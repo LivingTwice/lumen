@@ -11,6 +11,8 @@ use crate::text;
 
 pub const STATUS_KNOWN: i64 = 4;
 pub const STATUS_IGNORED: i64 = 5;
+/// Minutage des mots au nouveau calage précis (0 : ancien Whisper ou LingQ, approximatif).
+pub const TIMING_PRECISE: i64 = 2;
 
 pub fn open(path: &Path) -> Result<Connection> {
     let conn = Connection::open(path)?;
@@ -74,6 +76,8 @@ pub fn open(path: &Path) -> Result<Connection> {
     add_column(&conn, "lessons", "duration", "REAL NOT NULL DEFAULT 0")?;
     // couverture choisie par l'utilisateur (fichier dans media/)
     add_column(&conn, "lessons", "cover_path", "TEXT")?;
+    // qualité du minutage des mots (voir TIMING_PRECISE)
+    add_column(&conn, "lessons", "timing_v", "INTEGER NOT NULL DEFAULT 0")?;
     Ok(conn)
 }
 
@@ -186,6 +190,7 @@ pub struct Lesson {
     pub anchor: i64,
     pub duration: f64,
     pub cover_path: Option<String>,
+    pub timing_v: i64,
 }
 
 fn hue_for(title: &str) -> i64 {
@@ -270,7 +275,7 @@ pub fn lessons_list(c: &Connection, lang: &str) -> Result<Vec<LessonSummary>> {
 
 pub fn lesson_get(c: &Connection, id: i64) -> Result<Lesson> {
     let l = c.query_row(
-        "SELECT id,lang,title,collection,kind,source,text,media_path,timings,hue,word_count,page,completed,video_path,position,anchor,duration,cover_path
+        "SELECT id,lang,title,collection,kind,source,text,media_path,timings,hue,word_count,page,completed,video_path,position,anchor,duration,cover_path,timing_v
          FROM lessons WHERE id=?1",
         [id],
         |r| {
@@ -293,6 +298,7 @@ pub fn lesson_get(c: &Connection, id: i64) -> Result<Lesson> {
                 anchor: r.get(15)?,
                 duration: r.get(16)?,
                 cover_path: r.get(17)?,
+                timing_v: r.get(18)?,
             })
         },
     )?;
@@ -358,6 +364,16 @@ pub fn lesson_set_video(c: &Connection, id: i64, path: &str) -> Result<()> {
 
 pub fn lesson_source(c: &Connection, id: i64) -> Result<(String, Option<String>)> {
     Ok(c.query_row("SELECT source, video_path FROM lessons WHERE id=?1", [id], |r| Ok((r.get(0)?, r.get(1)?)))?)
+}
+
+/// Langue, texte et audio d'une leçon (pour recaler la lanterne).
+pub fn lesson_media(c: &Connection, id: i64) -> Result<(String, String, Option<String>)> {
+    Ok(c.query_row("SELECT lang, text, media_path FROM lessons WHERE id=?1", [id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?)
+}
+
+pub fn lesson_set_timings(c: &Connection, id: i64, timings: &str, version: i64) -> Result<()> {
+    c.execute("UPDATE lessons SET timings=?1, timing_v=?2 WHERE id=?3", params![timings, version, id])?;
+    Ok(())
 }
 
 /// Change (ou retire) la couverture. Renvoie l'ancienne, à supprimer du disque.

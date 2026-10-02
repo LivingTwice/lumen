@@ -71,6 +71,8 @@ export interface Api {
   importMedia(lang: LangCode, path: string, title: string | null, onEvent: (e: ImportEvent) => void): Promise<number>;
   importYoutube(lang: LangCode, url: string, onEvent: (e: ImportEvent) => void): Promise<number>;
   lessonFetchVideo(id: number, onEvent: (e: ImportEvent) => void): Promise<string>;
+  /** Réécoute l'audio et recale la lanterne sur le texte existant. Renvoie les horodatages. */
+  lessonResync(id: number, onEvent: (e: ImportEvent) => void): Promise<string>;
   lingqScan(key: string): Promise<LingqLang[]>;
   lingqImport(key: string, plan: LingqPlan, onEvent: (e: LingqEvent) => void): Promise<LingqReport>;
   lingqCancel(): Promise<void>;
@@ -119,6 +121,7 @@ async function createTauriApi(): Promise<Api> {
       invoke("import_media", { lang, path, title, onEvent: ch<ImportEvent>(onEvent) }),
     importYoutube: (lang, url, onEvent) => invoke("import_youtube", { lang, url, onEvent: ch<ImportEvent>(onEvent) }),
     lessonFetchVideo: (id, onEvent) => invoke("lesson_fetch_video", { id, onEvent: ch<ImportEvent>(onEvent) }),
+    lessonResync: (id, onEvent) => invoke("lesson_resync", { id, onEvent: ch<ImportEvent>(onEvent) }),
     lingqScan: (key) => invoke("lingq_scan", { key }),
     lingqImport: (key, plan, onEvent) => invoke("lingq_import", { key, plan, onEvent: ch<LingqEvent>(onEvent) }),
     lingqCancel: () => invoke("lingq_cancel"),

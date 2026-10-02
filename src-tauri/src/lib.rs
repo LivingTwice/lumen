@@ -65,6 +65,7 @@ pub fn run() {
             commands::import_media,
             commands::import_youtube,
             commands::lesson_fetch_video,
+            commands::lesson_resync,
             commands::lingq_scan,
             commands::lingq_import,
             commands::lingq_cancel,

@@ -20,6 +20,32 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 /** Hauteur (part de la zone visible) de la ligne où l'œil lit : le point de reprise y revient. */
 const READ_LINE = 0.3;
 
+/**
+ * Repères verticaux de la police de lecture, mesurés une fois par taille.
+ * La lanterne se centre sur la hauteur des capitales, avec la même marge
+ * au-dessus des capitales et sous la ligne de base (les jambages bas, légers
+ * à l'œil, s'y logent), et non sur la boîte de la police, qui réserve bien
+ * plus de place au-dessus des lettres qu'en dessous.
+ */
+const fontMarks = new Map<string, { ascent: number; capMid: number; half: number }>();
+function readingMarks(el: HTMLElement) {
+  const cs = getComputedStyle(el);
+  const key = `${cs.fontSize}|${cs.fontFamily}|${cs.fontWeight}`;
+  let m = fontMarks.get(key);
+  if (!m) {
+    const ctx = document.createElement("canvas").getContext("2d");
+    if (!ctx) return null;
+    ctx.font = `${cs.fontWeight} ${cs.fontSize} ${cs.fontFamily}`;
+    const size = parseFloat(cs.fontSize) || 23;
+    const cap = ctx.measureText("H").actualBoundingBoxAscent;
+    const desc = ctx.measureText("gpqyj").actualBoundingBoxDescent;
+    m = { ascent: ctx.measureText("Hg").fontBoundingBoxAscent, capMid: cap / 2, half: cap / 2 + desc + size * 0.06 };
+    // tant que la police n'est pas chargée, la mesure serait celle d'une police de secours
+    if (document.fonts.status === "loaded") fontMarks.set(key, m);
+  }
+  return { ...m, padTop: parseFloat(cs.paddingTop) || 0 };
+}
+
 export function Reader() {
   const lessonId = useApp((s) => s.lessonId);
   const settings = useApp((s) => s.settings);
@@ -52,6 +78,7 @@ export function Reader() {
   const [cinema, setCinema] = useState(false);
   const onPlayback = useCallback((s: PlaybackState) => setMediaPlaying(s.playing), []);
   const lanternPage = useRef(-1);
+  const lanternBox = useRef<{ y: number; height: number } | null>(null);
   // mot où reprendre la lecture : souhaité (want) et déjà écrit (saved)
   const anchorRef = useRef({ id: 0, want: 0, saved: 0 });
   const restoredFor = useRef<number | null>(null);
@@ -475,14 +502,24 @@ export function Reader() {
     if (!el) return;
     const c = container.getBoundingClientRect();
     const r = el.getBoundingClientRect();
-    const pad = 3;
-    const target = { x: r.left - c.left - pad, y: r.top - c.top - pad / 2, width: r.width + pad * 2, height: r.height + pad };
+    const fm = readingMarks(el);
+    const padX = 3;
+    let target = { x: r.left - c.left - padX, y: r.top - c.top - 1.5, width: r.width + padX * 2, height: r.height + 3 };
+    if (fm) {
+      // boîte symétrique autour des lettres : centrée sur la hauteur des capitales
+      const mid = r.top - c.top + fm.padTop + fm.ascent - fm.capMid;
+      target = { ...target, y: mid - fm.half, height: fm.half * 2 };
+    }
     const samePage = lanternPage.current === page;
     lanternPage.current = page;
-    if (!lanternOn || !samePage) {
+    // changement de ligne : un saut net plutôt qu'une glissade en travers du paragraphe
+    const prev = lanternBox.current;
+    const newLine = !prev || Math.abs(target.y - prev.y) > target.height * 0.5;
+    lanternBox.current = { y: target.y, height: target.height };
+    if (!lanternOn || !samePage || newLine) {
       lantern.set(target);
       setLanternOn(true);
-    } else void lantern.start({ ...target, transition: { type: "spring", stiffness: 520, damping: 40, mass: 0.6 } });
+    } else void lantern.start({ ...target, transition: { type: "spring", stiffness: 760, damping: 50, mass: 0.5 } });
     // garde le mot visible
     const sc = scrollRef.current;
     if (sc) {
@@ -717,6 +754,7 @@ export function Reader() {
           onCursor={setCursor}
           videoHost={videoHost}
           onState={onPlayback}
+          onResynced={(t) => setData((d) => (d ? { ...d, lesson: { ...d.lesson, timings: t, timing_v: 2 } } : d))}
         />
 
         <AnimatePresence>

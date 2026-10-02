@@ -9,6 +9,9 @@
 //!   {"type":"progress","value":42}
 //!   {"type":"done","duration":123.4,"words":[{"w":" Hello","t0":0.12,"t1":0.48}, ...]}
 //!   {"type":"error","message":"..."}
+//!
+//! Minutage des mots : alignement DTW de whisper.cpp, puis calage sur l'attaque
+//! réelle de la voix (écart moyen mesuré : 30 à 45 ms, contre 0,4 s avant).
 
 use std::fs::File;
 use std::io::Write;
@@ -23,7 +26,9 @@ use symphonia::core::formats::FormatOptions;
 use symphonia::core::io::MediaSourceStream;
 use symphonia::core::meta::MetadataOptions;
 use symphonia::core::probe::Hint;
-use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters};
+use whisper_rs::{
+    DtwMode, DtwModelPreset, DtwParameters, FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters,
+};
 
 const TARGET_RATE: u32 = 16_000;
 
@@ -154,6 +159,160 @@ fn resample(input: &[f32], from: u32) -> Vec<f32> {
         .collect()
 }
 
+// ---------- minutage précis des mots ----------
+//
+// Les horodatages classiques de whisper.cpp font commencer chaque mot à la fin
+// du précédent : ils arrivent en moyenne 0,4 s trop tôt, silences compris.
+// On utilise donc l'alignement DTW sur l'attention du modèle (un instant par
+// fragment de mot), puis on cale chaque début sur l'attaque réelle du son.
+
+/// Têtes d'attention de référence pour l'alignement, selon le modèle.
+fn dtw_preset(model: &str) -> Option<DtwModelPreset> {
+    let name = Path::new(model).file_name()?.to_str()?.to_lowercase();
+    let en = name.contains(".en");
+    Some(if name.contains("large-v3-turbo") {
+        DtwModelPreset::LargeV3Turbo
+    } else if name.contains("large-v3") {
+        DtwModelPreset::LargeV3
+    } else if name.contains("large-v2") {
+        DtwModelPreset::LargeV2
+    } else if name.contains("large") {
+        DtwModelPreset::LargeV1
+    } else if name.contains("medium") {
+        if en { DtwModelPreset::MediumEn } else { DtwModelPreset::Medium }
+    } else if name.contains("small") {
+        if en { DtwModelPreset::SmallEn } else { DtwModelPreset::Small }
+    } else if name.contains("base") {
+        if en { DtwModelPreset::BaseEn } else { DtwModelPreset::Base }
+    } else if name.contains("tiny") {
+        if en { DtwModelPreset::TinyEn } else { DtwModelPreset::Tiny }
+    } else {
+        return None;
+    })
+}
+
+/// Énergie du son par tranches de 10 ms, et seuil voix / silence adapté à
+/// l'enregistrement (bruit de fond, musique).
+struct Envelope {
+    db: Vec<f32>,
+    thr: f32,
+}
+
+const HOP: f64 = 0.01;
+
+impl Envelope {
+    fn new(audio: &[f32]) -> Self {
+        let hop = (TARGET_RATE as f64 * HOP) as usize;
+        let win = hop * 5 / 2;
+        let db: Vec<f32> = (0..audio.len() / hop)
+            .map(|i| {
+                let a = &audio[i * hop..(i * hop + win).min(audio.len())];
+                let rms = (a.iter().map(|x| x * x).sum::<f32>() / a.len().max(1) as f32).sqrt();
+                20.0 * (rms + 1e-5).log10()
+            })
+            .collect();
+        let mut sorted = db.clone();
+        sorted.sort_by(|a, b| a.total_cmp(b));
+        let pct = |p: f64| sorted.get(((sorted.len() as f64 - 1.0) * p) as usize).copied().unwrap_or(-100.0);
+        let (floor, loud) = (pct(0.1), pct(0.9));
+        // relatif à la voix : un silence numérique parfait ne doit pas faire
+        // passer le moindre souffle pour une syllabe
+        let thr = (floor + 0.3 * (loud - floor)).max(loud - 35.0).max(floor + 6.0);
+        Self { db, thr }
+    }
+
+    fn above(&self, t: f64, frames: usize) -> bool {
+        let i = (t / HOP).max(0.0) as usize;
+        (i..i + frames).all(|k| self.db.get(k).is_some_and(|d| *d > self.thr))
+    }
+
+    fn below(&self, t: f64, frames: usize) -> bool {
+        let i = (t / HOP).max(0.0) as usize;
+        (i..i + frames).all(|k| self.db.get(k).is_none_or(|d| *d <= self.thr))
+    }
+
+    /// Voix présente à cet instant (deux tranches de suite au-dessus du seuil).
+    fn voiced(&self, t: f64) -> bool {
+        self.above(t, 2)
+    }
+
+    /// Attaque : au moins 30 ms de voix à partir d'ici.
+    fn attack(&self, t: f64) -> bool {
+        self.above(t, 3)
+    }
+
+    /// Vraie pause : au moins 50 ms de silence à partir d'ici.
+    fn gap(&self, t: f64) -> bool {
+        self.below(t, 5)
+    }
+}
+
+/// Avance moyenne de l'alignement DTW dans la parole continue (mesurée sur
+/// des enregistrements de référence en anglais et en espagnol : 80 à 100 ms).
+const DTW_LEAD: f64 = 0.09;
+
+/// Cale les débuts de mots sur l'attaque réelle de la voix, sans jamais
+/// inverser l'ordre des mots, puis fixe chaque fin avant le silence suivant.
+/// En entrée, `t0` est l'estimation du début et `t1` celle de la fin.
+fn refine(words: &mut [Word], env: &Envelope, duration: f64) {
+    let n = words.len();
+    let first_voice = |from: f64, to: f64| {
+        let mut f = from;
+        while f < to {
+            if env.attack(f) {
+                return Some(f);
+            }
+            f += HOP;
+        }
+        None
+    };
+    for k in 0..n {
+        let lo = if k > 0 { words[k - 1].t0 + 0.04 } else { 0.0 };
+        let s = words[k].t0.max(lo);
+        // un mot ne commence pas après sa propre fin estimée
+        let own_end = words[k].t1.max(s + HOP);
+        let t = if !env.voiced(s) {
+            // estimation dans un silence (souvent après une pause) : on avance jusqu'à l'attaque
+            first_voice(s, own_end.min(s + 2.0).max(s + 0.3)).unwrap_or(s)
+        } else {
+            // dans la voix : une micro-pause juste devant marque l'attaque,
+            // sinon on corrige l'avance moyenne de l'alignement
+            let ahead = (s + DTW_LEAD + 0.06).min(own_end);
+            let mut f = s;
+            let mut found = None;
+            while f < ahead {
+                if env.gap(f) {
+                    found = first_voice(f, own_end);
+                    break;
+                }
+                f += HOP;
+            }
+            found.unwrap_or_else(|| (s + DTW_LEAD).min(own_end - HOP).max(s))
+        };
+        words[k].t0 = (t * 100.0).round() / 100.0;
+    }
+    for k in 0..n {
+        let next = if k + 1 < n { words[k + 1].t0 } else { duration };
+        // fin : dernière voix avant un silence d'au moins 60 ms, sinon le mot suivant
+        let mut end = next;
+        let mut f = words[k].t0 + HOP;
+        let mut quiet = 0.0;
+        while f < next {
+            if env.voiced(f) {
+                quiet = 0.0;
+            } else {
+                quiet += HOP;
+                if quiet >= 0.06 {
+                    end = f - quiet + HOP;
+                    break;
+                }
+            }
+            f += HOP;
+        }
+        words[k].t1 = ((end.max(words[k].t0 + 0.05).min(next.max(words[k].t0))) * 100.0).round() / 100.0;
+    }
+}
+
 fn run() -> Result<()> {
     let args: Vec<String> = std::env::args().collect();
     if args.len() < 4 {
@@ -171,8 +330,16 @@ fn run() -> Result<()> {
     let duration = audio.len() as f64 / TARGET_RATE as f64;
 
     emit(serde_json::json!({"type":"stage","stage":"model","duration":duration}));
-    let ctx = WhisperContext::new_with_params(model, WhisperContextParameters::default())
-        .map_err(|e| anyhow!("modèle Whisper illisible : {e:?}"))?;
+    let mut cparams = WhisperContextParameters::default();
+    let preset = dtw_preset(model);
+    let use_dtw = preset.is_some();
+    if let Some(model_preset) = preset {
+        // l'alignement DTW exige l'attention classique
+        cparams.flash_attn(false);
+        cparams.dtw_parameters(DtwParameters { mode: DtwMode::ModelPreset { model_preset }, ..Default::default() });
+    }
+    let ctx = WhisperContext::new_with_params(model, cparams).map_err(|e| anyhow!("modèle Whisper illisible : {e:?}"))?;
+    let eot = ctx.token_eot();
     let mut state = ctx.create_state().map_err(|e| anyhow!("{e:?}"))?;
 
     let threads = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4).min(8) as i32;
@@ -185,8 +352,6 @@ fn run() -> Result<()> {
     params.set_print_realtime(false);
     params.set_print_timestamps(false);
     params.set_token_timestamps(true);
-    params.set_split_on_word(true);
-    params.set_max_len(1);
     params.set_suppress_blank(true);
     params.set_progress_callback_safe(|p: i32| {
         emit(serde_json::json!({"type":"progress","value":p}));
@@ -195,19 +360,47 @@ fn run() -> Result<()> {
     emit(serde_json::json!({"type":"stage","stage":"transcribe","duration":duration}));
     state.full(params, &audio).map_err(|e| anyhow!("transcription échouée : {e:?}"))?;
 
+    // mots reconstitués à partir des fragments (un mot commence par une espace) ;
+    // les octets sont assemblés avant décodage, pour le cyrillique notamment
     let mut words: Vec<Word> = Vec::new();
-    for seg in state.as_iter() {
-        let text = match seg.to_str_lossy() {
-            Ok(t) => t.to_string(),
-            Err(_) => continue,
-        };
-        if text.trim().is_empty() || text.trim().starts_with('[') && text.trim().ends_with(']') {
-            continue;
+    let mut cur: Option<(Vec<u8>, f64)> = None;
+    // `end` : instant DTW du dernier fragment du mot (sa fin estimée)
+    let flush = |cur: &mut Option<(Vec<u8>, f64)>, words: &mut Vec<Word>, end: Option<f64>| {
+        if let Some((bytes, t0)) = cur.take() {
+            let w = String::from_utf8_lossy(&bytes).to_string();
+            let t = w.trim();
+            if !t.is_empty() && !(t.starts_with('[') && t.ends_with(']')) {
+                words.push(Word { w, t0, t1: end.unwrap_or(t0).max(t0) });
+            }
         }
-        let t0 = seg.start_timestamp() as f64 / 100.0;
-        let t1 = seg.end_timestamp() as f64 / 100.0;
-        words.push(Word { w: text, t0, t1: t1.max(t0) });
+    };
+    for seg in state.as_iter() {
+        // l'instant DTW d'un fragment marque sa fin : un mot commence là où
+        // finit le fragment précédent (en début de segment, l'estimation
+        // classique, recalée ensuite sur l'attaque du son)
+        let mut prev_end: Option<f64> = None;
+        for i in 0..seg.n_tokens() {
+            let Some(tok) = seg.get_token(i) else { continue };
+            if tok.token_id() >= eot {
+                continue; // jetons spéciaux (horodatages, fin de texte)
+            }
+            let Ok(bytes) = tok.to_bytes() else { continue };
+            let data = tok.token_data();
+            let legacy = data.t0 as f64 / 100.0;
+            if bytes.first() == Some(&b' ') || cur.is_none() {
+                flush(&mut cur, &mut words, prev_end);
+                let start = if use_dtw { prev_end.unwrap_or(legacy) } else { legacy };
+                cur = Some((bytes.to_vec(), start.max(0.0)));
+            } else if let Some((b, _)) = cur.as_mut() {
+                b.extend_from_slice(bytes);
+            }
+            if use_dtw && data.t_dtw >= 0 {
+                prev_end = Some(data.t_dtw as f64 / 100.0);
+            }
+        }
+        flush(&mut cur, &mut words, prev_end);
     }
+    refine(&mut words, &Envelope::new(&audio), duration);
     emit(serde_json::json!({"type":"done","duration":duration,"words":words}));
     Ok(())
 }

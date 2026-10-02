@@ -503,10 +503,13 @@ async fn transcribe_into_lesson(
         source,
         text,
         media_path: Some(stored.display().to_string()),
-        timings: Some(timings),
+        timings: Some(timings.clone()),
         video_path,
     };
-    db::lesson_create(&state.db.lock(), &lesson).map_err(err)
+    let conn = state.db.lock();
+    let id = db::lesson_create(&conn, &lesson).map_err(err)?;
+    db::lesson_set_timings(&conn, id, &timings, db::TIMING_PRECISE).map_err(err)?;
+    Ok(id)
 }
 
 #[tauri::command]
@@ -598,10 +601,35 @@ pub async fn import_youtube(state: State<'_, AppState>, lang: String, url: Strin
         source: url,
         text,
         media_path: Some(audio.display().to_string()),
-        timings: Some(timings),
+        timings: Some(timings.clone()),
         video_path: video,
     };
-    db::lesson_create(&state.db.lock(), &lesson).map_err(err)
+    let conn = state.db.lock();
+    let id = db::lesson_create(&conn, &lesson).map_err(err)?;
+    db::lesson_set_timings(&conn, id, &timings, db::TIMING_PRECISE).map_err(err)?;
+    Ok(id)
+}
+
+/// Recale la lanterne d'une leçon audio ou vidéo : l'audio est réécouté avec
+/// le minutage précis et les mots entendus sont alignés sur le texte, qui ne
+/// change pas. Renvoie les nouveaux horodatages.
+#[tauri::command]
+pub async fn lesson_resync(state: State<'_, AppState>, id: i64, on_event: Channel<ImportEvent>) -> R<String> {
+    let (lang, text, media) = db::lesson_media(&state.db.lock(), id).map_err(err)?;
+    let media = media.ok_or("Cette leçon n'a pas d'audio à recaler.")?;
+    let m = active_model(&state, "asr")?;
+    let model_path = models::path_of(&state.data_dir, m);
+    let words = media::transcribe(&model_path, std::path::Path::new(&media), &lang, |e| {
+        let _ = on_event.send(e);
+    })
+    .await
+    .map_err(err)?;
+    let (timings, found) = media::align_timings(&text, &lang, &words);
+    if found < 0.3 {
+        return Err("L'audio ne correspond pas assez au texte de la leçon pour recaler la lanterne.".into());
+    }
+    db::lesson_set_timings(&state.db.lock(), id, &timings, db::TIMING_PRECISE).map_err(err)?;
+    Ok(timings)
 }
 
 /// Télécharge l'image d'une vidéo déjà transcrite (leçons importées sans vidéo).

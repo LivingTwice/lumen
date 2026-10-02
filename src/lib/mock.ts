@@ -170,6 +170,7 @@ export function createMockApi(): Api {
         anchor: 0,
         duration: 0,
         cover_path: null,
+        timing_v: 0,
         created_at: Date.now() / 1000,
       };
       db.lessons.push(l);
@@ -337,6 +338,18 @@ export function createMockApi(): Api {
     },
     async lessonFetchVideo() {
       throw "Le téléchargement de vidéos fonctionne dans l'application Mac.";
+    },
+    async lessonResync(id, onEvent) {
+      const l = db.lessons.find((x) => x.id === id);
+      if (!l?.media_path) throw "Cette leçon n'a pas d'audio à recaler.";
+      onEvent({ type: "stage", stage: "transcribe" });
+      for (let i = 1; i <= 20; i++) {
+        await sleep(90);
+        onEvent({ type: "progress", value: i * 5 });
+      }
+      l.timing_v = 2;
+      commit();
+      return l.timings ?? "[]";
     },
     async lingqScan(key) {
       await sleep(900);

@@ -9,6 +9,8 @@ use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
 
+use crate::text;
+
 #[derive(Deserialize, Debug)]
 pub struct WWord {
     pub w: String,
@@ -121,6 +123,169 @@ pub fn build_transcript(words: &[WWord]) -> (String, String) {
         prev_end = w.t1;
     }
     (text, serde_json::to_string(&timings).unwrap_or_else(|_| "[]".into()))
+}
+
+// ---------- recalage sur un texte existant ----------
+
+fn round2(x: f64) -> f64 {
+    (x * 100.0).round() / 100.0
+}
+
+/// Mots entendus, redécoupés comme le texte de Lumen (élisions comprises),
+/// la durée d'un mot coupé étant répartie au prorata de la longueur.
+fn heard_keys(words: &[WWord], lang: &str) -> Vec<(String, f64, f64)> {
+    let mut out = Vec::new();
+    for w in words {
+        let parts: Vec<text::Token> = text::tokenize(w.w.trim(), lang).into_iter().filter(|t| t.w).collect();
+        let total: usize = parts.iter().map(|p| p.e - p.s).sum();
+        let mut at = w.t0;
+        for p in &parts {
+            let d = if total > 0 { (w.t1 - w.t0).max(0.0) * (p.e - p.s) as f64 / total as f64 } else { 0.0 };
+            out.push((p.k.clone(), at, at + d));
+            at += d;
+        }
+    }
+    out
+}
+
+/// Plus longue sous-suite croissante (en j) d'ancres triées par i.
+fn longest_increasing(v: &[(usize, usize)]) -> Vec<(usize, usize)> {
+    let mut tails: Vec<usize> = Vec::new();
+    let mut prev = vec![usize::MAX; v.len()];
+    for (k, &(_, j)) in v.iter().enumerate() {
+        let pos = tails.partition_point(|&t| v[t].1 < j);
+        if pos > 0 {
+            prev[k] = tails[pos - 1];
+        }
+        if pos == tails.len() {
+            tails.push(k);
+        } else {
+            tails[pos] = k;
+        }
+    }
+    let mut out = Vec::new();
+    let mut k = tails.last().copied();
+    while let Some(x) = k {
+        out.push(v[x]);
+        k = (prev[x] != usize::MAX).then_some(prev[x]);
+    }
+    out.reverse();
+    out
+}
+
+/// Plus longue sous-suite commune entre a[a0..a1] et b[b0..b1].
+fn common_into(a: &[String], b: &[String], (a0, a1): (usize, usize), (b0, b1): (usize, usize), out: &mut Vec<(usize, usize)>) {
+    let (n, m) = (a1.saturating_sub(a0), b1.saturating_sub(b0));
+    // trop long sans ancre : ces mots seront interpolés
+    if n == 0 || m == 0 || n * m > 4_000_000 {
+        return;
+    }
+    let at = |i: usize, j: usize| i * (m + 1) + j;
+    let mut dp = vec![0u16; (n + 1) * (m + 1)];
+    for i in (0..n).rev() {
+        for j in (0..m).rev() {
+            dp[at(i, j)] = if a[a0 + i] == b[b0 + j] { dp[at(i + 1, j + 1)] + 1 } else { dp[at(i + 1, j)].max(dp[at(i, j + 1)]) };
+        }
+    }
+    let (mut i, mut j) = (0, 0);
+    while i < n && j < m {
+        if a[a0 + i] == b[b0 + j] {
+            out.push((a0 + i, b0 + j));
+            i += 1;
+            j += 1;
+        } else if dp[at(i + 1, j)] >= dp[at(i, j + 1)] {
+            i += 1;
+        } else {
+            j += 1;
+        }
+    }
+}
+
+/// Couples (i, j) croissants de mots identiques entre le texte (a) et ce qui
+/// est entendu (b) : des ancres sûres d'abord (suites de trois mots présentes
+/// une seule fois de chaque côté), puis l'alignement fin entre deux ancres.
+pub fn align_keys(a: &[String], b: &[String]) -> Vec<(usize, usize)> {
+    use std::collections::HashMap;
+    fn grams(v: &[String]) -> HashMap<(&str, &str, &str), (u32, usize)> {
+        let mut m = HashMap::new();
+        for i in 0..v.len().saturating_sub(2) {
+            let e = m.entry((v[i].as_str(), v[i + 1].as_str(), v[i + 2].as_str())).or_insert((0, i));
+            e.0 += 1;
+        }
+        m
+    }
+    let (ga, gb) = (grams(a), grams(b));
+    let mut anchors: Vec<(usize, usize)> = ga
+        .iter()
+        .filter_map(|(k, &(n, i))| {
+            let &(nb, j) = gb.get(k)?;
+            (n == 1 && nb == 1).then_some((i, j))
+        })
+        .collect();
+    anchors.sort_unstable();
+    let mut out = Vec::new();
+    let (mut pa, mut pb) = (0, 0);
+    for (i, j) in longest_increasing(&anchors) {
+        if i < pa || j < pb {
+            continue; // chevauche l'ancre précédente
+        }
+        common_into(a, b, (pa, i), (pb, j), &mut out);
+        out.extend((0..3).map(|k| (i + k, j + k)));
+        pa = i + 3;
+        pb = j + 3;
+    }
+    common_into(a, b, (pa, a.len()), (pb, b.len()), &mut out);
+    out
+}
+
+/// Recale les horodatages d'un texte existant sur les mots entendus : le
+/// texte ne change pas, seuls les instants sont recalculés. Renvoie
+/// [[début, fin, t0, t1], …] (positions UTF-16) et la part de mots retrouvés.
+pub fn align_timings(text_in: &str, lang: &str, words: &[WWord]) -> (String, f64) {
+    let toks: Vec<text::Token> = text::tokenize(text_in, lang).into_iter().filter(|t| t.w).collect();
+    let heard = heard_keys(words, lang);
+    let a: Vec<String> = toks.iter().map(|t| t.k.clone()).collect();
+    let b: Vec<String> = heard.iter().map(|h| h.0.clone()).collect();
+    let pairs = align_keys(&a, &b);
+    let mut times: Vec<Option<(f64, f64)>> = vec![None; toks.len()];
+    for &(i, j) in &pairs {
+        times[i] = Some((heard[j].1, heard[j].2));
+    }
+    // mots non retrouvés entre deux mots retrouvés : temps réparti au prorata de la longueur
+    let mut i = 0;
+    while i < toks.len() {
+        if times[i].is_some() {
+            i += 1;
+            continue;
+        }
+        let start = i;
+        while i < toks.len() && times[i].is_none() {
+            i += 1;
+        }
+        let (Some(Some(before)), Some(Some(after))) = (start.checked_sub(1).map(|k| times[k]), times.get(i).copied()) else {
+            continue; // début ou fin sans repère : pas de lanterne
+        };
+        let from = before.1.max(before.0);
+        let to = after.0.max(from);
+        let total: usize = toks[start..i].iter().map(|t| t.e - t.s + 1).sum();
+        let mut at = from;
+        for k in start..i {
+            let d = (to - from) * (toks[k].e - toks[k].s + 1) as f64 / total as f64;
+            times[k] = Some((at, at + d));
+            at += d;
+        }
+    }
+    let mut out: Vec<[f64; 4]> = Vec::new();
+    let mut last = 0.0f64;
+    for (t, tm) in toks.iter().zip(&times) {
+        if let Some((t0, t1)) = tm {
+            let t0 = t0.max(last);
+            last = t0;
+            out.push([t.s as f64, t.e as f64, round2(t0), round2(t1.max(t0))]);
+        }
+    }
+    let found = if toks.is_empty() { 0.0 } else { pairs.len() as f64 / toks.len() as f64 };
+    (serde_json::to_string(&out).unwrap_or_else(|_| "[]".into()), found)
 }
 
 /// Lance yt-dlp et renvoie les lignes de sortie utiles. La progression
@@ -267,6 +432,68 @@ pub fn new_stem() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn ww(w: &str, t0: f64, t1: f64) -> WWord {
+        WWord { w: w.into(), t0, t1 }
+    }
+
+    #[test]
+    fn realign_keeps_text_and_fills_gaps() {
+        // titre absent de l'audio, mot mal entendu (« vacanze »), élision italienne
+        let text = "Giustino in vacanza\n\nGiustino vuole andare in vacanza. Prende dell'acqua e parte.";
+        let words = vec![
+            ww(" Giustino", 2.0, 2.6), ww(" vuole", 2.6, 2.9), ww(" andare", 2.9, 3.3), ww(" in", 3.3, 3.4),
+            ww(" vacanze.", 3.4, 4.0), ww(" Prende", 5.0, 5.4), ww(" dell'acqua", 5.4, 6.0), ww(" e", 6.0, 6.1), ww(" parte.", 6.1, 6.6),
+        ];
+        let (json, found) = align_timings(text, "it", &words);
+        let t: Vec<[f64; 4]> = serde_json::from_str(&json).unwrap();
+        let at = |w: &str| {
+            let s = text.rfind(w).unwrap() as f64;
+            t.iter().find(|x| x[0] == s).map(|x| x[2])
+        };
+        assert!(found > 0.6); // 9 mots sur 13, titre compris
+        // le titre n'a pas d'horodatage, le second « Giustino » oui
+        assert_eq!(t[0][0], text.rfind("Giustino").unwrap() as f64);
+        assert_eq!(at("vuole"), Some(2.6));
+        // « vacanza » non retrouvé : placé entre « in » et « Prende »
+        let v = at("vacanza.").unwrap();
+        assert!(v >= 3.4 && v <= 5.0);
+        // « dell'acqua » entendu en un mot, coupé en deux comme dans le texte
+        assert_eq!(at("dell'"), Some(5.4));
+        assert!(at("acqua").unwrap() > 5.4);
+        // ordre croissant
+        assert!(t.windows(2).all(|p| p[1][2] >= p[0][2]));
+    }
+
+    #[test]
+    fn anchors_survive_long_insertions() {
+        let a: Vec<String> = (0..300).map(|i| format!("w{i}")).collect();
+        // l'audio saute 40 mots et en ajoute 25 qui ne sont pas dans le texte
+        let mut b: Vec<String> = a[..100].to_vec();
+        b.extend((0..25).map(|i| format!("x{i}")));
+        b.extend(a[140..].iter().cloned());
+        let p = align_keys(&a, &b);
+        assert_eq!(p.len(), 260);
+        assert!(p.windows(2).all(|w| w[1].0 > w[0].0 && w[1].1 > w[0].1));
+    }
+
+    /// Essai réel (ignoré par défaut) : LUMEN_TEST_TEXT=texte.txt LUMEN_TEST_WORDS=mots.json
+    /// LUMEN_TEST_LANG=it cargo test --lib realign_live -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn realign_live() {
+        let (Ok(t), Ok(w)) = (std::env::var("LUMEN_TEST_TEXT"), std::env::var("LUMEN_TEST_WORDS")) else { return };
+        let lang = std::env::var("LUMEN_TEST_LANG").unwrap_or_else(|_| "en".into());
+        let text = std::fs::read_to_string(t).unwrap();
+        let words: Vec<WWord> = serde_json::from_str(&std::fs::read_to_string(w).unwrap()).unwrap();
+        let (json, found) = align_timings(&text, &lang, &words);
+        let t: Vec<[f64; 4]> = serde_json::from_str(&json).unwrap();
+        let u16: Vec<u16> = text.encode_utf16().collect();
+        println!("{:.0} % des mots retrouvés, {} mots minutés", found * 100.0, t.len());
+        for x in t.iter().take(24) {
+            println!("{:>7.2} s  {}", x[2], String::from_utf16_lossy(&u16[x[0] as usize..x[1] as usize]));
+        }
+    }
+
     #[test]
     fn transcript_offsets() {
         let words = vec![

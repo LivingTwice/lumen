@@ -35,7 +35,9 @@ Lumen est une application Mac pour apprendre les langues en lisant et en écouta
 ### Écoute
 
 - **Voix du système** (Web Speech API dans WKWebView) avec surlignage mot à mot : la **lanterne**.
-- **Audio importé** synchronisé grâce aux horodatages mot à mot de Whisper.
+- **Audio importé** synchronisé grâce aux horodatages mot à mot de Whisper. Minutage précis dans `lumen-whisper` : alignement DTW de whisper.cpp (l'instant DTW d'un fragment marque sa *fin* : un mot commence à la fin du fragment précédent), correction de l'avance moyenne de 90 ms dans le flot, puis calage sur l'attaque réelle de la voix (seuil relatif à la voix, vraie pause ≥ 50 ms, vraie attaque ≥ 30 ms). Mesuré sur des références : écart moyen 30 à 45 ms, contre 0,4 à 0,55 s avec les horodatages classiques.
+- **Lanterne** : part 60 ms avant le mot (`LANTERN_LEAD`, durée de son déplacement), saute directement d'une ligne à l'autre, boîte centrée sur la hauteur des capitales (même marge au-dessus et sous la ligne de base, mesurée sur la police).
+- **Recaler la lanterne** (bouton du lecteur, leçons audio et vidéo dont `timing_v` < 2 : ancien Whisper, LingQ) : l'audio est réécouté et les mots entendus sont alignés sur le texte existant (`media::align_timings` : ancres de trois mots uniques, puis plus longue sous-suite commune, mots manquants interpolés). Le texte ne change pas ; refus si moins de 30 % des mots sont retrouvés.
 - **Vidéo** : l'audio est le maître, la vidéo muette le suit (correction de dérive par ajustement de vitesse, ou saut au-delà de 0,35 s). Sous-titres interactifs (toucher un mot le traduit), sous-titres traduits en option, taille ajustable, **mode cinéma** plein écran.
 
 ### Import
@@ -186,6 +188,7 @@ cd src-tauri && cargo test --lib   # tests unitaires
 
 - Test réel de l'IA : `LUMEN_TEST_MODEL=/chemin/Qwen3.5-2B-Q4_K_M.gguf cargo test --release --lib live -- --ignored --nocapture`.
 - Test réel de LingQ (base jetable, rien n'est écrit dans Lumen) : `LUMEN_LINGQ_KEY=… cargo test --lib lingq_live -- --ignored --nocapture`.
+- Test réel du recalage : `LUMEN_TEST_TEXT=texte.txt LUMEN_TEST_WORDS=mots.json LUMEN_TEST_LANG=it cargo test --lib realign_live -- --ignored --nocapture` (mots : sortie `done` de `lumen-whisper`).
 - En mode `npm run dev`, `window.__lumen = { api, useApp }` est exposé pour piloter l'état depuis la console.
 
 ## Règles de code

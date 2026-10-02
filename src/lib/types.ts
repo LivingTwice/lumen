@@ -68,6 +68,8 @@ export interface Lesson {
   anchor: number;
   duration: number;
   cover_path: string | null;
+  /** 2 : mots calés précisément sur la voix ; 0 : minutage approximatif (ancien Whisper, LingQ) */
+  timing_v: number;
 }
 
 export interface OpenedLesson {

@@ -2,7 +2,7 @@ import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRe
 import { createPortal } from "react-dom";
 import { Icon } from "../../components/Icon";
 import { Segmented } from "../../components/ui";
-import { api } from "../../lib/api";
+import { api, errorText, isNoModel } from "../../lib/api";
 import { formatDuration, useApp } from "../../lib/store";
 import type { PageRange } from "../../lib/tokenize";
 import { loadVoices, speak, ttsAvailable, voicesFor, type SpeakHandle } from "../../lib/tts";
@@ -34,7 +34,15 @@ interface Props {
   /** emplacement (dans la scène vidéo) où afficher l'image */
   videoHost?: HTMLElement | null;
   onState?(s: PlaybackState): void;
+  /** nouveaux horodatages après un recalage de la lanterne */
+  onResynced?(timings: string): void;
 }
+
+/**
+ * Avance de la lanterne sur le son : elle part un peu avant le mot pour y
+ * arriver au moment où il commence (son déplacement dure environ 60 ms).
+ */
+const LANTERN_LEAD = 0.06;
 
 /** Dernier indice i tel que get(i) <= x (recherche dichotomique). */
 export function lastLE(n: number, get: (i: number) => number, x: number): number {
@@ -51,7 +59,7 @@ export function lastLE(n: number, get: (i: number) => number, x: number): number
   return ans;
 }
 
-export const Player = forwardRef<PlayerHandle, Props>(function Player({ lesson, tokens, pages, page, onPage, onCursor, videoHost, onState }, ref) {
+export const Player = forwardRef<PlayerHandle, Props>(function Player({ lesson, tokens, pages, page, onPage, onCursor, videoHost, onState, onResynced }, ref) {
   const settings = useApp((s) => s.settings);
   const setSetting = useApp((s) => s.setSetting);
   const hasMedia = !!lesson.media_path;
@@ -101,6 +109,23 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player({ lesson, 
       flush();
     };
   }, [remember]);
+
+  // ---------- recalage de la lanterne (minutage approximatif) ----------
+  const [resync, setResync] = useState<number | null>(null);
+  const canResync = hasMedia && !(lesson.timing_v >= 2);
+  const recaler = async () => {
+    setResync(0);
+    try {
+      const t = await api().lessonResync(lesson.id, (e) => e.type === "progress" && setResync(e.value));
+      onResynced?.(t);
+      useApp.getState().toast("La lanterne suit maintenant la voix, mot à mot", "light");
+    } catch (e) {
+      useApp.getState().toast(errorText(e), "error");
+      if (isNoModel(e)) useApp.getState().go("settings");
+    } finally {
+      setResync(null);
+    }
+  };
 
   const rateKey = hasMedia ? "media_rate" : "tts_rate";
   const rate = parseFloat(settings[rateKey] ?? (hasMedia ? "1" : "0.95")) || 1;
@@ -161,7 +186,7 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player({ lesson, 
         setTime(t);
         remember(t);
         if (timing) {
-          const k = lastLE(timing.raw.length, (j) => timing.raw[j][2], t + 0.04);
+          const k = lastLE(timing.raw.length, (j) => timing.raw[j][2], t + LANTERN_LEAD);
           if (k >= 0) {
             const [, , , t1] = timing.raw[k];
             const nextStart = timing.raw[k + 1]?.[2] ?? Infinity;
@@ -446,16 +471,16 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player({ lesson, 
     <>
       {hasMedia && !single && <audio ref={audioRef} src={api().mediaUrl(lesson.media_path!)} preload="auto" {...masterEvents} />}
       {video && videoHost ? createPortal(video, videoHost) : video && <div style={{ display: "none" }}>{video}</div>}
-      <div className="player">
+      <div className={`player ${canResync ? "has-resync" : ""}`}>
         <button className={`play-btn ${playing ? "playing" : ""}`} onClick={toggle} aria-label={playing ? "Pause" : "Lecture"} disabled={!hasMedia && !ttsAvailable()}>
           <Icon name={playing ? "pause" : "play"} size={18} />
         </button>
         {hasMedia && (
           <>
-            <button className="icon-btn" onClick={() => skip(-5)} aria-label="Reculer de 5 secondes">
+            <button className="icon-btn player-skip" onClick={() => skip(-5)} aria-label="Reculer de 5 secondes">
               <Icon name="back5" size={18} />
             </button>
-            <button className="icon-btn" onClick={() => skip(5)} aria-label="Avancer de 5 secondes">
+            <button className="icon-btn player-skip" onClick={() => skip(5)} aria-label="Avancer de 5 secondes">
               <Icon name="fwd5" size={18} />
             </button>
             <span className="time">{formatDuration(time)}</span>
@@ -467,14 +492,35 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player({ lesson, 
             <div className="knob" style={{ left: `${progress * 100}%` }} />
           </div>
         </div>
-        {hasMedia && <span className="time">{formatDuration(duration)}</span>}
-        <Segmented
-          id={`rate-${hasMedia ? "m" : "t"}`}
-          label="Vitesse"
-          value={rates.includes(String(rate)) ? String(rate) : rates[2]}
-          onChange={(v) => setSetting(rateKey, v)}
-          options={rates.map((r) => ({ value: r, label: `${r.replace(".", ",")}×` }))}
-        />
+        {hasMedia && <span className="time player-total">{formatDuration(duration)}</span>}
+        <div className="rate-full">
+          <Segmented
+            id={`rate-${hasMedia ? "m" : "t"}`}
+            label="Vitesse"
+            value={rates.includes(String(rate)) ? String(rate) : rates[2]}
+            onChange={(v) => setSetting(rateKey, v)}
+            options={rates.map((r) => ({ value: r, label: `${r.replace(".", ",")}×` }))}
+          />
+        </div>
+        {/* fenêtre étroite : un seul bouton qui passe à la vitesse suivante */}
+        <button
+          className="btn sm soft rate-compact num"
+          onClick={() => setSetting(rateKey, rates[(rates.indexOf(String(rate)) + 1) % rates.length])}
+          aria-label="Vitesse de lecture"
+          title="Vitesse de lecture"
+        >
+          {String(rate).replace(".", ",")}×
+        </button>
+        {canResync &&
+          (resync === null ? (
+            <button className="btn sm soft player-resync" onClick={recaler} aria-label="Recaler la lanterne" title="Réécoute l'audio pour caler la lanterne sur chaque mot. Le texte ne change pas.">
+              <Icon name="sparkle" size={14} /> <span className="resync-label">Recaler la lanterne</span>
+            </button>
+          ) : (
+            <span className="player-resync busy num" role="status">
+              <span className="dot busy" /> Calage {Math.round(resync)} %
+            </span>
+          ))}
         {!hasMedia && <span className="player-label">{voiceName ? `Voix : ${voiceName}` : ttsAvailable() ? "Voix du système" : "Synthèse vocale indisponible"}</span>}
       </div>
     </>
