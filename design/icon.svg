@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0.3" y2="1">
+      <stop offset="0" stop-color="#262A6B"/>
+      <stop offset="0.55" stop-color="#161842"/>
+      <stop offset="1" stop-color="#0B0C22"/>
+    </linearGradient>
+    <radialGradient id="halo" cx="512" cy="470" r="380" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFD9A0" stop-opacity="0.55"/>
+      <stop offset="0.35" stop-color="#F3A65A" stop-opacity="0.22"/>
+      <stop offset="1" stop-color="#F3A65A" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="orb" cx="490" cy="440" r="170" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFFFFF"/>
+      <stop offset="0.45" stop-color="#FFF1D6"/>
+      <stop offset="0.85" stop-color="#FFC27A"/>
+      <stop offset="1" stop-color="#F59E4C"/>
+    </radialGradient>
+    <linearGradient id="page" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FFE7C2" stop-opacity="0.95"/>
+      <stop offset="1" stop-color="#FFB86B" stop-opacity="0.15"/>
+    </linearGradient>
+    <clipPath id="sq"><rect x="100" y="100" width="824" height="824" rx="185"/></clipPath>
+  </defs>
+  <g clip-path="url(#sq)">
+    <rect x="100" y="100" width="824" height="824" fill="url(#bg)"/>
+    <circle cx="512" cy="470" r="380" fill="url(#halo)"/>
+    <!-- pages ouvertes : deux arcs lumineux sous l'astre -->
+    <path d="M232 700 C 340 640, 440 640, 512 690 C 584 640, 684 640, 792 700" fill="none" stroke="url(#page)" stroke-width="22" stroke-linecap="round"/>
+    <path d="M272 770 C 360 722, 444 722, 512 760 C 580 722, 664 722, 752 770" fill="none" stroke="url(#page)" stroke-width="14" stroke-linecap="round" opacity="0.55"/>
+    <circle cx="512" cy="470" r="150" fill="url(#orb)"/>
+    <circle cx="512" cy="470" r="196" fill="none" stroke="#FFE2B5" stroke-opacity="0.28" stroke-width="3"/>
+  </g>
+  <rect x="100.5" y="100.5" width="823" height="823" rx="185" fill="none" stroke="#FFFFFF" stroke-opacity="0.08"/>
+</svg>

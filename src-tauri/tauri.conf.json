@@ -1,0 +1,101 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Lumen",
+  "version": "0.1.0",
+  "identifier": "app.lumen.reader",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "macOSPrivateApi": true,
+    "windows": [
+      {
+        "label": "main",
+        "title": "Lumen",
+        "width": 1380,
+        "height": 880,
+        "minWidth": 980,
+        "minHeight": 640,
+        "center": true,
+        "titleBarStyle": "Overlay",
+        "hiddenTitle": true,
+        "trafficLightPosition": {
+          "x": 20,
+          "y": 24
+        },
+        "transparent": true,
+        "windowEffects": {
+          "effects": [
+            "sidebar"
+          ],
+          "state": "followsWindowActiveState"
+        },
+        "dragDropEnabled": true,
+        "acceptFirstMouse": true
+      }
+    ],
+    "security": {
+      "csp": null,
+      "assetProtocol": {
+        "enable": true,
+        "scope": [
+          "$APPDATA/media/**"
+        ]
+      }
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": [
+      "app",
+      "dmg"
+    ],
+    "category": "Education",
+    "shortDescription": "Apprendre les langues en lisant et en écoutant",
+    "copyright": "© 2026 Ulysse Rives",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "resources": {
+      "resources/dicts/*": "dicts/"
+    },
+    "externalBin": [
+      "binaries/lumen-whisper"
+    ],
+    "macOS": {
+      "minimumSystemVersion": "13.0",
+      "signingIdentity": "-",
+      "dmg": {
+        "background": "dmg/background.png",
+        "windowSize": {
+          "width": 660,
+          "height": 420
+        },
+        "appPosition": {
+          "x": 170,
+          "y": 200
+        },
+        "applicationFolderPosition": {
+          "x": 490,
+          "y": 200
+        }
+      }
+    },
+    "createUpdaterArtifacts": true
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDk4NzVCQzBGQzBDRjA4MzkKUldRNUNNL0FEN3gxbU01QXNvUm1kRkpkTVdySkc4dXdxNXV1Wlg4b2piUldTQXdSK2dvLzAwdSsK",
+      "endpoints": [
+        "https://github.com/LivingTwice/lumen-releases/releases/latest/download/latest.json"
+      ]
+    }
+  }
+}

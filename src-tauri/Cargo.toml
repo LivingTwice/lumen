@@ -1,0 +1,54 @@
+[workspace]
+members = [".", "lumen-whisper"]
+resolver = "2"
+
+[package]
+name = "lumen"
+version = "0.1.0"
+description = "Lumen : apprendre les langues en lisant et en écoutant"
+authors = ["Ulysse Rives"]
+edition = "2021"
+rust-version = "1.80"
+
+[lib]
+name = "lumen_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.7", features = [] }
+
+[dependencies]
+tauri = { version = "2.12", features = ["protocol-asset", "macos-private-api"] }
+tauri-plugin-dialog = "2.8"
+tauri-plugin-opener = "2.7"
+tauri-plugin-updater = "2.13"
+tauri-plugin-process = "2.4"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+rusqlite = { version = "0.40", features = ["bundled"] }
+flate2 = "1"
+reqwest = { version = "0.13", default-features = false, features = ["rustls", "stream"] }
+futures-util = "0.3"
+tokio = { version = "1", features = ["fs", "io-util", "process", "rt-multi-thread", "macros", "sync", "time"] }
+unicode-segmentation = "1"
+unicode-normalization = "0.1"
+sha2 = "0.11"
+hex = "0.4"
+anyhow = "1"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+parking_lot = "0.12"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+llama-cpp-2 = { version = "0.1.158", default-features = false, features = ["metal"] }
+
+[target.'cfg(not(target_os = "macos"))'.dependencies]
+llama-cpp-2 = { version = "0.1.158", default-features = false }
+
+[profile.release]
+codegen-units = 4
+lto = "thin"
+opt-level = 3
+strip = true
+
+[profile.dev.package."*"]
+opt-level = 2

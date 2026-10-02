@@ -1,0 +1,550 @@
+/* ==========================================================================
+   Accueil : l'aube (thème clair) et la nuit chaude (thème sombre)
+   ========================================================================== */
+
+.ob {
+  --ob-bg: #fbf7f1;
+  --ob-text: #1d1a17;
+  --ob-muted: rgba(29, 26, 23, 0.62);
+  --ob-glass: rgba(255, 255, 255, 0.55);
+  --ob-glass-hover: rgba(255, 255, 255, 0.75);
+  --ob-border: rgba(255, 255, 255, 0.85);
+  --ob-edge: rgba(120, 80, 40, 0.1);
+  --ob-shadow: 0 10px 40px rgba(150, 90, 40, 0.1), 0 1px 2px rgba(120, 80, 40, 0.08);
+  --ob-accent: #e8913a;
+  --ob-btn: #1d1a17;
+  --ob-btn-text: #fbf7f1;
+  --b1: #ffc56b;
+  --b2: #ff9f6e;
+  --b3: #f6a3b4;
+  --b4: #ffe2a0;
+  --b5: #ffb88a;
+  --blob-opacity: 0.5;
+  --horizon: rgba(232, 145, 58, 0.55);
+  --grain: 0.07;
+
+  height: 100%;
+  position: relative;
+  overflow: hidden;
+  overflow: clip;
+  display: flex;
+  flex-direction: column;
+  background: var(--ob-bg);
+  color: var(--ob-text);
+  isolation: isolate;
+}
+
+:root[data-theme="dark"] .ob {
+  --ob-bg: #0c0a09;
+  --ob-text: #f6efe6;
+  --ob-muted: rgba(246, 239, 230, 0.6);
+  --ob-glass: rgba(255, 240, 225, 0.05);
+  --ob-glass-hover: rgba(255, 240, 225, 0.09);
+  --ob-border: rgba(255, 230, 200, 0.12);
+  --ob-edge: rgba(255, 230, 200, 0.06);
+  --ob-shadow: 0 10px 40px rgba(0, 0, 0, 0.35);
+  --ob-accent: #ffb45e;
+  --ob-btn: #f6efe6;
+  --ob-btn-text: #14110f;
+  --b1: #a8521c;
+  --b2: #7a2a18;
+  --b3: #c27a2a;
+  --b4: #5a2a14;
+  --b5: #e19a3c;
+  --blob-opacity: 0.42;
+  --horizon: rgba(255, 180, 94, 0.6);
+  --grain: 0.09;
+}
+
+/* ---------- ciel animé ---------- */
+
+.ob-sky {
+  position: absolute;
+  inset: -12%;
+  z-index: -2;
+  pointer-events: none;
+}
+.ob-blob {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(90px);
+  opacity: var(--blob-opacity);
+  will-change: transform;
+}
+.ob-blob.b1 {
+  width: 52vw;
+  height: 52vw;
+  left: 8%;
+  top: 4%;
+  background: var(--b1);
+  animation: drift1 26s ease-in-out infinite alternate;
+}
+.ob-blob.b2 {
+  width: 46vw;
+  height: 46vw;
+  right: 2%;
+  top: 18%;
+  background: var(--b2);
+  animation: drift2 31s ease-in-out infinite alternate;
+}
+.ob-blob.b3 {
+  width: 40vw;
+  height: 40vw;
+  left: 30%;
+  bottom: -6%;
+  background: var(--b3);
+  animation: drift3 23s ease-in-out infinite alternate;
+}
+.ob-blob.b4 {
+  width: 36vw;
+  height: 36vw;
+  left: -6%;
+  bottom: 8%;
+  background: var(--b4);
+  animation: drift2 29s ease-in-out infinite alternate-reverse;
+}
+.ob-blob.b5 {
+  width: 28vw;
+  height: 28vw;
+  right: 16%;
+  bottom: 14%;
+  background: var(--b5);
+  animation: drift1 21s ease-in-out infinite alternate-reverse;
+}
+@keyframes drift1 {
+  0% {
+    transform: translate(0, 0) scale(1);
+  }
+  50% {
+    transform: translate(8vw, 6vh) scale(1.12);
+  }
+  100% {
+    transform: translate(-4vw, 10vh) scale(0.94);
+  }
+}
+@keyframes drift2 {
+  0% {
+    transform: translate(0, 0) scale(1.05);
+  }
+  50% {
+    transform: translate(-9vw, -5vh) scale(0.92);
+  }
+  100% {
+    transform: translate(-3vw, 8vh) scale(1.1);
+  }
+}
+@keyframes drift3 {
+  0% {
+    transform: translate(0, 0) scale(0.95);
+  }
+  50% {
+    transform: translate(6vw, -9vh) scale(1.15);
+  }
+  100% {
+    transform: translate(-8vw, -3vh) scale(1);
+  }
+}
+
+/* grain photographique, très léger */
+.ob-grain {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  opacity: var(--grain);
+  mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
+}
+
+.ob-motes {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+}
+.ob-motes i {
+  position: absolute;
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: #ffd8a0;
+  box-shadow: 0 0 8px 1px rgba(255, 190, 110, 0.9);
+  opacity: 0;
+  animation: mote 12s linear infinite;
+}
+@keyframes mote {
+  0% {
+    transform: translate(0, 0);
+    opacity: 0;
+  }
+  15% {
+    opacity: 0.9;
+  }
+  85% {
+    opacity: 0.6;
+  }
+  100% {
+    transform: translate(18px, -38vh);
+    opacity: 0;
+  }
+}
+
+/* ---------- l'astre et l'horizon ---------- */
+
+.ob-orb {
+  position: absolute;
+  left: 50%;
+  z-index: 2;
+  pointer-events: none;
+}
+.ob-orb-core {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: radial-gradient(circle at 40% 36%, #ffffff 0%, #fff4df 32%, #ffcf8a 68%, #f5a04e 100%);
+  box-shadow: 0 0 40px 10px rgba(255, 186, 104, 0.55), 0 0 140px 40px rgba(255, 170, 90, 0.28), inset -6px -10px 24px rgba(220, 120, 40, 0.25);
+}
+.ob-orb-halo {
+  position: absolute;
+  inset: -90%;
+  border-radius: 50%;
+  background: radial-gradient(closest-side, rgba(255, 200, 130, 0.5), rgba(255, 190, 110, 0.12) 55%, transparent);
+  animation: breathe 6s ease-in-out infinite;
+}
+.ob-orb-rays {
+  position: absolute;
+  inset: -160%;
+  border-radius: 50%;
+  background: repeating-conic-gradient(from 0deg, rgba(255, 196, 120, 0.16) 0deg 3deg, transparent 3deg 18deg);
+  -webkit-mask: radial-gradient(closest-side, transparent 22%, #000 30%, transparent 72%);
+  mask: radial-gradient(closest-side, transparent 22%, #000 30%, transparent 72%);
+  animation: spin 90s linear infinite;
+}
+
+.ob-horizon {
+  position: absolute;
+  left: 50%;
+  width: min(820px, 70vw);
+  height: 1px;
+  margin-left: calc(min(820px, 70vw) / -2);
+  z-index: 3;
+  background: linear-gradient(90deg, transparent, var(--horizon) 30%, var(--horizon) 70%, transparent);
+  box-shadow: 0 0 22px 2px var(--horizon);
+  transform-origin: center;
+  pointer-events: none;
+}
+.ob-horizon::after {
+  content: "";
+  position: absolute;
+  left: 20%;
+  right: 20%;
+  top: 1px;
+  height: 120px;
+  background: radial-gradient(50% 100% at 50% 0%, var(--horizon), transparent 70%);
+  opacity: 0.35;
+  filter: blur(10px);
+}
+
+/* ---------- mise en page ---------- */
+
+.ob-top {
+  height: 52px;
+  flex-shrink: 0;
+}
+.ob-stage {
+  flex: 1;
+  position: relative;
+  display: flex;
+  justify-content: center;
+}
+.ob-step {
+  position: absolute;
+  left: 0;
+  right: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  padding: 0 48px;
+  z-index: 4;
+}
+.ob-step.welcome {
+  top: 52%;
+}
+.ob-step.form {
+  top: 124px;
+}
+.ob-step.ready {
+  top: 49%;
+}
+
+.ob-word {
+  position: relative;
+  font-family: var(--font-display);
+  font-size: clamp(76px, 9vw, 116px);
+  font-weight: 420;
+  letter-spacing: -0.035em;
+  line-height: 1;
+  margin: 0;
+}
+.ob-word .ch {
+  display: inline-block;
+}
+.ob-word .sheen {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  color: transparent;
+  background: linear-gradient(105deg, transparent 38%, rgba(255, 214, 150, 0.95) 48%, rgba(255, 255, 255, 0.95) 50%, rgba(255, 214, 150, 0.95) 52%, transparent 62%);
+  background-size: 260% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  animation: sheen 7s ease-in-out 2.4s infinite;
+  background-position: 120% 0;
+}
+@keyframes sheen {
+  0% {
+    background-position: 120% 0;
+  }
+  35%,
+  100% {
+    background-position: -40% 0;
+  }
+}
+
+.ob-lead {
+  margin-top: 18px;
+  max-width: 560px;
+  font-size: 18px;
+  line-height: 1.6;
+  color: var(--ob-muted);
+  text-wrap: balance;
+}
+.ob h2 {
+  font-family: var(--font-display);
+  font-size: 44px;
+  font-weight: 440;
+  letter-spacing: -0.02em;
+  line-height: 1.08;
+  margin: 0;
+}
+.ob-sub {
+  margin-top: 12px;
+  max-width: 560px;
+  font-size: 16px;
+  line-height: 1.6;
+  color: var(--ob-muted);
+}
+
+.ob-cta {
+  position: relative;
+  overflow: hidden;
+  margin-top: 30px;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  height: 52px;
+  padding: 0 26px;
+  border-radius: 999px;
+  border: 0;
+  background: var(--ob-btn);
+  color: var(--ob-btn-text);
+  font-size: 15px;
+  font-weight: 560;
+  box-shadow: 0 10px 30px rgba(120, 70, 20, 0.22), 0 0 0 0 rgba(255, 180, 94, 0.5);
+  transition: transform 0.2s var(--ease-out), box-shadow 0.4s ease, opacity 0.2s ease;
+}
+.ob-cta:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 14px 40px rgba(120, 70, 20, 0.28), 0 0 0 6px rgba(255, 180, 94, 0.18);
+}
+.ob-cta:active:not(:disabled) {
+  transform: scale(0.97);
+}
+.ob-cta:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+.ob-cta::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(105deg, transparent 35%, rgba(255, 220, 170, 0.55) 50%, transparent 65%);
+  transform: translateX(-120%);
+  animation: cta-sheen 4.5s ease-in-out 3s infinite;
+}
+@keyframes cta-sheen {
+  0% {
+    transform: translateX(-120%);
+  }
+  30%,
+  100% {
+    transform: translateX(120%);
+  }
+}
+.ob-link {
+  margin-top: 30px;
+  height: 52px;
+  padding: 0 18px;
+  border: 0;
+  background: transparent;
+  color: var(--ob-muted);
+  font-size: 15px;
+  border-radius: 999px;
+}
+.ob-link:hover {
+  color: var(--ob-text);
+}
+.ob-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+/* ---------- cartes de verre ---------- */
+
+.ob-grid {
+  display: grid;
+  gap: 14px;
+  width: min(900px, 100%);
+  margin-top: 34px;
+}
+.ob-grid.langs {
+  grid-template-columns: repeat(3, 1fr);
+}
+.ob-grid.profiles {
+  grid-template-columns: repeat(3, 1fr);
+}
+.ob-card {
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  padding: 18px 20px;
+  border-radius: 20px;
+  border: 1px solid var(--ob-border);
+  background: var(--ob-glass);
+  -webkit-backdrop-filter: blur(22px) saturate(140%);
+  backdrop-filter: blur(22px) saturate(140%);
+  box-shadow: var(--ob-shadow), inset 0 0 0 1px var(--ob-edge);
+  color: var(--ob-text);
+  text-align: left;
+  transition: transform 0.35s var(--ease-out), background-color 0.3s ease, box-shadow 0.35s ease, border-color 0.3s ease;
+}
+.ob-card:hover {
+  transform: translateY(-3px);
+  background: var(--ob-glass-hover);
+}
+.ob-card::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: radial-gradient(360px circle at var(--mx, -400px) var(--my, -400px), rgba(255, 200, 130, 0.28), transparent 45%);
+  pointer-events: none;
+}
+.ob-card.on {
+  border-color: rgba(255, 170, 80, 0.9);
+  box-shadow: 0 0 0 3px rgba(255, 180, 94, 0.22), 0 16px 50px rgba(255, 160, 70, 0.28);
+}
+.ob-card .hello {
+  font-family: var(--font-display);
+  font-size: 30px;
+  font-weight: 450;
+  letter-spacing: -0.01em;
+  line-height: 1.15;
+}
+.ob-card .meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--ob-muted);
+}
+.ob-card .dot-lang {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+.ob-card .tick {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: var(--ob-accent);
+  color: #fff;
+  box-shadow: 0 0 16px rgba(255, 170, 80, 0.7);
+}
+.ob-card strong.pname {
+  font-family: var(--font-display);
+  font-size: 26px;
+  font-weight: 460;
+  margin-top: 6px;
+}
+.ob-card .pdesc {
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--ob-muted);
+  min-height: 58px;
+}
+.ob-card .psize {
+  margin-top: 6px;
+  font-size: 13px;
+  font-weight: 600;
+}
+.ob-rays {
+  display: flex;
+  gap: 4px;
+}
+.ob-rays i {
+  width: 20px;
+  height: 4px;
+  border-radius: 4px;
+  background: var(--ob-edge);
+  background: color-mix(in srgb, var(--ob-text) 14%, transparent);
+}
+.ob-rays i.on {
+  background: var(--ob-accent);
+  box-shadow: 0 0 10px rgba(255, 170, 80, 0.8);
+}
+
+.ob-dots {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+  padding-bottom: 28px;
+  position: relative;
+  z-index: 4;
+}
+.ob-dots i {
+  width: 6px;
+  height: 6px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--ob-text) 22%, transparent);
+  transition: width 0.45s var(--ease-out), background-color 0.4s ease;
+}
+.ob-dots i.on {
+  width: 24px;
+  background: var(--ob-accent);
+}
+
+/* éclosion finale : la lumière envahit l'écran */
+.ob-bloom {
+  position: fixed;
+  z-index: 50;
+  width: 120px;
+  height: 120px;
+  margin: -60px 0 0 -60px;
+  border-radius: 50%;
+  background: radial-gradient(circle, #fffaf2 0%, #fff4e4 45%, #ffe7c4 70%, rgba(255, 220, 170, 0) 100%);
+  pointer-events: none;
+}
+:root[data-theme="dark"] .ob-bloom {
+  background: radial-gradient(circle, #fff3e2 0%, #ffd9a6 30%, #2a1c12 75%, #121316 100%);
+}
