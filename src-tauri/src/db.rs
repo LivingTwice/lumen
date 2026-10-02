@@ -63,21 +63,28 @@ pub fn open(path: &Path) -> Result<Connection> {
         CREATE TABLE IF NOT EXISTS tcache(k TEXT PRIMARY KEY, v TEXT NOT NULL, created_at INTEGER NOT NULL);
         "#,
     )?;
-    // migrations
-    let has_video: bool = conn
-        .prepare("SELECT 1 FROM pragma_table_info('lessons') WHERE name='video_path'")?
-        .exists([])?;
-    if !has_video {
-        conn.execute_batch("ALTER TABLE lessons ADD COLUMN video_path TEXT;")?;
-    }
+    // migrations (uniquement des ajouts : les bases existantes restent lisibles)
+    add_column(&conn, "lessons", "video_path", "TEXT")?;
     // identifiant d'origine des leçons importées (ex. « lingq:123 ») pour ne pas les dupliquer
-    let has_ext: bool = conn
-        .prepare("SELECT 1 FROM pragma_table_info('lessons') WHERE name='ext_id'")?
-        .exists([])?;
-    if !has_ext {
-        conn.execute_batch("ALTER TABLE lessons ADD COLUMN ext_id TEXT; CREATE INDEX IF NOT EXISTS lessons_ext ON lessons(ext_id);")?;
-    }
+    add_column(&conn, "lessons", "ext_id", "TEXT")?;
+    conn.execute_batch("CREATE INDEX IF NOT EXISTS lessons_ext ON lessons(ext_id);")?;
+    // reprise exacte : seconde atteinte dans l'audio, mot atteint dans le texte
+    add_column(&conn, "lessons", "position", "REAL NOT NULL DEFAULT 0")?;
+    add_column(&conn, "lessons", "anchor", "INTEGER NOT NULL DEFAULT 0")?;
+    add_column(&conn, "lessons", "duration", "REAL NOT NULL DEFAULT 0")?;
+    // couverture choisie par l'utilisateur (fichier dans media/)
+    add_column(&conn, "lessons", "cover_path", "TEXT")?;
     Ok(conn)
+}
+
+fn add_column(conn: &Connection, table: &str, column: &str, decl: &str) -> Result<()> {
+    let exists: bool = conn
+        .prepare(&format!("SELECT 1 FROM pragma_table_info('{table}') WHERE name=?1"))?
+        .exists([column])?;
+    if !exists {
+        conn.execute_batch(&format!("ALTER TABLE {table} ADD COLUMN {column} {decl};"))?;
+    }
+    Ok(())
 }
 
 pub fn now() -> i64 {
@@ -152,6 +159,10 @@ pub struct LessonSummary {
     /// part (0-100) des occurrences reconnues (connues ou en apprentissage)
     pub known_pct: i64,
     pub excerpt: String,
+    /// seconde atteinte dans l'audio ou la vidéo, et durée totale
+    pub position: f64,
+    pub duration: f64,
+    pub cover_path: Option<String>,
 }
 
 #[derive(Serialize, Clone, Debug)]
@@ -170,6 +181,11 @@ pub struct Lesson {
     pub word_count: i64,
     pub page: i64,
     pub completed: bool,
+    pub position: f64,
+    /// jeton (mot) où la lecture s'était arrêtée
+    pub anchor: i64,
+    pub duration: f64,
+    pub cover_path: Option<String>,
 }
 
 fn hue_for(title: &str) -> i64 {
@@ -200,7 +216,7 @@ pub fn status_map(c: &Connection, lang: &str) -> Result<HashMap<String, i64>> {
 pub fn lessons_list(c: &Connection, lang: &str) -> Result<Vec<LessonSummary>> {
     let statuses = status_map(c, lang)?;
     let mut st = c.prepare(
-        "SELECT id,lang,title,collection,kind,source,hue,word_count,page,completed,media_path,created_at,opened_at,text
+        "SELECT id,lang,title,collection,kind,source,hue,word_count,page,completed,media_path,created_at,opened_at,text,position,duration,cover_path
          FROM lessons WHERE lang=?1 ORDER BY COALESCE(opened_at, created_at) DESC",
     )?;
     let rows = st.query_map([lang], |r| {
@@ -223,6 +239,9 @@ pub fn lessons_list(c: &Connection, lang: &str) -> Result<Vec<LessonSummary>> {
                 new_words: 0,
                 known_pct: 0,
                 excerpt: String::new(),
+                position: r.get(14)?,
+                duration: r.get(15)?,
+                cover_path: r.get(16)?,
             },
             text,
         ))
@@ -251,7 +270,8 @@ pub fn lessons_list(c: &Connection, lang: &str) -> Result<Vec<LessonSummary>> {
 
 pub fn lesson_get(c: &Connection, id: i64) -> Result<Lesson> {
     let l = c.query_row(
-        "SELECT id,lang,title,collection,kind,source,text,media_path,timings,hue,word_count,page,completed,video_path FROM lessons WHERE id=?1",
+        "SELECT id,lang,title,collection,kind,source,text,media_path,timings,hue,word_count,page,completed,video_path,position,anchor,duration,cover_path
+         FROM lessons WHERE id=?1",
         [id],
         |r| {
             Ok(Lesson {
@@ -269,6 +289,10 @@ pub fn lesson_get(c: &Connection, id: i64) -> Result<Lesson> {
                 page: r.get(11)?,
                 completed: r.get::<_, i64>(12)? != 0,
                 video_path: r.get(13)?,
+                position: r.get(14)?,
+                anchor: r.get(15)?,
+                duration: r.get(16)?,
+                cover_path: r.get(17)?,
             })
         },
     )?;
@@ -282,6 +306,9 @@ pub struct LessonPatch {
     pub collection: Option<String>,
     pub page: Option<i64>,
     pub completed: Option<bool>,
+    pub position: Option<f64>,
+    pub anchor: Option<i64>,
+    pub duration: Option<f64>,
 }
 
 pub fn lesson_update(c: &Connection, id: i64, p: &LessonPatch) -> Result<()> {
@@ -297,18 +324,28 @@ pub fn lesson_update(c: &Connection, id: i64, p: &LessonPatch) -> Result<()> {
     if let Some(v) = p.completed {
         c.execute("UPDATE lessons SET completed=?1 WHERE id=?2", params![v as i64, id])?;
     }
+    if let Some(v) = p.position {
+        c.execute("UPDATE lessons SET position=?1 WHERE id=?2", params![v.max(0.0), id])?;
+    }
+    if let Some(v) = p.anchor {
+        c.execute("UPDATE lessons SET anchor=?1 WHERE id=?2", params![v.max(0), id])?;
+    }
+    if let Some(v) = p.duration {
+        c.execute("UPDATE lessons SET duration=?1 WHERE id=?2", params![v.max(0.0), id])?;
+    }
     Ok(())
 }
 
 pub fn lesson_delete(c: &Connection, id: i64) -> Result<Vec<String>> {
-    let files: Option<(Option<String>, Option<String>)> = c
-        .query_row("SELECT media_path, video_path FROM lessons WHERE id=?1", [id], |r| Ok((r.get(0)?, r.get(1)?)))
+    let files: Option<(Option<String>, Option<String>, Option<String>)> = c
+        .query_row("SELECT media_path, video_path, cover_path FROM lessons WHERE id=?1", [id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
         .optional()?;
     c.execute("DELETE FROM lessons WHERE id=?1", [id])?;
     let mut out = Vec::new();
-    if let Some((a, v)) = files {
+    if let Some((a, v, cover)) = files {
         out.extend(a);
         out.extend(v);
+        out.extend(cover);
     }
     out.dedup();
     Ok(out)
@@ -321,6 +358,13 @@ pub fn lesson_set_video(c: &Connection, id: i64, path: &str) -> Result<()> {
 
 pub fn lesson_source(c: &Connection, id: i64) -> Result<(String, Option<String>)> {
     Ok(c.query_row("SELECT source, video_path FROM lessons WHERE id=?1", [id], |r| Ok((r.get(0)?, r.get(1)?)))?)
+}
+
+/// Change (ou retire) la couverture. Renvoie l'ancienne, à supprimer du disque.
+pub fn lesson_set_cover(c: &Connection, id: i64, path: Option<&str>) -> Result<Option<String>> {
+    let old: Option<String> = c.query_row("SELECT cover_path FROM lessons WHERE id=?1", [id], |r| r.get(0))?;
+    c.execute("UPDATE lessons SET cover_path=?1 WHERE id=?2", params![path, id])?;
+    Ok(old)
 }
 
 /// Leçon déjà importée depuis cette origine ?
@@ -672,6 +716,38 @@ mod tests {
         assert_eq!(total, 1);
         assert_eq!(items[0].translation, "chat");
         assert!(export_csv(&c, "en").unwrap().contains("\"cat\",\"chat\""));
+        drop(c);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn resume_position_and_cover() {
+        let path = std::env::temp_dir().join(format!("lumen-db-resume-{}.db", std::process::id()));
+        let _ = std::fs::remove_file(&path);
+        // base d'une ancienne version : ni position, ni couverture
+        {
+            let old = Connection::open(&path).unwrap();
+            old.execute_batch(
+                "CREATE TABLE lessons(id INTEGER PRIMARY KEY AUTOINCREMENT, lang TEXT NOT NULL, title TEXT NOT NULL,
+                 collection TEXT NOT NULL DEFAULT '', kind TEXT NOT NULL DEFAULT 'text', source TEXT NOT NULL DEFAULT '',
+                 text TEXT NOT NULL, media_path TEXT, timings TEXT, hue INTEGER NOT NULL DEFAULT 210,
+                 word_count INTEGER NOT NULL DEFAULT 0, page INTEGER NOT NULL DEFAULT 0, completed INTEGER NOT NULL DEFAULT 0,
+                 created_at INTEGER NOT NULL, opened_at INTEGER);
+                 INSERT INTO lessons(lang,title,text,created_at) VALUES('en','Ancienne','Old text here.',1);",
+            )
+            .unwrap();
+        }
+        let c = open(&path).unwrap();
+        let l = lesson_get(&c, 1).unwrap();
+        assert_eq!((l.position, l.anchor, l.duration, l.cover_path.clone()), (0.0, 0, 0.0, None));
+        lesson_update(&c, 1, &LessonPatch { position: Some(754.3), anchor: Some(42), duration: Some(1510.0), page: Some(2), ..Default::default() }).unwrap();
+        let l = lesson_get(&c, 1).unwrap();
+        assert_eq!((l.position, l.anchor, l.duration, l.page), (754.3, 42, 1510.0, 2));
+        assert_eq!(lesson_set_cover(&c, 1, Some("/m/a.cover.jpg")).unwrap(), None);
+        assert_eq!(lesson_set_cover(&c, 1, Some("/m/b.cover.jpg")).unwrap().as_deref(), Some("/m/a.cover.jpg"));
+        let s = &lessons_list(&c, "en").unwrap()[0];
+        assert_eq!((s.position, s.duration, s.cover_path.as_deref()), (754.3, 1510.0, Some("/m/b.cover.jpg")));
+        assert!(lesson_delete(&c, 1).unwrap().contains(&"/m/b.cover.jpg".to_string()));
         drop(c);
         let _ = std::fs::remove_file(path);
     }

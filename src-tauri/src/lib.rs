@@ -44,6 +44,7 @@ pub fn run() {
             commands::lesson_create,
             commands::lesson_update,
             commands::lesson_delete,
+            commands::lesson_set_cover,
             commands::term_set,
             commands::terms_mark_known,
             commands::terms_list,

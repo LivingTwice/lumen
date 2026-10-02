@@ -14,6 +14,8 @@ export interface PlayerHandle {
   pause(): void;
   stop(): void;
   isPlaying(): boolean;
+  /** oublie la position mémorisée (leçon terminée : la prochaine lecture repart du début) */
+  forget(): void;
 }
 
 export interface PlaybackState {
@@ -73,6 +75,33 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player({ lesson, 
   pageRef.current = page;
   const listenSecs = useRef(0);
 
+  // ---------- mémoire de la position, à la seconde près ----------
+  // La seconde atteinte est écrite au plus une fois par seconde pendant
+  // l'écoute, puis à chaque pause, saut ou sortie : fermer Lumen n'en
+  // perd au pire qu'une seconde.
+  const posRef = useRef(lesson.position || 0);
+  const savedPos = useRef(lesson.position || 0);
+  const savedDuration = useRef(lesson.duration || 0);
+  // voix du système : mot où la lecture s'était arrêtée
+  const resumeRef = useRef(hasMedia ? -1 : lesson.anchor || -1);
+  const remember = useCallback(
+    (t: number, force = false) => {
+      posRef.current = t;
+      if (!hasMedia || Math.abs(t - savedPos.current) < (force ? 0.05 : 1)) return;
+      savedPos.current = t;
+      void api().lessonUpdate(lesson.id, { position: Math.round(t * 10) / 10 });
+    },
+    [hasMedia, lesson.id],
+  );
+  useEffect(() => {
+    const flush = () => remember(posRef.current, true);
+    window.addEventListener("pagehide", flush);
+    return () => {
+      window.removeEventListener("pagehide", flush);
+      flush();
+    };
+  }, [remember]);
+
   const rateKey = hasMedia ? "media_rate" : "tts_rate";
   const rate = parseFloat(settings[rateKey] ?? (hasMedia ? "1" : "0.95")) || 1;
 
@@ -130,6 +159,7 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player({ lesson, 
       if (el) {
         const t = el.currentTime;
         setTime(t);
+        remember(t);
         if (timing) {
           const k = lastLE(timing.raw.length, (j) => timing.raw[j][2], t + 0.04);
           if (k >= 0) {
@@ -157,7 +187,7 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player({ lesson, 
     };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
-  }, [hasMedia, playing, timing, setCursor, single, dual, rate]);
+  }, [hasMedia, playing, timing, setCursor, single, dual, rate, remember]);
 
   // temps d'écoute
   useEffect(() => {
@@ -240,9 +270,10 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player({ lesson, 
       m.currentTime = Math.max(0, t);
       if (dual && videoRef.current) videoRef.current.currentTime = m.currentTime;
       setTime(m.currentTime);
+      remember(m.currentTime, true);
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [dual, single],
+    [dual, single, remember],
   );
 
   const seekToToken = useCallback(
@@ -288,7 +319,7 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player({ lesson, 
       speakRef.current?.stop();
       setPlaying(false);
     } else {
-      const cur = cursorRef.current;
+      const cur = cursorRef.current >= 0 ? cursorRef.current : resumeRef.current;
       const r = pages[pageRef.current];
       speakFrom(cur >= r.start && cur < r.end ? cur : r.start);
     }
@@ -318,6 +349,11 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player({ lesson, 
         setPlaying(false);
       },
       isPlaying: () => playing,
+      forget() {
+        posRef.current = 0;
+        savedPos.current = 0;
+        resumeRef.current = -1;
+      },
     }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [toggle, hasMedia, seekToToken, speakFrom, playing],
@@ -358,14 +394,36 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player({ lesson, 
 
   const masterEvents = {
     onPlay: () => setPlaying(true),
-    onPause: () => {
+    onPause: (e: React.SyntheticEvent<HTMLMediaElement>) => {
       setPlaying(false);
       if (dual) videoRef.current?.pause();
+      if (!e.currentTarget.ended) remember(e.currentTarget.currentTime, true);
     },
-    onEnded: () => setPlaying(false),
+    // écoutée jusqu'au bout : la prochaine fois, on repart du début
+    onEnded: () => {
+      setPlaying(false);
+      remember(0, true);
+    },
     onLoadedMetadata: (e: React.SyntheticEvent<HTMLMediaElement>) => {
-      setDuration(e.currentTarget.duration || 0);
-      e.currentTarget.playbackRate = rate;
+      const el = e.currentTarget;
+      const d = el.duration || 0;
+      setDuration(d);
+      el.playbackRate = rate;
+      if (d && Math.abs(d - savedDuration.current) > 0.5) {
+        savedDuration.current = d;
+        void api().lessonUpdate(lesson.id, { duration: Math.round(d * 10) / 10 });
+      }
+      // reprise exacte là où l'écoute s'était arrêtée
+      const p = posRef.current;
+      if (p > 0.5 && (!d || p < d - 0.5)) {
+        el.currentTime = p;
+        if (dual && videoRef.current && videoRef.current.readyState >= 1) videoRef.current.currentTime = p;
+        setTime(p);
+        if (timing) {
+          const k = lastLE(timing.raw.length, (j) => timing.raw[j][2], p + 0.04);
+          if (k >= 0) setCursor(timing.tokIdx[k]);
+        }
+      }
     },
     onTimeUpdate: (e: React.SyntheticEvent<HTMLMediaElement>) => !playing && setTime(e.currentTarget.currentTime),
   };
@@ -379,6 +437,8 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player({ lesson, 
       muted={dual}
       onClick={toggle}
       {...(single ? masterEvents : {})}
+      // image seule : elle se cale sur la position reprise du son
+      onLoadedMetadata={single ? masterEvents.onLoadedMetadata : (e) => (e.currentTarget.currentTime = posRef.current)}
     />
   ) : null;
 

@@ -56,6 +56,8 @@ interface AppStore {
   langs(): LangCode[];
   go(view: View): void;
   openLesson(id: number): void;
+  /** oublie la leçon en cours si c'est celle-ci (supprimée) */
+  forgetLesson(id: number): void;
   openImport(files?: string[] | null): void;
   closeImport(): void;
   toast(text: string, kind?: Toast["kind"]): void;
@@ -89,7 +91,9 @@ export const useApp = create<AppStore>((set, get) => ({
 
   async init() {
     const [info, settings] = await Promise.all([api().appInfo(), api().settingsGet()]);
-    set({ info, settings: { ...DEFAULTS, ...settings }, ready: true });
+    // la dernière leçon ouverte reste « en cours » d'un lancement à l'autre
+    const last = Number(settings.last_lesson) || null;
+    set({ info, settings: { ...DEFAULTS, ...settings }, lessonId: last, ready: true });
     await get().refreshModels();
     await get().refreshKnown();
     // prépare l'IA en arrière-plan dès l'ouverture de l'application
@@ -123,6 +127,13 @@ export const useApp = create<AppStore>((set, get) => ({
 
   openLesson(id) {
     set({ lessonId: id, view: "reader" });
+    if (get().settings.last_lesson !== String(id)) void get().setSetting("last_lesson", String(id));
+  },
+
+  forgetLesson(id) {
+    if (get().lessonId !== id) return;
+    set({ lessonId: null });
+    void get().setSetting("last_lesson", "");
   },
 
   openImport(files = null) {
@@ -214,7 +225,8 @@ export function formatNumber(n: number): string {
 
 export function formatDuration(secs: number): string {
   const s = Math.max(0, Math.round(secs));
-  const m = Math.floor(s / 60);
-  const r = s % 60;
-  return `${m}:${String(r).padStart(2, "0")}`;
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const r = String(s % 60).padStart(2, "0");
+  return h ? `${h}:${String(m).padStart(2, "0")}:${r}` : `${m}:${r}`;
 }

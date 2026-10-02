@@ -35,6 +35,9 @@ export interface LessonPatch {
   collection?: string;
   page?: number;
   completed?: boolean;
+  position?: number;
+  anchor?: number;
+  duration?: number;
 }
 
 export interface Api {
@@ -46,6 +49,8 @@ export interface Api {
   lessonCreate(lesson: NewLesson): Promise<number>;
   lessonUpdate(id: number, patch: LessonPatch): Promise<void>;
   lessonDelete(id: number): Promise<void>;
+  /** Couverture (image déjà réduite) ; `null` la retire. Renvoie le chemin enregistré. */
+  lessonSetCover(id: number, data: Uint8Array | null, ext: string | null): Promise<string | null>;
   termSet(update: TermUpdate): Promise<void>;
   termsMarkKnown(lang: LangCode, keys: string[], wordsRead: number): Promise<number>;
   termsList(query: TermQuery): Promise<{ items: Term[]; total: number }>;
@@ -89,6 +94,7 @@ async function createTauriApi(): Promise<Api> {
     lessonCreate: (lesson) => invoke("lesson_create", { lesson }),
     lessonUpdate: (id, patch) => invoke("lesson_update", { id, patch }),
     lessonDelete: (id) => invoke("lesson_delete", { id }),
+    lessonSetCover: (id, data, ext) => invoke("lesson_set_cover", { id, data: data ? Array.from(data) : null, ext }),
     termSet: (update) => invoke("term_set", { update }),
     termsMarkKnown: (lang, keys, wordsRead) => invoke("terms_mark_known", { lang, keys, wordsRead }),
     termsList: (query) => invoke("terms_list", { query }),

@@ -222,6 +222,24 @@
 .known-glow {
   animation: known-glow 1s ease;
 }
+/* reprise de la lecture : le mot où l'on s'était arrêté s'allume puis s'éteint */
+.page .w.resume {
+  animation: resume-halo 2.6s var(--ease-out);
+}
+@keyframes resume-halo {
+  0% {
+    background: transparent;
+    box-shadow: 0 0 0 0 transparent;
+  }
+  18% {
+    background: var(--light-soft);
+    box-shadow: 0 0 0 4px var(--light-veil), 0 0 26px var(--light-soft);
+  }
+  100% {
+    background: transparent;
+    box-shadow: 0 0 0 0 transparent;
+  }
+}
 @keyframes known-glow {
   0% {
     background: var(--light-soft);

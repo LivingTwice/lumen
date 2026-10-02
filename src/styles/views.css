@@ -28,46 +28,68 @@
   color: var(--text);
 }
 
+/* ---------- couvertures ---------- */
+
+.cover-box {
+  position: relative;
+}
+/* sur une carte, la couverture ne forme pas de plan à part : son petit
+   bouton peut ainsi passer au-dessus de la zone qui ouvre la leçon */
+.lesson-card > .cover-box {
+  z-index: auto;
+}
 .cover {
   position: relative;
-  height: 128px;
+  aspect-ratio: 16 / 9;
   border-radius: 14px 14px 0 0;
   overflow: hidden;
+  background: var(--bg-sunk);
+  isolation: isolate;
 }
-.cover.big {
-  height: auto;
+.cover-box.big {
+  display: flex;
+}
+.cover-box.big .cover {
+  flex: 1;
+  aspect-ratio: auto;
   min-height: 230px;
   border-radius: 18px;
 }
+.cover-art,
+.cover-img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  transition: transform 0.9s var(--ease-out), opacity 0.6s ease;
+}
+.cover-img {
+  object-fit: cover;
+  opacity: 0;
+}
+.cover-img.on {
+  opacity: 1;
+}
+/* grain photographique : la couleur générée gagne de la matière */
+.cover-grain {
+  position: absolute;
+  inset: 0;
+  background-size: 140px;
+  mix-blend-mode: overlay;
+  opacity: 0.22;
+  pointer-events: none;
+}
+/* voile du bas pour que l'étiquette reste lisible, reflet discret en haut */
 .cover::after {
   content: "";
   position: absolute;
   inset: 0;
-  background: linear-gradient(180deg, transparent 50%, rgba(0, 0, 0, 0.18));
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.08), transparent 30%, transparent 58%, rgba(0, 0, 0, 0.26));
+  pointer-events: none;
 }
-.cover-sun {
-  position: absolute;
-  width: 46px;
-  height: 46px;
-  margin: -23px 0 0 -23px;
-  border-radius: 50%;
-  background: radial-gradient(circle at 40% 38%, #fff, #fff3dc 40%, rgba(255, 210, 150, 0.7) 70%, rgba(255, 210, 150, 0));
-  filter: blur(0.3px);
-  animation: sun-drift 9s ease-in-out infinite;
-}
-.cover.big .cover-sun {
-  width: 74px;
-  height: 74px;
-  margin: -37px 0 0 -37px;
-}
-@keyframes sun-drift {
-  0%,
-  100% {
-    transform: translate(0, 0) scale(1);
-  }
-  50% {
-    transform: translate(6px, -4px) scale(1.08);
-  }
+.lesson-card:hover .cover-art,
+.lesson-card:hover .cover-img {
+  transform: scale(1.045);
 }
 .cover-kind {
   position: absolute;
@@ -80,14 +102,69 @@
   height: 24px;
   padding: 0 9px;
   border-radius: 999px;
-  background: rgba(0, 0, 0, 0.28);
+  background: rgba(0, 0, 0, 0.3);
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
   color: #fff;
   font-size: 11.5px;
   font-weight: 550;
 }
-
+/* avancement, comme une bande de lumière au bas de l'image */
+.cover-progress {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 1;
+  height: 3px;
+  background: rgba(0, 0, 0, 0.28);
+}
+.cover-progress i {
+  display: block;
+  height: 100%;
+  border-radius: 0 3px 3px 0;
+  background: linear-gradient(90deg, var(--light-strong), var(--light));
+  box-shadow: 0 0 10px var(--light);
+}
+.cover-edit-wrap {
+  position: absolute;
+  right: 10px;
+  bottom: 9px;
+  z-index: 3 !important;
+  opacity: 0;
+  transform: translateY(3px);
+  transition: opacity 0.2s ease, transform 0.25s var(--ease-out);
+}
+.lesson-card:hover .cover-edit-wrap,
+.cover-edit-wrap:focus-within,
+.cover-edit-wrap.open {
+  opacity: 1;
+  transform: none;
+}
+.cover-edit {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: 0;
+  display: grid;
+  place-items: center;
+  color: #fff;
+  background: rgba(0, 0, 0, 0.32);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.18);
+  transition: background-color 0.2s ease, transform 0.15s ease, box-shadow 0.25s ease;
+}
+.cover-edit:hover {
+  background: rgba(0, 0, 0, 0.5);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.3), 0 0 14px var(--light-soft);
+}
+.cover-edit:active {
+  transform: scale(0.92);
+}
+.cover-edit.busy {
+  animation: pulse 1.4s ease-in-out infinite;
+}
 .hero {
   display: grid;
   grid-template-columns: 300px 1fr;
@@ -242,15 +319,6 @@
 .lesson-known .bar {
   flex: 1;
   height: 4px;
-}
-.lesson-progress {
-  position: absolute;
-  left: 0;
-  bottom: 0;
-  height: 2px;
-  border-radius: 0 2px 2px 0;
-  background: var(--light-strong);
-  box-shadow: 0 0 10px var(--light);
 }
 .lesson-menu {
   position: absolute;

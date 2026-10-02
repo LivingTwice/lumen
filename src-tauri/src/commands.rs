@@ -125,6 +125,34 @@ pub async fn lesson_delete(state: State<'_, AppState>, id: i64) -> R<()> {
     Ok(())
 }
 
+/// Enregistre l'image de couverture choisie (déjà réduite par l'interface),
+/// ou la retire si `data` est vide. Renvoie le chemin de la nouvelle image.
+#[tauri::command]
+pub async fn lesson_set_cover(state: State<'_, AppState>, id: i64, data: Option<Vec<u8>>, ext: Option<String>) -> R<Option<String>> {
+    let media = media::media_dir(&state.data_dir);
+    let new_path = match data {
+        Some(bytes) if !bytes.is_empty() => {
+            if bytes.len() > 30_000_000 {
+                return Err("Cette image est trop lourde (30 Mo au plus).".into());
+            }
+            let ext = ext.unwrap_or_default().to_lowercase();
+            let ext = if ["jpg", "jpeg", "png", "webp", "gif", "heic", "avif"].contains(&ext.as_str()) { ext } else { "jpg".into() };
+            std::fs::create_dir_all(&media).map_err(err)?;
+            let p = media.join(format!("{}.cover.{ext}", media::new_stem()));
+            std::fs::write(&p, bytes).map_err(|e| format!("Image impossible à enregistrer : {e}"))?;
+            Some(p.display().to_string())
+        }
+        _ => None,
+    };
+    let old = db::lesson_set_cover(&state.db.lock(), id, new_path.as_deref()).map_err(err)?;
+    if let Some(old) = old.map(PathBuf::from) {
+        if old.starts_with(&media) {
+            let _ = std::fs::remove_file(old);
+        }
+    }
+    Ok(new_path)
+}
+
 // ---------- vocabulaire ----------
 
 #[tauri::command]

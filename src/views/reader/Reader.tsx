@@ -17,6 +17,8 @@ interface Range {
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+/** Hauteur (part de la zone visible) de la ligne où l'œil lit : le point de reprise y revient. */
+const READ_LINE = 0.3;
 
 export function Reader() {
   const lessonId = useApp((s) => s.lessonId);
@@ -50,6 +52,14 @@ export function Reader() {
   const [cinema, setCinema] = useState(false);
   const onPlayback = useCallback((s: PlaybackState) => setMediaPlaying(s.playing), []);
   const lanternPage = useRef(-1);
+  // mot où reprendre la lecture : souhaité (want) et déjà écrit (saved)
+  const anchorRef = useRef({ id: 0, want: 0, saved: 0 });
+  const restoredFor = useRef<number | null>(null);
+  const scrollTimer = useRef(0);
+  const ignoreScrollUntil = useRef(0);
+  const cursorNow = useRef(-1);
+  cursorNow.current = cursor;
+  const [resumeAt, setResumeAt] = useState(-1);
 
   // ---------- chargement ----------
   useEffect(() => {
@@ -69,12 +79,18 @@ export function Reader() {
         const p = paginate(d.tokens);
         setPage(Math.min(d.lesson.page, p.length - 1));
       })
-      .catch((e) => toast(errorText(e), "error"));
+      .catch(() => {
+        if (!alive) return;
+        // leçon supprimée entre-temps : on l'oublie
+        useApp.getState().forgetLesson(lessonId);
+        toast("Cette leçon n'existe plus.", "error");
+        go("library");
+      });
     void api().aiWarmup().catch(() => {});
     return () => {
       alive = false;
     };
-  }, [lessonId, toast]);
+  }, [lessonId, toast, go]);
 
   const lesson = data?.lesson;
   const tokens = useMemo(() => data?.tokens ?? [], [data]);
@@ -83,6 +99,86 @@ export function Reader() {
   const lang = lesson?.lang ?? "en";
 
   const statusOf = useCallback((k: string): number => terms[k]?.status ?? 0, [terms]);
+
+  // ---------- reprise : mot atteint, écrit au plus une fois par seconde ----------
+  useEffect(() => {
+    if (!data) return;
+    const id = data.lesson.id;
+    anchorRef.current = { id, want: data.lesson.anchor, saved: data.lesson.anchor };
+    const flush = () => {
+      const a = anchorRef.current;
+      if (a.id !== id || a.want === a.saved || a.want < 0) return;
+      a.saved = a.want;
+      void api().lessonUpdate(id, { anchor: a.want });
+    };
+    const timer = window.setInterval(flush, 1000);
+    window.addEventListener("pagehide", flush);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener("pagehide", flush);
+      flush();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data?.lesson.id]);
+
+  // le mot lu à voix haute (voix, audio ou vidéo) devient le point de reprise
+  useEffect(() => {
+    if (cursor >= 0) anchorRef.current.want = cursor;
+  }, [cursor]);
+
+  // à l'ouverture : retour au mot où l'on s'était arrêté, signalé par un bref halo
+  useLayoutEffect(() => {
+    if (!data || restoredFor.current === data.lesson.id) return;
+    restoredFor.current = data.lesson.id;
+    const a = data.lesson.anchor;
+    const range = pages[page];
+    if (!range || a <= range.start || a >= range.end) return;
+    const sc = scrollRef.current;
+    const el = pageRef.current?.querySelector(`[data-i="${a}"]`);
+    if (!sc || !el) return;
+    const top = el.getBoundingClientRect().top - sc.getBoundingClientRect().top + sc.scrollTop;
+    // ce défilement automatique ne doit pas déplacer le point de reprise
+    ignoreScrollUntil.current = performance.now() + 600;
+    sc.scrollTop = Math.max(0, top - sc.clientHeight * READ_LINE);
+    // avec un média, la lanterne montre déjà l'endroit
+    if (!(data.lesson.media_path && data.lesson.position > 0.5)) setResumeAt(a);
+  }, [data, pages, page]);
+  useEffect(() => {
+    if (resumeAt < 0) return;
+    const t = window.setTimeout(() => setResumeAt(-1), 2600);
+    return () => window.clearTimeout(t);
+  }, [resumeAt]);
+
+  /** Après un défilement : le mot prononcé s'il est visible, sinon le mot sur la ligne de lecture. */
+  const onReaderScroll = (e: React.UIEvent<HTMLDivElement>) => {
+    const sc = e.currentTarget;
+    setScrolled(sc.scrollTop > 90);
+    if (performance.now() < ignoreScrollUntil.current) return;
+    window.clearTimeout(scrollTimer.current);
+    scrollTimer.current = window.setTimeout(() => {
+      const range = pages[page];
+      const pg = pageRef.current;
+      if (!range || !pg) return;
+      const box = sc.getBoundingClientRect();
+      const cur = cursorNow.current;
+      const curEl = cur >= range.start && cur < range.end ? pg.querySelector(`[data-i="${cur}"]`) : null;
+      if (curEl) {
+        const r = curEl.getBoundingClientRect();
+        if (r.bottom > box.top && r.top < box.bottom) return;
+      }
+      if (sc.scrollTop < 40) {
+        anchorRef.current.want = range.start;
+        return;
+      }
+      const line = box.top + sc.clientHeight * READ_LINE;
+      for (const el of pg.querySelectorAll<HTMLElement>("[data-i]")) {
+        if (el.getBoundingClientRect().bottom > line) {
+          anchorRef.current.want = Number(el.dataset.i);
+          return;
+        }
+      }
+    }, 250);
+  };
 
   // ---------- expressions enregistrées ----------
   const phraseIndex = useMemo(() => {
@@ -261,9 +357,10 @@ export function Reader() {
       setPage(p);
       setRange(null);
       scrollRef.current?.scrollTo({ top: 0, behavior: "smooth" });
+      anchorRef.current.want = pages[p].start;
       void api().lessonUpdate(lesson.id, { page: p });
     },
-    [lesson, pages.length],
+    [lesson, pages],
   );
 
   const onPlayerPage = useCallback(
@@ -316,7 +413,10 @@ export function Reader() {
       if (added) toast(`${added} mot${added > 1 ? "s" : ""} rejoigne${added > 1 ? "nt" : ""} vos mots connus`, "light");
     } else {
       playerRef.current?.stop();
-      await api().lessonUpdate(lesson.id, { completed: true, page: 0 });
+      // leçon terminée : la prochaine lecture repart du début
+      playerRef.current?.forget();
+      anchorRef.current = { id: lesson.id, want: 0, saved: 0 };
+      await api().lessonUpdate(lesson.id, { completed: true, page: 0, position: 0, anchor: 0 });
       bump();
       const next = await findNext();
       setComplete({ ...session.current, next });
@@ -459,6 +559,7 @@ export function Reader() {
     if (selected) cls += range!.a === range!.b ? " sel" : " sel-range";
     if (ph) cls += ` ph p${ph.status}`;
     if (i === cursor) cls += " cur";
+    if (i === resumeAt) cls += " resume";
     if (glowKeys.has(t.k)) cls += " known-glow";
     current.push(
       <span key={i} className={cls} data-i={i} style={illum && st === 0 ? ({ "--d": `${((i - pr.start) / total) * 0.75}s` } as React.CSSProperties) : undefined}>
@@ -517,7 +618,7 @@ export function Reader() {
           />
         )}
 
-        <div className="reader-scroll" ref={scrollRef} onScroll={(e) => setScrolled((e.target as HTMLElement).scrollTop > 90)}>
+        <div className="reader-scroll" ref={scrollRef} onScroll={onReaderScroll}>
           <div className="reader-inner">
             <header className="reader-head">
               <div className="reader-crumb">

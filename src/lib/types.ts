@@ -42,6 +42,10 @@ export interface LessonSummary {
   new_words: number;
   known_pct: number;
   excerpt: string;
+  /** seconde atteinte dans l'audio ou la vidéo, et durée totale (0 si inconnue) */
+  position: number;
+  duration: number;
+  cover_path: string | null;
 }
 
 export interface Lesson {
@@ -59,6 +63,11 @@ export interface Lesson {
   word_count: number;
   page: number;
   completed: boolean;
+  position: number;
+  /** jeton (mot) où la lecture s'était arrêtée */
+  anchor: number;
+  duration: number;
+  cover_path: string | null;
 }
 
 export interface OpenedLesson {

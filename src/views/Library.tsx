@@ -1,25 +1,15 @@
 import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useMemo, useState } from "react";
-import { Icon, type IconName } from "../components/Icon";
+import { Cover } from "../components/Cover";
+import { Icon } from "../components/Icon";
 import { Menu, Orb, Segmented, Sheet, useGlow } from "../components/ui";
 import { api, errorText } from "../lib/api";
 import { confirmAsk } from "../lib/dialogs";
 import { STARTERS, langInfo } from "../lib/langs";
-import { formatNumber, useApp } from "../lib/store";
+import { formatDuration, formatNumber, useApp } from "../lib/store";
 import type { LessonSummary } from "../lib/types";
 
 type Filter = "all" | "text" | "audio" | "book" | "done";
-
-const KIND: Record<string, { label: string; icon: IconName }> = {
-  text: { label: "Texte", icon: "text" },
-  web: { label: "Article", icon: "globe" },
-  book: { label: "Livre", icon: "book" },
-  pdf: { label: "PDF", icon: "file" },
-  subtitles: { label: "Sous-titres", icon: "text" },
-  audio: { label: "Audio", icon: "wave" },
-  video: { label: "Vidéo", icon: "video" },
-  simplified: { label: "Simplifié", icon: "sparkle" },
-};
 
 function greeting() {
   const h = new Date().getHours();
@@ -32,34 +22,17 @@ export function pagesOf(words: number) {
   return Math.max(1, Math.round(words / 230));
 }
 
-export function Cover({ hue, kind, big = false }: { hue: number; kind: string; big?: boolean }) {
-  const k = KIND[kind] ?? KIND.text;
-  // position de la « source de lumière » dérivée de la teinte
-  const x = 25 + ((hue * 7) % 50);
-  const y = 20 + ((hue * 13) % 45);
-  return (
-    <div
-      className={`cover ${big ? "big" : ""}`}
-      style={{
-        background: `radial-gradient(120% 90% at ${x}% ${y}%, hsl(${(hue + 30) % 360} 85% 78% / .95), transparent 55%),
-          linear-gradient(150deg, hsl(${hue} 55% 42%), hsl(${(hue + 40) % 360} 60% 22%))`,
-      }}
-    >
-      <span className="cover-sun" style={{ left: `${x}%`, top: `${y}%` }} />
-      <span className="cover-kind">
-        <Icon name={k.icon} size={14} />
-        {k.label}
-      </span>
-    </div>
-  );
+/** Avancement (0 à 1) : à la seconde près pour l'audio et la vidéo, à la page près sinon. */
+export function progressOf(l: LessonSummary): number {
+  if (l.completed) return 1;
+  if (l.has_media && l.duration > 0) return Math.min(1, l.position / l.duration);
+  return l.page / pagesOf(l.word_count);
 }
 
 function LessonCard({ l, index, onDelete, onRename }: { l: LessonSummary; index: number; onDelete(): void; onRename(): void }) {
   const openLesson = useApp((s) => s.openLesson);
   const glow = useGlow<HTMLDivElement>();
   const [menu, setMenu] = useState(false);
-  const pages = pagesOf(l.word_count);
-  const progress = l.completed ? 100 : Math.round((l.page / pages) * 100);
   return (
     <motion.div
       layout
@@ -72,7 +45,7 @@ function LessonCard({ l, index, onDelete, onRename }: { l: LessonSummary; index:
       onMouseMove={glow.onMouseMove}
     >
       <button className="lesson-hit" onClick={() => openLesson(l.id)} aria-label={`Ouvrir ${l.title}`} />
-      <Cover hue={l.hue} kind={l.kind} />
+      <Cover lesson={l} progress={progressOf(l)} editable />
       <div className="lesson-body">
         {l.collection && <span className="lesson-collection">{l.collection}</span>}
         <h3 className="lesson-title">{l.title}</h3>
@@ -93,7 +66,6 @@ function LessonCard({ l, index, onDelete, onRename }: { l: LessonSummary; index:
           </div>
           <span className="num">{l.known_pct} %</span>
         </div>
-        {progress > 0 && progress < 100 && <div className="lesson-progress" style={{ width: `${progress}%` }} />}
       </div>
       <div className="lesson-menu">
         <Menu
@@ -165,6 +137,7 @@ export function Library() {
   const remove = async (l: LessonSummary) => {
     if (!(await confirmAsk(`Supprimer « ${l.title} » ? Les mots appris sont conservés.`, "Supprimer la leçon", "Supprimer"))) return;
     await api().lessonDelete(l.id);
+    useApp.getState().forgetLesson(l.id);
     toast("Leçon supprimée");
     bump();
   };
@@ -218,7 +191,7 @@ export function Library() {
               animate={{ opacity: 1, y: 0 }}
               transition={{ type: "spring", stiffness: 220, damping: 26 }}
             >
-              <Cover hue={resume.hue} kind={resume.kind} big />
+              <Cover lesson={resume} big progress={progressOf(resume)} />
               <div className="hero-body">
                 <span className="eyebrow">Reprendre la lecture</span>
                 <h2 className="display">{resume.title}</h2>
@@ -228,7 +201,10 @@ export function Library() {
                     <Icon name="book" size={17} /> Continuer
                   </button>
                   <span className="muted num">
-                    Page {Math.min(resume.page + 1, pagesOf(resume.word_count))} sur {pagesOf(resume.word_count)} · {resume.new_words} mots nouveaux
+                    {resume.has_media && resume.position > 1
+                      ? `Reprise à ${formatDuration(resume.position)}${resume.duration ? ` sur ${formatDuration(resume.duration)}` : ""}`
+                      : `Page ${Math.min(resume.page + 1, pagesOf(resume.word_count))} sur ${pagesOf(resume.word_count)}`}{" "}
+                    · {resume.new_words} mots nouveaux
                   </span>
                 </div>
               </div>

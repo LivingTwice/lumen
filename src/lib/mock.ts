@@ -105,6 +105,9 @@ export function createMockApi(): Api {
       new_words: uniq.size,
       known_pct: keys.length ? Math.floor((rec * 100) / keys.length) : 100,
       excerpt: l.text.slice(0, 220).replace(/\n/g, " "),
+      position: l.position ?? 0,
+      duration: l.duration ?? 0,
+      cover_path: l.cover_path ?? null,
     };
   };
 
@@ -163,6 +166,10 @@ export function createMockApi(): Api {
         word_count: tokenize(n.text, n.lang).filter((t) => t.w).length,
         page: 0,
         completed: false,
+        position: 0,
+        anchor: 0,
+        duration: 0,
+        cover_path: null,
         created_at: Date.now() / 1000,
       };
       db.lessons.push(l);
@@ -177,6 +184,20 @@ export function createMockApi(): Api {
     async lessonDelete(id) {
       db.lessons = db.lessons.filter((l) => l.id !== id);
       commit();
+    },
+    async lessonSetCover(id, data) {
+      const l = db.lessons.find((x) => x.id === id);
+      if (!l) throw "Leçon introuvable";
+      // dans le navigateur, l'image est gardée telle quelle (adresse data:)
+      let url: string | null = null;
+      if (data) {
+        let bin = "";
+        for (let i = 0; i < data.length; i += 0x8000) bin += String.fromCharCode(...data.subarray(i, i + 0x8000));
+        url = `data:image/jpeg;base64,${btoa(bin)}`;
+      }
+      l.cover_path = url;
+      commit();
+      return url;
     },
     async termSet(u: TermUpdate) {
       const term = normalize(u.term);

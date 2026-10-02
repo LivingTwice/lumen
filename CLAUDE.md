@@ -28,6 +28,7 @@ Lumen est une application Mac pour apprendre les langues en lisant et en écouta
 - Sélection d'un mot au clic, d'une **expression** en glissant sur plusieurs mots.
 - **Panneau du mot** (`WordPanel`) : dictionnaire hors ligne (forme de base, sens), puis sens précis en contexte par l'IA, en streaming. Traduction de la phrase entière.
 - **« Terminer la page »** : les mots nouveaux non consultés passent en connus.
+- **Reprise exacte**, même après fermeture de l'app : page (`page`), mot atteint (`anchor`, mot lu à voix haute ou mot sur la ligne de lecture à 30 % de la hauteur) et seconde atteinte dans l'audio ou la vidéo (`position`). Écriture au plus une fois par seconde, puis à chaque pause, saut ou sortie. À l'ouverture : retour au mot avec un bref halo, ou lanterne sur le mot et média calé à la seconde. Leçon terminée ou média écouté jusqu'au bout : on repart du début. La dernière leçon ouverte (réglage `last_lesson`) reste « en cours » d'un lancement à l'autre.
 - **Simplifier** : l'IA réécrit la leçon au niveau A1, A2, B1 ou B2 et crée une nouvelle leçon.
 - **Raccourcis** : flèches (mot suivant ou précédent), `1` `2` `3` (statut), `K` ou `4` (connu), `X` (ignorer), `0` (remettre à nouveau), Espace (lecture audio), Entrée (terminer la page), Échap (fermer, quitter le mode cinéma), PageUp et PageDown.
 
@@ -47,7 +48,8 @@ Lumen est une application Mac pour apprendre les langues en lisant et en écouta
 
 ### Le reste
 
-- **Bibliothèque** : leçons par langue et collection, pourcentage de mots connus, mots nouveaux.
+- **Bibliothèque** : leçons par langue et collection, pourcentage de mots connus, mots nouveaux, avancement (bande de lumière au bas de la couverture, à la seconde près pour l'audio et la vidéo).
+- **Couvertures** (`components/Cover.tsx`) : image choisie par l'utilisateur (petit bouton au survol, réduite à 1 280 px en JPEG puis copiée dans `media/`, colonne `cover_path`), sinon miniature YouTube (`maxresdefault` puis `hqdefault`), sinon œuvre SVG générée et reproductible (aube, halo, aurore ou prisme, graine = identifiant, couleurs = teinte) avec grain photographique.
 - **Vocabulaire** : recherche, filtres (tous, en apprentissage, connus, ignorés, expressions), changement de statut, export CSV compatible Anki.
 - **Progrès** : mots connus, paliers, mots lus par jour, temps d'écoute (30 jours).
 - **Réglages** : thème (suit le Mac par défaut), typographie de lecture, voix, modèles IA (téléchargement avec reprise, suppression), vidéos en ligne (navigateur pour les cookies, état des composants), import LingQ, mises à jour, « Revoir l'accueil ».
@@ -87,6 +89,7 @@ src/
     Sidebar.tsx           Navigation, langue active, compteur de mots connus, carte de mise à jour
     UpdateCard.tsx        Carte « Lumen X est disponible »
     LingqCard.tsx         Avancement de l'import LingQ dans la barre latérale
+    Cover.tsx             Couvertures (image choisie, miniature YouTube, œuvre générée)
     ui.tsx                Composants partagés (Orb, Segmented, Switch, Sheet, Menu, Toasts, CountUp, useGlow)
     Icon.tsx              Icônes SVG maison
   lib/
@@ -99,6 +102,7 @@ src/
     tts.ts                Voix du système, événements de frontière de mot
     updater.ts            Store des mises à jour (check, install, restart)
     lingq.ts              Store de l'import LingQ (analyse, import, progression)
+    covers.ts             Liens YouTube, choix et réduction des images de couverture
     langs.ts              Langues, salutations, textes de départ (STARTERS)
     profiles.ts           Profils IA (Léger, Équilibré, Maximum)
     dialogs.ts            Confirmations natives
@@ -206,7 +210,7 @@ Si la commande demande une nouvelle permission (plugin, fenêtre), l'ajouter à 
 ### Rust
 
 - Base de données : `state.db.lock()` (parking_lot), jamais de verrou tenu pendant un appel IA ou réseau.
-- **Migrations** : uniquement additives, dans `db.rs`, en testant l'existence de la colonne via `pragma_table_info` (exemple : `video_path`). Ne jamais casser une base existante : les utilisateurs mettent à jour sans réinstaller.
+- **Migrations** : uniquement additives, dans `db.rs`, avec `add_column(conn, table, colonne, déclaration)` (teste l'existence via `pragma_table_info`). Ne jamais casser une base existante : les utilisateurs mettent à jour sans réinstaller (le test `resume_position_and_cover` ouvre une base d'ancienne version).
 - **Offsets de texte en UTF-16** pour correspondre aux index des chaînes JavaScript.
 - **Normalisation identique** entre `text.rs` et `tokenize.ts` (minuscules, suppression de U+0301 et U+0300, apostrophes unifiées, élisions it/fr/pt/ca). Toute modification d'un côté se reporte de l'autre.
 - Ne jamais lier whisper.cpp dans l'application principale : la transcription reste dans `lumen-whisper`.
