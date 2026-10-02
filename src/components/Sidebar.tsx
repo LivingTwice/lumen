@@ -6,6 +6,7 @@ import { useApp, type View } from "../lib/store";
 import type { LangCode, LessonSummary } from "../lib/types";
 import { Icon, type IconName } from "./Icon";
 import { CountUp, Menu, Orb } from "./ui";
+import { LingqCard } from "./LingqCard";
 import { UpdateCard } from "./UpdateCard";
 
 const NAV: { view: View; label: string; icon: IconName }[] = [
@@ -142,6 +143,7 @@ export function Sidebar() {
 
       <div className="side-bottom">
         <UpdateCard />
+        <LingqCard />
         <button className="ai-card" style={{ textAlign: "left", cursor: "pointer" }} onClick={() => go("settings")}>
           <span className="eyebrow">IA locale</span>
           <span className="ai-row">

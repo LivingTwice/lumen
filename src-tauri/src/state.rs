@@ -13,5 +13,6 @@ pub struct AppState {
     pub db: Mutex<Connection>,
     pub dicts: Dicts,
     pub ai: Engine,
+    /// téléchargements de modèles et import LingQ en cours (annulables)
     pub downloads: Mutex<HashMap<String, Arc<AtomicBool>>>,
 }

@@ -46,6 +46,10 @@ function save(db: Db) {
 const today = () => new Date().toISOString().slice(0, 10);
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+let lingqCancelled = false;
+const STARTERS_MOCK =
+  "Every morning, Martha climbed the narrow stairs of the old lighthouse. From the top, the sea looked endless and calm.\n\nOne day, she found a letter hidden between two stones. The paper was damp, but the words could still be read.";
+
 const MOCK_DICT: Record<string, [string, string, string]> = {
   lighthouse: ["Nom commun", "ˈlaɪt.haʊs", "Phare"],
   stairs: ["Nom commun", "stɛəz", "Escalier"],
@@ -112,7 +116,7 @@ export function createMockApi(): Api {
     return text;
   };
 
-  return {
+  const mock: Api = {
     async appInfo() {
       return { version: "0.1.0 (aperçu navigateur)", data_dir: "(navigateur)", platform: "web", ytdlp: false, transcriber: false, dict_langs: ["en", "es", "it", "de", "pt", "ru"] };
     },
@@ -313,10 +317,59 @@ export function createMockApi(): Api {
     async lessonFetchVideo() {
       throw "Le téléchargement de vidéos fonctionne dans l'application Mac.";
     },
+    async lingqScan(key) {
+      await sleep(900);
+      if (key.trim().length < 10) throw "LingQ refuse cette clé API. Vérifiez-la sur lingq.com puis collez-la à nouveau.";
+      return [
+        { lang: "en", known_words: 4210, lingqs: 812, courses: [{ id: 1, title: "Mini Stories", lessons: 60 }, { id: 2, title: "Mes imports", lessons: 14 }], lessons: 74 },
+        { lang: "it", known_words: 930, lingqs: 205, courses: [{ id: 3, title: "Italiano per principianti", lessons: 24 }], lessons: 24 },
+      ];
+    },
+    async lingqImport(_key, plan, onEvent) {
+      lingqCancelled = false;
+      const report = { words: 0, lessons: 0, skipped: 0, failed: 0, audio_failed: 0, cancelled: false };
+      const sample: [string, number, string][] = [["lighthouse", 4, "phare"], ["narrow", 2, "étroit"], ["endless", 1, "sans fin"], ["damp", 3, "humide"]];
+      for (const lang of plan.langs) {
+        if (plan.vocab) {
+          for (const stage of ["known", "ignored", "cards"] as const) {
+            onEvent({ type: "stage", lang, stage });
+            for (let i = 1; i <= 10 && !lingqCancelled; i++) {
+              await sleep(90);
+              onEvent({ type: "progress", done: i * 100, total: 1000 });
+            }
+          }
+          for (const [term, status, translation] of sample) {
+            if (!db.terms[`${lang}|${term}`]) {
+              db.terms[`${lang}|${term}`] = { term, status: status as Term["status"], translation, note: "", lemma: "", context: "", updated_at: Date.now() / 1000 };
+              report.words++;
+            }
+          }
+        }
+        if (plan.lessons && !lingqCancelled) {
+          onEvent({ type: "stage", lang, stage: "lessons" });
+          const titles = ["Une lettre dans le phare", "Le gardien", "La réponse"];
+          for (let i = 0; i < titles.length && !lingqCancelled; i++) {
+            onEvent({ type: "progress", done: i, total: titles.length });
+            await sleep(400);
+            await mock.lessonCreate({ lang, title: titles[i], text: STARTERS_MOCK, collection: "Mini Stories (LingQ)" });
+            report.lessons++;
+            onEvent({ type: "lesson", title: titles[i], course: "Mini Stories (LingQ)" });
+          }
+          onEvent({ type: "progress", done: titles.length, total: titles.length });
+        }
+      }
+      report.cancelled = lingqCancelled;
+      commit();
+      return report;
+    },
+    async lingqCancel() {
+      lingqCancelled = true;
+    },
     mediaUrl(path) {
       return path;
     },
   };
+  return mock;
 }
 
 // Pour réinitialiser l'aperçu : localStorage.removeItem("lumen-mock-db")

@@ -9,6 +9,7 @@ import { formatBytes, useApp } from "../lib/store";
 import { loadVoices, sayWord, voicesFor } from "../lib/tts";
 import { useUpdate } from "../lib/updater";
 import type { LangCode, ModelRow } from "../lib/types";
+import { LingqSection } from "./LingqSection";
 
 function ModelLine({ m }: { m: ModelRow }) {
   const dl = useApp((s) => s.downloads[m.id]);
@@ -301,6 +302,8 @@ export function Settings() {
               </div>
             </div>
           </section>
+
+          <LingqSection />
 
           <section className="set-section">
             <h2>Apparence</h2>

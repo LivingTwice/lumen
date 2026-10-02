@@ -43,13 +43,14 @@ Lumen est une application Mac pour apprendre les langues en lisant et en écouta
 - Audio et vidéo locaux (MP3, M4A, WAV, FLAC, OGG, MP4, MOV, MKV…), transcrits par Whisper.
 - **YouTube** et autres sites : audio `ba[ext=m4a]` pour la transcription, vidéo `bv*[vcodec^=avc1][height<=1080]` téléchargée en parallèle. Si YouTube exige une vérification, nouvel essai avec `--cookies-from-browser` (réglage `youtube_browser`). Bouton « Télécharger la vidéo » sur les anciennes leçons sans image.
 - Glisser-déposer n'importe où dans la fenêtre.
+- **LingQ** (Réglages › LingQ, clé API personnelle) : mots connus et ignorés, LingQ (traductions, notes, contexte), leçons de tous les cours (créés, importés et suivis) avec audio. Les horodatages de LingQ sont par phrase : `lingq.rs` les répartit sur les mots. Fusion sans recul de statut (niveaux LingQ 1-3 → 1-3, niveau 4 et ✓ → connu), activité du jour non touchée, leçons dédupliquées par la colonne `ext_id` (`lingq:<id>`). L'import continue en arrière-plan (carte dans la barre latérale).
 
 ### Le reste
 
 - **Bibliothèque** : leçons par langue et collection, pourcentage de mots connus, mots nouveaux.
 - **Vocabulaire** : recherche, filtres (tous, en apprentissage, connus, ignorés, expressions), changement de statut, export CSV compatible Anki.
 - **Progrès** : mots connus, paliers, mots lus par jour, temps d'écoute (30 jours).
-- **Réglages** : thème (suit le Mac par défaut), typographie de lecture, voix, modèles IA (téléchargement avec reprise, suppression), vidéos en ligne (navigateur pour les cookies, état des composants), mises à jour, « Revoir l'accueil ».
+- **Réglages** : thème (suit le Mac par défaut), typographie de lecture, voix, modèles IA (téléchargement avec reprise, suppression), vidéos en ligne (navigateur pour les cookies, état des composants), import LingQ, mises à jour, « Revoir l'accueil ».
 - **Accueil** (`Onboarding`) : aube animée (ciel en parallaxe, astre qui se lève à l'horizon, poussières de lumière, révélation lettre par lettre). Clair = aube, sombre = nuit chaude. **Jamais de fond bleu.** Étapes : bienvenue, langues, profil IA, prêt, puis éclosion lumineuse vers la première leçon.
 - **Mises à jour automatiques** : vérification 8 s après le démarrage puis toutes les 6 h, carte discrète dans la barre latérale, installation en un clic puis redémarrage.
 
@@ -64,6 +65,7 @@ Interface React (src/)                     Rust (src-tauri/src/)
                                                             ──► media.rs   ──► lumen-whisper (sidecar)
                                                             ──► tools.rs   (yt-dlp, QuickJS)
                                                             ──► models.rs  (téléchargements GGUF)
+                                                            ──► lingq.rs   (import LingQ)
 ```
 
 - **Un seul point d'entrée vers le natif** : `src/lib/api.ts`. L'interface `Api` a deux implémentations : Tauri (`invoke`) et un **backend simulé** (`src/lib/mock.ts`) utilisé dans le navigateur.
@@ -71,6 +73,7 @@ Interface React (src/)                     Rust (src-tauri/src/)
 - **Pourquoi un sidecar Whisper** : llama.cpp et whisper.cpp embarquent chacun leur propre copie de ggml ; les lier dans le même binaire provoque des conflits de symboles. `lumen-whisper` est lancé par `media.rs` et répond en lignes JSON.
 - **IA** : prompts ChatML avec un bloc `<think></think>` vide (désactive le raisonnement de Qwen3.5), exemples few-shot, indices du dictionnaire. Les requêtes sont **interruptibles** par un compteur d'époque (une nouvelle sélection annule la précédente). Les réponses mot sont mises en cache (table `tcache`, clé versionnée `w3`).
 - **Médias** : copiés dans `$APPDATA/media/`, servis à la WebView par le protocole `asset` (portée limitée à `$APPDATA/media/**`).
+- **LingQ** : API non documentée, lue avec prudence (champs optionnels, reprises sur 429 et 5xx). v2 pour `known-words` et `ignored-words`, v3 pour `cards`, `collections/my`, `search?shelf=my_lessons`, `collections/{id}/lessons` et `lessons/{id}` (`tokenizedText`, `audioUrl`). La clé n'est envoyée qu'à `www.lingq.com`. Lire une leçon par l'API la fait remonter dans l'étagère « Continuer » de LingQ.
 - **Dictionnaires** : Wiktionnaire français via kaikki.org, compilés en SQLite, livrés compressés dans `src-tauri/resources/dicts/*.db.gz`, décompressés au premier usage.
 - **Données utilisateur** : `~/Library/Application Support/app.lumen.reader/` (`lumen.db`, `models/`, `media/`, dictionnaires décompressés).
 
@@ -83,6 +86,7 @@ src/
   components/
     Sidebar.tsx           Navigation, langue active, compteur de mots connus, carte de mise à jour
     UpdateCard.tsx        Carte « Lumen X est disponible »
+    LingqCard.tsx         Avancement de l'import LingQ dans la barre latérale
     ui.tsx                Composants partagés (Orb, Segmented, Switch, Sheet, Menu, Toasts, CountUp, useGlow)
     Icon.tsx              Icônes SVG maison
   lib/
@@ -94,6 +98,7 @@ src/
     importers.ts          Extraction : web, EPUB, PDF, sous-titres
     tts.ts                Voix du système, événements de frontière de mot
     updater.ts            Store des mises à jour (check, install, restart)
+    lingq.ts              Store de l'import LingQ (analyse, import, progression)
     langs.ts              Langues, salutations, textes de départ (STARTERS)
     profiles.ts           Profils IA (Léger, Équilibré, Maximum)
     dialogs.ts            Confirmations natives
@@ -104,6 +109,7 @@ src/
     Vocabulary.tsx        Vocabulaire
     Progress.tsx          Progrès
     Settings.tsx          Réglages
+    LingqSection.tsx      Réglages › LingQ (clé API, analyse du compte, import)
     reader/
       Reader.tsx          Lecteur : pages, sélection, raccourcis, lanterne, Simplifier
       WordPanel.tsx       Panneau du mot (dictionnaire + IA)
@@ -129,6 +135,7 @@ src-tauri/
     media.rs              Transcription (sidecar), horodatages, yt-dlp
     tools.rs              yt-dlp et QuickJS gérés (installation, mise à jour hebdomadaire)
     models.rs             Catalogue et téléchargement des modèles avec reprise
+    lingq.rs              Import LingQ (vocabulaire, cours, leçons, audio)
     state.rs              AppState partagé
   lumen-whisper/          Sidecar de transcription
   resources/dicts/        Dictionnaires compressés (≈ 66 Mo)
@@ -174,6 +181,7 @@ cd src-tauri && cargo test --lib   # tests unitaires
 ```
 
 - Test réel de l'IA : `LUMEN_TEST_MODEL=/chemin/Qwen3.5-2B-Q4_K_M.gguf cargo test --release --lib live -- --ignored --nocapture`.
+- Test réel de LingQ (base jetable, rien n'est écrit dans Lumen) : `LUMEN_LINGQ_KEY=… cargo test --lib lingq_live -- --ignored --nocapture`.
 - En mode `npm run dev`, `window.__lumen = { api, useApp }` est exposé pour piloter l'état depuis la console.
 
 ## Règles de code

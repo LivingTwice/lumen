@@ -765,3 +765,106 @@
   box-shadow: 0 0 8px var(--light);
 }
 
+/* ---------- LingQ ---------- */
+
+.link {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  color: var(--accent);
+  font-weight: 550;
+  text-decoration: none;
+  cursor: pointer;
+}
+.link:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.set-row .grow span .link {
+  font-size: inherit;
+  color: var(--accent);
+}
+.key-field {
+  flex: 1;
+  min-width: 0;
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+.key-field .input {
+  padding: 8px 44px 8px 12px;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 13px;
+  letter-spacing: 0.02em;
+}
+.key-field .input::placeholder {
+  font-family: var(--font-ui);
+  letter-spacing: 0;
+}
+.key-field .icon-btn {
+  position: absolute;
+  right: 4px;
+  width: 30px;
+  height: 30px;
+}
+.lingq-wait {
+  font-size: 12.5px;
+  color: var(--muted);
+}
+.lingq-error {
+  font-size: 12.5px;
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 7%, transparent);
+}
+.lingq-account {
+  margin-top: 12px;
+}
+.lingq-progress {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding: 20px 18px;
+}
+.lingq-progress .grow {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.lingq-progress strong {
+  font-weight: 560;
+}
+.lingq-progress .bar {
+  margin: 10px 0 7px;
+}
+.lingq-progress .num {
+  font-size: 12.5px;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.lingq-report {
+  background: var(--light-veil);
+}
+.lingq-check {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  color: var(--ok);
+  background: color-mix(in srgb, var(--ok) 14%, transparent);
+}
+.lingq-go {
+  align-items: flex-end;
+  background: var(--bg-sunk);
+}
+.lingq-note {
+  flex: 1;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+

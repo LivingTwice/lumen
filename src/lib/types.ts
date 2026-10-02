@@ -154,3 +154,43 @@ export interface TermQuery {
   limit: number;
   offset: number;
 }
+
+// ---------- import LingQ ----------
+
+export interface LingqCourse {
+  id: number;
+  title: string;
+  lessons: number;
+}
+
+/** Contenu du compte LingQ pour une langue. */
+export interface LingqLang {
+  lang: LangCode;
+  known_words: number;
+  lingqs: number;
+  courses: LingqCourse[];
+  lessons: number;
+}
+
+export interface LingqPlan {
+  langs: LangCode[];
+  vocab: boolean;
+  lessons: boolean;
+  audio: boolean;
+}
+
+export type LingqStage = "known" | "ignored" | "cards" | "lessons";
+
+export type LingqEvent =
+  | { type: "stage"; lang: LangCode; stage: LingqStage }
+  | { type: "progress"; done: number; total: number }
+  | { type: "lesson"; title: string; course: string };
+
+export interface LingqReport {
+  words: number;
+  lessons: number;
+  skipped: number;
+  failed: number;
+  audio_failed: number;
+  cancelled: boolean;
+}

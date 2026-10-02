@@ -2,6 +2,7 @@ mod ai;
 mod commands;
 mod db;
 mod dict;
+mod lingq;
 mod media;
 mod models;
 mod state;
@@ -63,6 +64,9 @@ pub fn run() {
             commands::import_media,
             commands::import_youtube,
             commands::lesson_fetch_video,
+            commands::lingq_scan,
+            commands::lingq_import,
+            commands::lingq_cancel,
         ])
         .run(tauri::generate_context!())
         .expect("erreur au lancement de Lumen");

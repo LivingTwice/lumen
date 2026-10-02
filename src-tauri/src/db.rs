@@ -10,7 +10,6 @@ use serde::{Deserialize, Serialize};
 use crate::text;
 
 pub const STATUS_KNOWN: i64 = 4;
-#[allow(dead_code)]
 pub const STATUS_IGNORED: i64 = 5;
 
 pub fn open(path: &Path) -> Result<Connection> {
@@ -70,6 +69,13 @@ pub fn open(path: &Path) -> Result<Connection> {
         .exists([])?;
     if !has_video {
         conn.execute_batch("ALTER TABLE lessons ADD COLUMN video_path TEXT;")?;
+    }
+    // identifiant d'origine des leçons importées (ex. « lingq:123 ») pour ne pas les dupliquer
+    let has_ext: bool = conn
+        .prepare("SELECT 1 FROM pragma_table_info('lessons') WHERE name='ext_id'")?
+        .exists([])?;
+    if !has_ext {
+        conn.execute_batch("ALTER TABLE lessons ADD COLUMN ext_id TEXT; CREATE INDEX IF NOT EXISTS lessons_ext ON lessons(ext_id);")?;
     }
     Ok(conn)
 }
@@ -317,6 +323,16 @@ pub fn lesson_source(c: &Connection, id: i64) -> Result<(String, Option<String>)
     Ok(c.query_row("SELECT source, video_path FROM lessons WHERE id=?1", [id], |r| Ok((r.get(0)?, r.get(1)?)))?)
 }
 
+/// Leçon déjà importée depuis cette origine ?
+pub fn lesson_by_ext(c: &Connection, ext_id: &str) -> Result<Option<i64>> {
+    Ok(c.query_row("SELECT id FROM lessons WHERE ext_id=?1", [ext_id], |r| r.get(0)).optional()?)
+}
+
+pub fn lesson_set_ext(c: &Connection, id: i64, ext_id: &str, completed: bool) -> Result<()> {
+    c.execute("UPDATE lessons SET ext_id=?1, completed=?2 WHERE id=?3", params![ext_id, completed as i64, id])?;
+    Ok(())
+}
+
 // ---------- termes (mots et expressions) ----------
 
 #[derive(Serialize, Clone, Debug)]
@@ -442,6 +458,67 @@ pub fn terms_mark_known(c: &mut Connection, lang: &str, keys: &[String], words_r
     bump(&tx, lang, "words_read", words_read)?;
     tx.commit()?;
     Ok(added)
+}
+
+/// Terme venu d'une autre application (LingQ).
+pub struct ImportedTerm {
+    pub term: String,
+    pub status: i64,
+    pub translation: String,
+    pub note: String,
+    pub context: String,
+}
+
+/// Statut retenu quand un mot existe déjà : jamais de recul, et un mot
+/// ignoré d'un côté ne remplace pas un mot étudié de l'autre.
+fn merge_status(current: i64, incoming: i64) -> i64 {
+    if current == STATUS_IGNORED || incoming == STATUS_IGNORED {
+        return current;
+    }
+    current.max(incoming)
+}
+
+/// Fusionne des termes importés : un mot absent est ajouté, un mot présent
+/// garde le statut le plus avancé et ne complète que ses champs vides.
+/// L'activité du jour n'est pas touchée (ce ne sont pas des mots appris
+/// aujourd'hui). Renvoie le nombre de termes ajoutés ou modifiés.
+pub fn terms_import(c: &mut Connection, lang: &str, items: &[ImportedTerm]) -> Result<i64> {
+    let tx = c.transaction()?;
+    let t = now();
+    let mut changed = 0i64;
+    {
+        let mut get = tx.prepare_cached("SELECT status,translation,note,context FROM terms WHERE lang=?1 AND term=?2")?;
+        let mut ins = tx.prepare_cached(
+            "INSERT INTO terms(lang,term,status,translation,note,context,created_at,updated_at) VALUES(?1,?2,?3,?4,?5,?6,?7,?7)",
+        )?;
+        let mut upd = tx.prepare_cached(
+            "UPDATE terms SET status=?3, translation=?4, note=?5, context=?6, updated_at=?7 WHERE lang=?1 AND term=?2",
+        )?;
+        for it in items {
+            let term = text::normalize(&it.term);
+            if term.is_empty() || term.chars().count() > 120 || !(1..=5).contains(&it.status) {
+                continue;
+            }
+            let prev: Option<(i64, String, String, String)> = get
+                .query_row(params![lang, term], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))
+                .optional()?;
+            match prev {
+                None => {
+                    changed += ins.execute(params![lang, term, it.status, it.translation, it.note, it.context, t])? as i64;
+                }
+                Some((status, tr, note, ctx)) => {
+                    let keep = |old: &String, new: &String| if old.is_empty() { new.clone() } else { old.clone() };
+                    let next = (merge_status(status, it.status), keep(&tr, &it.translation), keep(&note, &it.note), keep(&ctx, &it.context));
+                    if next != (status, tr, note, ctx) {
+                        upd.execute(params![lang, term, next.0, next.1, next.2, next.3, t])?;
+                        changed += 1;
+                    }
+                }
+            }
+        }
+    }
+    tx.commit()?;
+    Ok(changed)
 }
 
 #[derive(Deserialize, Debug)]
@@ -595,6 +672,36 @@ mod tests {
         assert_eq!(total, 1);
         assert_eq!(items[0].translation, "chat");
         assert!(export_csv(&c, "en").unwrap().contains("\"cat\",\"chat\""));
+        drop(c);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn import_never_goes_backwards() {
+        let path = std::env::temp_dir().join(format!("lumen-db-import-{}.db", std::process::id()));
+        let mut c = open(&path).unwrap();
+        let it = |term: &str, status: i64, tr: &str| ImportedTerm {
+            term: term.into(), status, translation: tr.into(), note: String::new(), context: String::new(),
+        };
+        term_set(&c, &TermUpdate { lang: "en".into(), term: "cat".into(), status: 4, translation: None, note: None, lemma: None, context: None }).unwrap();
+        term_set(&c, &TermUpdate { lang: "en".into(), term: "dog".into(), status: 5, translation: None, note: None, lemma: None, context: None }).unwrap();
+        let n = terms_import(&mut c, "en", &[it("Cat", 2, "chat"), it("dog", 1, "chien"), it("Bird", 3, "oiseau"), it("the", 4, ""), it("", 4, "")]).unwrap();
+        assert_eq!(n, 4);
+        let all = terms_for_keys(&c, "en", &["cat".into(), "dog".into(), "bird".into(), "the".into()]).unwrap();
+        assert_eq!((all["cat"].status, all["cat"].translation.as_str()), (4, "chat"));
+        assert_eq!(all["dog"].status, 5);
+        assert_eq!(all["bird"].status, 3);
+        // un nouvel import identique ne change rien, et l'activité du jour reste vide
+        assert_eq!(terms_import(&mut c, "en", &[it("bird", 3, "oiseau")]).unwrap(), 0);
+        assert_eq!(stats(&c, "en").unwrap().today.lingqs, 0);
+        // leçon importée retrouvée par son origine
+        let id = lesson_create(&c, &NewLesson {
+            lang: "en".into(), title: "L".into(), collection: "C".into(), kind: "text".into(),
+            source: String::new(), text: "Hello there.".into(), media_path: None, timings: None, video_path: None,
+        }).unwrap();
+        lesson_set_ext(&c, id, "lingq:42", true).unwrap();
+        assert_eq!(lesson_by_ext(&c, "lingq:42").unwrap(), Some(id));
+        assert_eq!(lesson_by_ext(&c, "lingq:43").unwrap(), None);
         drop(c);
         let _ = std::fs::remove_file(path);
     }

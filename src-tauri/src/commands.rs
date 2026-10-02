@@ -13,6 +13,7 @@ use tauri::State;
 use crate::ai::{self, Priority};
 use crate::db::{self, LessonPatch, NewLesson, TermQuery, TermUpdate};
 use crate::dict::DictResult;
+use crate::lingq;
 use crate::media::{self, ImportEvent};
 use crate::models::{self, DownloadEvent};
 use crate::state::AppState;
@@ -602,4 +603,45 @@ pub async fn lesson_fetch_video(state: State<'_, AppState>, id: i64, on_event: C
     let p = path.display().to_string();
     db::lesson_set_video(&state.db.lock(), id, &p).map_err(err)?;
     Ok(p)
+}
+
+// ---------- LingQ ----------
+
+/// Clé de l'import LingQ dans la table des travaux annulables.
+const LINGQ_JOB: &str = "lingq-import";
+
+#[tauri::command]
+pub async fn lingq_scan(key: String) -> R<Vec<lingq::LangSummary>> {
+    lingq::scan(&key).await.map_err(err)
+}
+
+#[tauri::command]
+pub async fn lingq_import(
+    state: State<'_, AppState>,
+    key: String,
+    plan: lingq::ImportPlan,
+    on_event: Channel<lingq::LingqEvent>,
+) -> R<lingq::Report> {
+    let cancel = Arc::new(AtomicBool::new(false));
+    {
+        let mut jobs = state.downloads.lock();
+        if jobs.contains_key(LINGQ_JOB) {
+            return Err("Un import LingQ est déjà en cours.".into());
+        }
+        jobs.insert(LINGQ_JOB.to_string(), cancel.clone());
+    }
+    let res = lingq::import(&state.db, &state.data_dir, &key, &plan, &cancel, |e| {
+        let _ = on_event.send(e);
+    })
+    .await;
+    state.downloads.lock().remove(LINGQ_JOB);
+    res.map_err(err)
+}
+
+#[tauri::command]
+pub async fn lingq_cancel(state: State<'_, AppState>) -> R<()> {
+    if let Some(flag) = state.downloads.lock().get(LINGQ_JOB) {
+        flag.store(true, Ordering::Relaxed);
+    }
+    Ok(())
 }
