@@ -60,8 +60,10 @@ Lumen est une application Mac pour apprendre les langues en lisant et en écouta
 
 ### Import
 
-- Texte collé, page web (extraction de l'article), EPUB (un chapitre par leçon), PDF, TXT, Markdown, sous-titres SRT et VTT.
-- Audio et vidéo locaux (MP3, M4A, WAV, FLAC, OGG, MP4, MOV, MKV…) et YouTube, transcrits par `media::lesson_transcript` : Whisper repère chaque mot dans le temps (et enregistre le son décodé, `lumen-whisper --pcm`) ; si **Qwen3-ASR** est installé (catégorie `asrtext`) et connaît la langue (23 langues de Lumen, `asr::language_name` ; sauf et lv lt sk sl hr bg uk), il écrit le texte et le minutage de Whisper y est recalé (`align_timings`, texte écarté sous 50 % de mots retrouvés ; en cas d'échec, Whisper seul). Mesuré sur des leçons LingQ italiennes : récits lus, 0,3 à 2,6 % de mots faux et aucune phrase sautée, contre 4,5 à 9,7 % et 47 mots sautés pour Whisper ; conversation libre de 22 min, erreurs comparables, sans les boucles de Whisper. Durée : environ le double de Whisper seul (37 s pour 5 min sur M2 Pro). Qwen3-ASR découpe le son à ±30 s dans les silences (`asr::split_on_silence`), impose la langue (`language Italian<asr_text>`), coupe les boucles (`repeated_tail`), et chaque morceau passe sur le GPU à son tour (`Engine::exclusive`) : le chat garde la main entre deux.
+- Texte collé, EPUB (un chapitre par leçon), PDF, TXT, Markdown, sous-titres SRT et VTT.
+- **Lien universel** (onglet « Lien », `link.rs`, commandes `link_probe` puis `import_link`) : Lumen regarde ce qu'il y a derrière n'importe quelle adresse. Sites vidéo et audio connus (`VIDEO_SITES`, `AUDIO_SITES`) : yt-dlp d'abord (`media::yt_info`, `-J --flat-playlist` : vidéo, playlist, chaîne dont on garde l'onglet des vidéos). Autres pages : les médias qu'elles déclarent (Open Graph, balises audio et vidéo, JSON-LD, lecteurs YouTube, Vimeo, Dailymotion, SoundCloud intégrés), à défaut les adresses de fichiers écrites dans leur code (jamais une radio en direct : `live_host`, en-têtes `icy-`) ; page d'émission (`og:type` autre qu'`article`) : son flux RSS, mieux renseigné ; en dernier recours yt-dlp. Flux RSS et Atom (`feed_info`), Apple Podcasts (annuaire `itunes.apple.com/lookup`), fichier direct (téléchargé tel quel, `link::download`, sans yt-dlp). **Spotify** (fichiers protégés contre la copie) : données publiques de son lecteur intégré (`open.spotify.com/embed/…`, `__NEXT_DATA__`) ; épisode et podcast retrouvés dans le flux public du podcast par l'annuaire d'Apple (`find_episode` : titre, durée, date) ; morceau, album, playlist : le même morceau sur YouTube (`ytsearch1:`). Exclusivité Spotify : refus expliqué.
+- **Choix de ce qu'on importe** (`LinkFound` dans `ImportSheet.tsx`) : le texte de l'article (Readability), le son ou la vidéo transcrits, ou **le son avec le texte de la page** (`reference` de `media::lesson_transcript` : le texte est gardé tel quel et la lanterne calée dessus si la moitié de ses mots s'entendent, sinon transcription). Podcast, playlist, album : liste à cocher, importée élément par élément (un échec n'arrête pas les suivants). Couverture téléchargée et réduite par `sips` (1 280 px, JPEG), sauf YouTube qui a ses miniatures. Un lien collé dans l'onglet « Texte » propose de l'ouvrir comme lien.
+- Audio et vidéo locaux (MP3, M4A, WAV, FLAC, OGG, MP4, MOV, MKV…) et en ligne (lien universel), transcrits par `media::lesson_transcript` : Whisper repère chaque mot dans le temps (et enregistre le son décodé, `lumen-whisper --pcm`) ; si **Qwen3-ASR** est installé (catégorie `asrtext`) et connaît la langue (23 langues de Lumen, `asr::language_name` ; sauf et lv lt sk sl hr bg uk), il écrit le texte et le minutage de Whisper y est recalé (`align_timings`, texte écarté sous 50 % de mots retrouvés ; en cas d'échec, Whisper seul). Mesuré sur des leçons LingQ italiennes : récits lus, 0,3 à 2,6 % de mots faux et aucune phrase sautée, contre 4,5 à 9,7 % et 47 mots sautés pour Whisper ; conversation libre de 22 min, erreurs comparables, sans les boucles de Whisper. Durée : environ le double de Whisper seul (37 s pour 5 min sur M2 Pro). Qwen3-ASR découpe le son à ±30 s dans les silences (`asr::split_on_silence`), impose la langue (`language Italian<asr_text>`), coupe les boucles (`repeated_tail`), et chaque morceau passe sur le GPU à son tour (`Engine::exclusive`) : le chat garde la main entre deux.
 - **Texte aéré comme sur LingQ** (`media::airy`, à chaque transcription) : une phrase par paragraphe ; une phrase d'au plus deux mots rejoint la suivante ; une phrase de plus de 55 mots (parole spontanée peu ponctuée) est coupée à sa plus longue pause, à défaut après une virgule. Les horodatages suivent (positions UTF-16).
 - **YouTube** et autres sites : audio `ba[ext=m4a]` pour la transcription, vidéo `bv*[vcodec^=avc1][height<=1080]` téléchargée en parallèle. Si YouTube exige une vérification, nouvel essai avec `--cookies-from-browser` (réglage `youtube_browser`). Bouton « Télécharger la vidéo » sur les anciennes leçons sans image.
 - Glisser-déposer n'importe où dans la fenêtre.
@@ -92,7 +94,8 @@ Lumen est une application Mac pour apprendre les langues en lisant et en écouta
 - **Vocabulaire** : recherche, filtres (tous, en apprentissage, connus, ignorés, expressions), changement de statut, export CSV compatible Anki.
 - **Progrès** : mots connus, paliers, mots lus par jour, temps d'écoute (30 jours).
 - **Réglages** : langue de l'interface, thème (suit le Mac par défaut), typographie de lecture, voix, modèles IA (téléchargement avec reprise, suppression), vidéos en ligne (navigateur pour les cookies, état des composants), sauvegarde, import LingQ, mises à jour, « Revoir l'accueil ».
-- **Accueil** (`Onboarding`) : aube animée (ciel en parallaxe, astre qui se lève à l'horizon, poussières de lumière, révélation lettre par lettre). Clair = aube, sombre = nuit chaude. **Jamais de fond bleu.** Étapes : bienvenue, langues, profil IA, prêt (avec l'interrupteur de sauvegarde), puis éclosion lumineuse vers la première leçon. Depuis la bienvenue, « retrouver ma progression » : sauvegardes trouvées, restauration, profil IA (les modèles ne voyagent pas), « Bon retour ».
+- **Petit guide** (`components/Guide.tsx`, `styles/guide.css`) : quatre cartes illustrées et animées pour les néophytes : les couleurs des mots, toucher puis terminer la page, la lanterne, l'IA locale et ses quatre rôles (le traducteur Qwen3.5, l'oreille Whisper, la plume Qwen3-ASR, la voix Supertonic, avec leur état sur ce Mac). Phrase d'exemple « la lumière du matin » dans la langue étudiée (`SAMPLES` : `it es de pt ru fr en`, sinon l'italien). Proposé une seule fois par une carte du panneau du mot (réglage `guide_seen`), puis par le lien « Comment marche Lumen ? » ; aussi dans Réglages › À propos et par « Qu'est-ce qu'un modèle ? » (Réglages › IA locale, ouvre la carte des modèles). État `guide` du store (`openGuide(carte)`, `closeGuide`). Le guide capte le clavier (phase de capture) : Entrée ou les flèches ne touchent jamais la page derrière. Scènes figées si macOS réduit les animations.
+- **Accueil** (`Onboarding`) : aube animée (ciel en parallaxe, astre qui se lève à l'horizon, poussières de lumière, révélation lettre par lettre). Clair = aube, sombre = nuit chaude. **Jamais de fond bleu.** Étapes : bienvenue, langues, profil IA (avec « Qu'est-ce qu'un modèle ? » qui se déplie), prêt (avec l'interrupteur de sauvegarde), puis éclosion lumineuse vers la première leçon. Depuis la bienvenue, « retrouver ma progression » : sauvegardes trouvées, restauration, profil IA (les modèles ne voyagent pas), « Bon retour ».
 - **Mises à jour automatiques** : vérification 8 s après le démarrage puis toutes les 6 h, carte discrète dans la barre latérale, installation en un clic puis redémarrage.
 
 ## Architecture
@@ -106,6 +109,7 @@ Interface React (src/)                     Rust (src-tauri/src/)
                                                             ──► media.rs   ──► lumen-whisper (sidecar)
                                                             ──► tools.rs   (yt-dlp, QuickJS)
                                                             ──► models.rs  (téléchargements GGUF)
+                                                            ──► link.rs    (lien universel : pages, podcasts, Spotify)
                                                             ──► lingq.rs   (import LingQ)
                                                             ──► voice.rs   ──► sherpa-onnx-offline-tts (voix)
                                                             ──► backup.rs  ──► iCloud Drive/Lumen (sauvegarde)
@@ -134,6 +138,7 @@ src/
     Sidebar.tsx           Navigation, langue active, compteur de mots connus, carte de mise à jour
     AddToPlaylist.tsx     Feuille « Ajouter à une playlist » (depuis la bibliothèque)
     UpdateCard.tsx        Carte « Lumen X est disponible »
+    Guide.tsx             Petit guide : quatre cartes animées (principe, page, lanterne, modèles d'IA)
     BackupCard.tsx        Proposition de sauvegarde, alerte de sauvegarde interrompue
     LingqCard.tsx         Avancement de l'import LingQ dans la barre latérale
     Cover.tsx             Couvertures (image choisie, miniature YouTube, œuvre générée, mosaïque des playlists)
@@ -166,7 +171,7 @@ src/
     Chat.tsx              Vue Chat : liste des conversations, conversation ouverte
     chat/
       ChatThread.tsx      Conversation (messages, réflexion, champ, commandes /, effort), aussi dans le lecteur
-    ImportSheet.tsx       Feuille d'import (toutes sources, étapes de progression)
+    ImportSheet.tsx       Feuille d'import (texte, lien universel et son choix, fichiers, audio et vidéo ; étapes de progression)
     Vocabulary.tsx        Vocabulaire
     Progress.tsx          Progrès
     Settings.tsx          Réglages
@@ -185,6 +190,7 @@ src/
     reader.css            Lecteur, lanterne, vidéo, cinéma
     onboarding.css        Accueil (variables .ob pour clair et sombre)
     chat.css              Chat (vue, panneau du lecteur, champ, réflexion)
+    guide.css             Petit guide et son invitation dans le panneau du mot
 
 src-tauri/
   tauri.conf.json         Fenêtre, bundle (DMG, ressources, sidecar), updater (clé publique, URL)
@@ -204,6 +210,7 @@ src-tauri/
     media.rs              Transcription (sidecar), horodatages, yt-dlp
     tools.rs              yt-dlp et QuickJS gérés (installation, mise à jour hebdomadaire)
     models.rs             Catalogue et téléchargement des modèles avec reprise
+    link.rs               Lien universel : analyse (pages, yt-dlp, flux RSS, Apple Podcasts, Spotify), téléchargement, couverture
     lingq.rs              Import LingQ (vocabulaire, cours, leçons, audio)
     voice.rs              Voix naturelle : moteur sherpa-onnx, Supertonic 3, nettoyage du son, cache
     backup.rs             Sauvegarde (iCloud Drive ou dossier choisi), historique, ménage, restauration, état d'envoi iCloud
@@ -258,6 +265,7 @@ cd src-tauri && cargo test --lib   # tests unitaires
 - Test réel de la voix (télécharge le moteur dans un dossier jetable) : `LUMEN_VOICE_MODEL=/chemin/sherpa-onnx-supertonic-3-tts-int8-2026-05-11 cargo test --lib voice_live -- --ignored --nocapture` ; téléchargement complet comme dans l'app : `cargo test --lib voice_download_live -- --ignored --nocapture` ; audio d'une leçon (+ recalage si `LUMEN_ASR_MODEL` est donné ; copier d'abord `binaries/lumen-whisper-aarch64-apple-darwin` en `target/debug/deps/lumen-whisper`) : `cargo test --lib lesson_audio_live -- --ignored --nocapture`.
 - Test réel du recalage : `LUMEN_TEST_TEXT=texte.txt LUMEN_TEST_WORDS=mots.json LUMEN_TEST_LANG=it cargo test --lib realign_live -- --ignored --nocapture` (mots : sortie `done` de `lumen-whisper`) ; même chose pour la mise en page aérée : `airy_live` (`LUMEN_AIRY_OUT` pour enregistrer le texte).
 - Test réel de Qwen3-ASR : `LUMEN_ASR_DIR=dossier (modèle + mmproj) LUMEN_TEST_AUDIO=a.wav,b.wav LUMEN_TEST_LANG=it cargo test --release --lib asr_live -- --ignored --nocapture` (WAV f32 16 kHz mono : `afconvert -f WAVE -d LEF32@16000 -c 1`). Import complet comme dans l'app (Whisper, Qwen3-ASR, recalage, mise en page ; copier d'abord `binaries/lumen-whisper-aarch64-apple-darwin` en `target/release/deps/lumen-whisper`) : `LUMEN_ASR_MODEL=ggml-….bin LUMEN_ASR_DIR=… LUMEN_TEST_AUDIO=son.mp3 cargo test --release --lib transcript_live -- --ignored --nocapture`.
+- Test réel du lien universel : `LUMEN_TEST_URL="lien1 lien2" cargo test --lib link_live -- --ignored --nocapture` (analyse seule, affiche ce qui est trouvé) ; téléchargements (épisode RFI, couverture réduite) : `cargo test --lib link_download_live -- --ignored --nocapture` ; texte de la page gardé ou écarté selon ce qu'on entend (Whisper réel ; copier d'abord le sidecar en `target/debug/deps/lumen-whisper`) : `LUMEN_ASR_MODEL=ggml-….bin LUMEN_TEST_AUDIO=son.mp3 LUMEN_TEST_LANG=fr cargo test --lib reference_live -- --ignored --nocapture`.
 - Test réel de la sauvegarde sur une copie des données (dossier jetable, rien n'est écrit dans iCloud ni dans les données d'origine) : `LUMEN_BACKUP_DATA="$HOME/Library/Application Support/app.lumen.reader" cargo test --lib backup_live -- --ignored --nocapture` ; état d'envoi iCloud (lecture seule) : `cargo test --lib icloud_state_live -- --ignored --nocapture`.
 - En mode `npm run dev`, `window.__lumen = { api, useApp }` est exposé pour piloter l'état depuis la console. Le backend simulé propose une sauvegarde fictive « iMac du salon » pour essayer la restauration.
 
@@ -301,6 +309,7 @@ Si la commande demande une nouvelle permission (plugin, fenêtre), l'ajouter à 
 - Palette chaude et lumineuse : or, ambre, crème le jour ; nuit chaude et brune le soir. Pas de bleu dominant sur l'accueil.
 - Effets de lumière subtils et signifiants (halo de sélection, lanterne, reflets) plutôt que décoratifs ou bruyants.
 - Le lecteur doit rester confortable : pas d'animation qui distrait pendant la lecture.
+- **motion et CSS ne se partagent jamais `transform`** : un élément animé par motion (`layout`, `initial`/`animate`) ne porte ni `transition` CSS sur `transform` ni survol en `transform` ; on l'enveloppe (`.lesson-cell` animée autour de `.lesson-card` et de son survol). Liste filtrée : `AnimatePresence mode="popLayout"` (enfants qui transmettent leur `ref`), `layout="position"`, transition `layout` sans délai ; le décalage d'une carte à l'autre ne vaut que pour la première apparition. Les polices sont chargées avant le premier affichage (`fontsReady` dans `main.tsx`) pour que rien ne change de hauteur à leur arrivée.
 - État global dans `store.ts` ; état local dans le composant. Réglages persistés par `setSetting(clé, valeur)` (chaînes), valeurs par défaut dans `DEFAULTS`.
 - Les composants qui dépendent d'une leçon (`Player`, `VideoStage`) sont rendus avec `key={lesson.id}` pour repartir à zéro d'une leçon à l'autre.
 - **WebKit** (moteur de la fenêtre Lumen) : ne pas étirer (`align-items: stretch`) un élément qui tient sa hauteur d'`aspect-ratio` dans un conteneur flex dont la hauteur change ; au retour, WebKit garde l'ancienne hauteur étirée (c'est ce qui faisait disparaître la vidéo après le plein écran). Vérifier une mise en page délicate dans WebKit, pas seulement dans Chrome.

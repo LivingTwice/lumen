@@ -1,4 +1,4 @@
-import type { AppInfo, BackupInfo, BackupRestored, BackupStatus, ChatEvent, ChatOptions, ChatPatch, ChatReply, ChatSummary, ChatThread, DictResult, DownloadEvent, ImportEvent, LangCode, LessonSummary, LingqEvent, LingqLang, LingqPlan, LingqReport, ModelRow, NewLesson, OpenedLesson, Playlist, PlaylistPatch, Stats, Term, TermQuery, WordAnswer, VoicedLesson } from "./types";
+import type { AppInfo, BackupInfo, BackupRestored, BackupStatus, ChatEvent, ChatOptions, ChatPatch, ChatReply, ChatSummary, ChatThread, DictResult, DictStatus, DownloadEvent, ImportEvent, LangCode, LessonSummary, LinkInfo, LinkMedia, LingqEvent, LingqLang, LingqPlan, LingqReport, ModelRow, NewLesson, OpenedLesson, Playlist, PlaylistPatch, Stats, Term, TermQuery, WordAnswer, VoicedLesson } from "./types";
 
 export const isTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
@@ -44,7 +44,12 @@ export interface Api {
   stats(lang: LangCode): Promise<Stats>;
   activityAdd(lang: LangCode, wordsRead: number, listenSecs: number): Promise<void>;
   exportVocab(lang: LangCode, path: string): Promise<void>;
-  dictLookup(lang: LangCode, word: string): Promise<DictResult>;
+  /** `after` : la suite de la phrase (japonais, vietnamien : mots de plusieurs jetons) */
+  dictLookup(lang: LangCode, word: string, after?: string): Promise<DictResult>;
+  /** état du dictionnaire de la langue (le télécharge s'il manque) */
+  dictStatus(lang: LangCode): Promise<DictStatus>;
+  /** un dictionnaire vient d'arriver (ou son téléchargement a échoué) */
+  dictListen(onChange: (lang: string) => void): Promise<() => void>;
   aiWord(lang: LangCode, word: string, sentence: string, onPiece: (t: string) => void): Promise<WordAnswer>;
   aiSentence(lang: LangCode, sentence: string, onPiece: (t: string) => void): Promise<string>;
   aiSimplify(lang: LangCode, text: string, level: string, onPiece: (t: string) => void): Promise<string>;
@@ -68,10 +73,12 @@ export interface Api {
   /** crée l'audio d'une leçon de texte avec la voix naturelle */
   lessonVoice(id: number, onEvent: (e: ImportEvent) => void): Promise<VoicedLesson>;
   lessonVoiceCancel(id: number): Promise<void>;
-  fetchUrl(url: string): Promise<string>;
   readFile(path: string): Promise<ArrayBuffer>;
   importMedia(lang: LangCode, path: string, title: string | null, onEvent: (e: ImportEvent) => void): Promise<number>;
-  importYoutube(lang: LangCode, url: string, onEvent: (e: ImportEvent) => void): Promise<number>;
+  /** regarde ce qu'il y a derrière un lien : article, vidéo, podcast, Spotify… */
+  linkProbe(url: string, onEvent: (e: ImportEvent) => void): Promise<LinkInfo>;
+  /** importe un son ou une vidéo trouvé par linkProbe ; `text` : texte de la page, gardé si le son le suit */
+  importLink(lang: LangCode, item: LinkMedia, text: string | null, onEvent: (e: ImportEvent) => void): Promise<number>;
   lessonFetchVideo(id: number, onEvent: (e: ImportEvent) => void): Promise<string>;
   /** Réécoute l'audio et recale la lanterne sur le texte existant. Renvoie les horodatages. */
   lessonResync(id: number, onEvent: (e: ImportEvent) => void): Promise<string>;
@@ -119,7 +126,12 @@ async function createTauriApi(): Promise<Api> {
     stats: (lang) => invoke("stats", { lang }),
     activityAdd: (lang, wordsRead, listenSecs) => invoke("activity_add", { lang, wordsRead, listenSecs }),
     exportVocab: (lang, path) => invoke("export_vocab", { lang, path }),
-    dictLookup: (lang, word) => invoke("dict_lookup", { lang, word }),
+    dictLookup: (lang, word, after) => invoke("dict_lookup", { lang, word, after: after ?? null }),
+    dictStatus: (lang) => invoke("dict_status", { lang }),
+    dictListen: async (onChange) => {
+      const { listen } = await import("@tauri-apps/api/event");
+      return listen<string>("dict", (e) => onChange(e.payload));
+    },
     aiWord: (lang, word, sentence, onPiece) =>
       invoke("ai_word", { lang, word, sentence, onEvent: ch<{ type: string; text: string }>((e) => onPiece(e.text)) }),
     aiSentence: (lang, sentence, onPiece) =>
@@ -141,11 +153,11 @@ async function createTauriApi(): Promise<Api> {
     ttsSay: (lang, text, prefetch) => invoke("tts_say", { lang, text, prefetch }),
     lessonVoice: (id, onEvent) => invoke("lesson_voice", { id, onEvent: ch<ImportEvent>(onEvent) }),
     lessonVoiceCancel: (id) => invoke("model_cancel", { id: `voice:${id}` }),
-    fetchUrl: (url) => invoke("fetch_url", { url }),
     readFile: (path) => invoke<ArrayBuffer>("read_file", { path }),
     importMedia: (lang, path, title, onEvent) =>
       invoke("import_media", { lang, path, title, onEvent: ch<ImportEvent>(onEvent) }),
-    importYoutube: (lang, url, onEvent) => invoke("import_youtube", { lang, url, onEvent: ch<ImportEvent>(onEvent) }),
+    linkProbe: (url, onEvent) => invoke("link_probe", { url, onEvent: ch<ImportEvent>(onEvent) }),
+    importLink: (lang, item, text, onEvent) => invoke("import_link", { lang, item, text, onEvent: ch<ImportEvent>(onEvent) }),
     lessonFetchVideo: (id, onEvent) => invoke("lesson_fetch_video", { id, onEvent: ch<ImportEvent>(onEvent) }),
     lessonResync: (id, onEvent) => invoke("lesson_resync", { id, onEvent: ch<ImportEvent>(onEvent) }),
     lingqScan: (key) => invoke("lingq_scan", { key }),

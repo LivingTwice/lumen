@@ -38,6 +38,8 @@ export const DEFAULTS: Record<string, string> = {
   langs: "",
   lang: "",
   onboarded: "",
+  // petit guide : "1" une fois ouvert ou écarté (son invitation ne revient plus)
+  guide_seen: "",
   // sauvegarde : "" tant que l'utilisateur n'a pas choisi ; dossier vide = iCloud Drive
   backup_on: "",
   backup_dir: "",
@@ -66,9 +68,13 @@ interface AppStore {
   knownCount: number;
   /** rejoue l'écran d'accueil depuis les Réglages */
   replay: boolean;
+  /** petit guide ouvert, sur cette carte (null : fermé) */
+  guide: number | null;
 
   init(): Promise<void>;
   setReplay(v: boolean): void;
+  openGuide(card?: number): void;
+  closeGuide(): void;
   setting(key: string): string;
   setSetting(key: string, value: string): Promise<void>;
   lang(): LangCode;
@@ -111,9 +117,19 @@ export const useApp = create<AppStore>((set, get) => ({
   libraryVersion: 0,
   knownCount: 0,
   replay: false,
+  guide: null,
 
   setReplay(v) {
     set({ replay: v });
+  },
+
+  openGuide(card = 0) {
+    set({ guide: card });
+  },
+
+  closeGuide() {
+    set({ guide: null });
+    if (get().settings.guide_seen !== "1") void get().setSetting("guide_seen", "1");
   },
 
   async init() {

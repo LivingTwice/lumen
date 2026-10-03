@@ -5,7 +5,7 @@ import { Orb, Switch } from "../components/ui";
 import { api, errorText } from "../lib/api";
 import { formatWhen, pickBackupFolder, reloadProgress, restoreStage, useBackup } from "../lib/backup";
 import { count, t, type UiLang } from "../lib/i18n";
-import { LANGS, STARTERS, coreLangs, langLower, starterCollection, type LangInfo } from "../lib/langs";
+import { LANGS, STARTERS, featuredLangs, langLower, starterCollection, type LangInfo } from "../lib/langs";
 import { PROFILES } from "../lib/profiles";
 import { formatBytes, formatNumber, useApp } from "../lib/store";
 import type { BackupInfo, BackupRestored, LangCode } from "../lib/types";
@@ -70,6 +70,8 @@ export function Onboarding() {
   // en relecture, les langues déjà choisies restent cochées
   const [langs, setLangs] = useState<LangCode[]>(() => (replay ? useApp.getState().langs() : []));
   const [profile, setProfile] = useState("balanced");
+  // « Qu'est-ce qu'un modèle ? » déplié à l'étape de l'IA
+  const [what, setWhat] = useState(false);
   const [bloom, setBloom] = useState<{ x: number; y: number } | null>(null);
   const stageRef = useRef<HTMLDivElement>(null);
   const orbRef = useRef<HTMLDivElement>(null);
@@ -126,6 +128,7 @@ export function Onboarding() {
   const showHorizon = n === 0 || n === 3;
 
   const toggle = (c: LangCode) => setLangs((l) => (l.includes(c) ? l.filter((x) => x !== c) : [...l, c]));
+  const others = LANGS.filter((l) => !featuredLangs().includes(l.code));
 
   const langCard = (l: LangInfo, delay: number) => {
     const on = langs.includes(l.code);
@@ -146,7 +149,7 @@ export function Onboarding() {
         </span>
         <span className="meta">
           <span className="dot-lang" style={{ background: l.color }} />
-          {coreLangs().includes(l.code) && l.name !== l.native ? `${l.name} · ${l.native}` : l.name}
+          {featuredLangs().includes(l.code) && l.name !== l.native ? `${l.name} · ${l.native}` : l.name}
         </span>
         <AnimatePresence>
           {on && (
@@ -351,12 +354,17 @@ export function Onboarding() {
           {n === 1 && (
             <motion.div key="1" className="ob-step form" {...stepAnim}>
               <h2>{t("Quelles langues voulez-vous apprendre ?", "Which languages do you want to learn?")}</h2>
-              <p className="ob-sub">{t("Chacune a sa bibliothèque et son vocabulaire. Vous pourrez en ajouter ou en retirer plus tard.", "Each one has its own library and vocabulary. You can add or remove languages later.")}</p>
+              <p className="ob-sub">
+                {t(
+                  "Chacune a son dictionnaire hors ligne, sa bibliothèque et son vocabulaire. Vous pourrez en ajouter ou en retirer plus tard.",
+                  "Each one has its own offline dictionary, library and vocabulary. You can add or remove languages later.",
+                )}
+              </p>
               <div className="ob-langs-scroll">
-                <div className="ob-group">{t("Avec dictionnaire hors ligne", "With an offline dictionary")}</div>
-                <div className="ob-grid langs">{LANGS.filter((l) => coreLangs().includes(l.code)).map((l, i) => langCard(l, 0.15 + i * 0.06))}</div>
-                <div className="ob-group">{t("Avec la traduction par l'IA et la voix naturelle", "With AI translation and the natural voice")}</div>
-                <div className="ob-grid langs compact">{LANGS.filter((l) => !coreLangs().includes(l.code)).map((l, i) => langCard(l, 0.5 + i * 0.025))}</div>
+                <div className="ob-group">{t("Les plus étudiées", "Most studied")}</div>
+                <div className="ob-grid langs">{LANGS.filter((l) => featuredLangs().includes(l.code)).map((l, i) => langCard(l, 0.15 + i * 0.06))}</div>
+                <div className="ob-group">{t(`Et ${others.length} autres langues`, `And ${others.length} more languages`)}</div>
+                <div className="ob-grid langs compact">{others.map((l, i) => langCard(l, 0.5 + i * 0.025))}</div>
               </div>
               <div className="ob-actions">
                 <button className="ob-link" onClick={() => setN(0)}>
@@ -378,6 +386,30 @@ export function Onboarding() {
                   "It translates every word in its context, without ever sending anything online. The model downloads while you start reading.",
                 )}
               </p>
+              <button className="ob-what" onClick={() => setWhat((w) => !w)} aria-expanded={what}>
+                <Icon name="bulb" size={15} /> {t("Qu'est-ce qu'un modèle ?", "What is a model?")}
+                <motion.span className="chev" animate={{ rotate: what ? 180 : 0 }} transition={{ duration: 0.3, ease: EASE }}>
+                  <Icon name="chevron" size={14} />
+                </motion.span>
+              </button>
+              <AnimatePresence initial={false}>
+                {what && (
+                  <motion.div
+                    className="ob-explain"
+                    initial={{ height: 0, opacity: 0 }}
+                    animate={{ height: "auto", opacity: 1 }}
+                    exit={{ height: 0, opacity: 0 }}
+                    transition={{ duration: 0.45, ease: EASE }}
+                  >
+                    <p>
+                      {t(
+                        "C'est le « cerveau » de l'IA : un gros fichier qui a lu des milliards de phrases et appris à les comprendre. Plus il est grand, plus il saisit les nuances, mais plus il pèse et plus il demande de mémoire. Il travaille sur votre Mac, même sans Internet, et vous pourrez en changer à tout moment dans les Réglages.",
+                        "It's the AI's “brain”: a big file that has read billions of sentences and learned to understand them. The bigger it is, the more nuance it catches, but the more space and memory it needs. It works on your Mac, even offline, and you can switch at any time in Settings.",
+                      )}
+                    </p>
+                  </motion.div>
+                )}
+              </AnimatePresence>
               <div className="ob-grid profiles">
                 {PROFILES.map((p, i) => (
                   <motion.button

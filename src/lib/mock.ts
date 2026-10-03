@@ -3,6 +3,7 @@
 // par le backend Rust.
 import type { Api, TermUpdate } from "./api";
 import { t } from "./i18n";
+import { LANGS, bundledDict } from "./langs";
 import { tokenize, normalize } from "./tokenize";
 import type {
   BackupCounts,
@@ -14,6 +15,8 @@ import type {
   LangCode,
   Lesson,
   LessonSummary,
+  LinkInfo,
+  LinkMedia,
   ModelRow,
   NewLesson,
   Playlist,
@@ -140,6 +143,26 @@ export function createMockApi(): Api {
     };
   };
 
+  // dictionnaires : ceux qui ne sont pas livrés « se téléchargent » en une seconde et demie
+  const dictListeners = new Set<(lang: string) => void>();
+  const dictReady = new Set<string>();
+  const dictFetching = new Set<string>();
+  const dictFetch = (lang: string) => {
+    const id = `${t("fr", "en")}:${lang}`;
+    if (dictReady.has(id) || dictFetching.has(id)) return;
+    dictFetching.add(id);
+    setTimeout(() => {
+      dictFetching.delete(id);
+      dictReady.add(id);
+      dictListeners.forEach((f) => f(lang));
+    }, 1500);
+  };
+  const dictState = (lang: string) => {
+    const id = `${t("fr", "en")}:${lang}`;
+    const bundled = bundledDict(lang);
+    return { exists: lang !== t("fr", "en"), ready: bundled || dictReady.has(id), downloading: dictFetching.has(id), bundled };
+  };
+
   // sauvegarde : ce navigateur, et une sauvegarde fictive d'un autre Mac pour essayer la restauration
   const backupListeners = new Set<(s: BackupStatus) => void>();
   const backupCounts = (): BackupCounts => {
@@ -194,7 +217,7 @@ export function createMockApi(): Api {
         platform: "web",
         ytdlp: false,
         transcriber: false,
-        dict_langs: t("en es it de pt ru", "it es de pt ru fr").split(" "),
+        dict_langs: LANGS.map((l) => l.code).filter((c) => c !== t("fr", "en")),
       };
     },
     async settingsGet() {
@@ -380,11 +403,28 @@ export function createMockApi(): Api {
       commit();
     },
     async exportVocab() {},
-    async dictLookup(_lang, word) {
+    async dictLookup(lang, word) {
       await sleep(30);
+      const st = dictState(lang);
+      if (st.exists && !st.ready) {
+        dictFetch(lang);
+        return { entries: [], pending: true };
+      }
       const d = MOCK_DICT[normalize(word)];
       if (!d) return { entries: [] };
       return { entries: [{ word: normalize(word), pos: t(d[0], d[3]), ipa: d[1], glosses: [t(d[2], d[4])] }] };
+    },
+    async dictStatus(lang) {
+      const st = dictState(lang);
+      if (st.exists && !st.ready) {
+        dictFetch(lang);
+        return dictState(lang);
+      }
+      return st;
+    },
+    async dictListen(onChange) {
+      dictListeners.add(onChange);
+      return () => dictListeners.delete(onChange);
     },
     async aiWord(_lang, word, _sentence, onPiece) {
       if (!db.installed.some((m) => m.startsWith("qwen"))) throw t("NO_MODEL:Aucun modèle de traduction n'est installé. Ouvrez Réglages › IA locale.", "NO_MODEL:No translation model is installed. Open Settings › Local AI.");
@@ -524,17 +564,57 @@ export function createMockApi(): Api {
       // l'aperçu navigateur n'a pas le moteur : la voix du système prend le relais
       throw t("NO_VOICE: la voix naturelle fonctionne dans l'application Mac", "NO_VOICE: the natural voice works in the Mac app");
     },
-    async fetchUrl() {
-      throw t("L'import de pages web fonctionne dans l'application Mac.", "Importing web pages works in the Mac app.");
-    },
     async readFile() {
       throw t("La lecture de fichiers fonctionne dans l'application Mac.", "Reading files works in the Mac app.");
     },
     async importMedia() {
       throw t("La transcription fonctionne dans l'application Mac.", "Transcription works in the Mac app.");
     },
-    async importYoutube() {
-      throw t("L'import YouTube fonctionne dans l'application Mac.", "YouTube import works in the Mac app.");
+    async linkProbe(url, onEvent) {
+      onEvent({ type: "stage", stage: "probe" });
+      await sleep(900);
+      const raw = url.trim();
+      if (!raw.includes(".")) throw t("Cette adresse n'est pas valide.", "This address isn't valid.");
+      const page = /^https?:\/\//.test(raw) ? raw : `https://${raw}`;
+      const u = page.toLowerCase();
+      const empty: LinkInfo = { url: page, title: "", site: "", image: "", html: "", media: [], list: false, via: "", note: "" };
+      const day = (i: number) => new Date(Date.now() - i * 7 * 86400e3).toISOString().slice(0, 10);
+      const episodes = (show: string): LinkMedia[] =>
+        ["The lighthouse keeper", "A night at sea", "Back to the village", "The storm", "Morning fishermen", "Last light"].map((title, i) => ({
+          url: `https://cdn.example/ep${i}.mp3`,
+          title,
+          duration: 1260 + i * 137,
+          video: false,
+          direct: true,
+          image: "",
+          date: day(i),
+          page,
+          collection: show,
+        }));
+      if (u.includes("spotify") && /track|album|playlist/.test(u)) {
+        const songs = ["Clair de lune", "La mer", "Le phare"].map((title) => ({ url: `ytsearch1:${title}`, title: `${title} · Martha`, duration: 214, video: false, direct: false, image: "", date: "", page, collection: "Lumière" }));
+        return u.includes("track") ? { ...empty, title: "Clair de lune", site: "Martha", media: songs.slice(0, 1), via: "youtube" } : { ...empty, title: "Lumière", site: "Martha", media: songs, list: true, via: "youtube" };
+      }
+      if (u.includes("spotify")) return { ...empty, title: "The lighthouse keeper", site: "Slow Stories", media: episodes("Slow Stories").slice(0, 1), via: "rss" };
+      if (u.includes("youtu"))
+        return { ...empty, title: "A walk by the lighthouse", site: "Easy Stories", media: [{ url: page, title: "A walk by the lighthouse", duration: 754, video: true, direct: false, image: "", date: day(1), page, collection: "" }] };
+      if (/podcast|rss|feed|apple/.test(u)) return { ...empty, title: "Slow Stories", site: "Slow Stories", media: episodes("Slow Stories"), list: true };
+      const body = STARTERS_MOCK.split("\n\n").map((p) => `<p>${p}</p>`).join("");
+      return {
+        ...empty,
+        title: "The lighthouse",
+        site: "Stories",
+        html: `<html><head><title>The lighthouse</title></head><body><article><h1>The lighthouse</h1>${body}${body}</article></body></html>`,
+        media: [{ url: "https://cdn.example/lighthouse.mp3", title: "The lighthouse", duration: 0, video: false, direct: true, image: "", date: "", page, collection: "" }],
+      };
+    },
+    async importLink(_lang, _item, _text, onEvent) {
+      onEvent({ type: "stage", stage: "download" });
+      for (let i = 1; i <= 10; i++) {
+        await sleep(80);
+        onEvent({ type: "progress", value: i * 10 });
+      }
+      throw t("La transcription fonctionne dans l'application Mac.", "Transcription works in the Mac app.");
     },
     async lessonFetchVideo() {
       throw t("Le téléchargement de vidéos fonctionne dans l'application Mac.", "Downloading videos works in the Mac app.");

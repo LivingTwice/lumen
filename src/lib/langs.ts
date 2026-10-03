@@ -16,8 +16,9 @@ export interface LangInfo {
 }
 
 /**
- * Langues proposées : toutes celles de la voix naturelle (Supertonic 3).
- * Les six premières ont en plus un dictionnaire hors ligne.
+ * Langues proposées : toutes celles de la voix naturelle (Supertonic 3), chacune avec un
+ * dictionnaire hors ligne dans la langue de l'interface. Les six premières sont les plus
+ * étudiées (en grand à l'accueil).
  */
 const RAW: (Omit<LangInfo, "name"> & { fr: string; en: string })[] = [
   { code: "en", fr: "Anglais", en: "English", native: "English", badge: "EN", color: "#3b5bdb", tts: ["en-GB", "en-US", "en"], hello: "Hello" },
@@ -60,10 +61,16 @@ export const LANGS: LangInfo[] = RAW.map((l) => ({
   },
 }));
 
-/** Les six langues avec un dictionnaire hors ligne dans la langue de l'interface
- *  (définitions anglaises : pas d'anglais, le français en plus). Les autres : IA seulement. */
-export function coreLangs(): LangCode[] {
+/** Les six langues les plus étudiées (sans la langue de l'interface, le français en plus
+ *  pour un anglophone) : en grand à l'accueil. */
+export function featuredLangs(): LangCode[] {
   return t("en it de pt ru es", "it de pt ru es fr").split(" ") as LangCode[];
+}
+
+/** Dictionnaire livré avec l'application (définitions en français de six langues) ; les
+ *  autres se téléchargent au premier usage. */
+export function bundledDict(code: string): boolean {
+  return t("en it de pt ru es", "").split(" ").includes(code);
 }
 
 /** « italien » ou « Italian », au milieu d'une phrase. */

@@ -1,6 +1,7 @@
 import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useRef, useState } from "react";
 import { Icon } from "./components/Icon";
+import { Guide } from "./components/Guide";
 import { Sidebar } from "./components/Sidebar";
 import { Orb, Toasts } from "./components/ui";
 import { isTauri } from "./lib/api";
@@ -159,6 +160,7 @@ export function App() {
         </AnimatePresence>
       </main>
       <ImportSheet />
+      <Guide />
       <Toasts />
       <AnimatePresence>
         {dropping && (

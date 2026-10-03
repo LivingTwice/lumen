@@ -135,12 +135,15 @@ pub fn build_transcript(words: &[WWord]) -> (String, String) {
 /// mot dans le temps (et décode le son) ; si Qwen3-ASR est fourni (`fine` :
 /// modèle et partie audio), il écrit le texte, plus juste, sur lequel le
 /// minutage de Whisper est recalé. Le texte est ensuite aéré comme sur LingQ.
+/// `reference` : un texte déjà écrit (article, transcription officielle d'une
+/// page), gardé tel quel si le son le suit ; sinon, transcription comme d'habitude.
 pub async fn lesson_transcript(
     engine: &crate::ai::Engine,
     whisper: &Path,
     fine: Option<(PathBuf, PathBuf)>,
     media: &Path,
     lang: &str,
+    reference: Option<&str>,
     mut on_event: impl FnMut(ImportEvent),
 ) -> Result<(String, String)> {
     let pcm = fine.as_ref().map(|_| std::env::temp_dir().join(format!("lumen-{}.pcm", new_stem())));
@@ -162,6 +165,17 @@ pub async fn lesson_transcript(
             return Err(e);
         }
     };
+    if let Some(r) = reference {
+        let (r_timings, found) = align_timings(r, lang, &words);
+        // même garde-fou que pour Qwen3-ASR : la moitié des mots au moins doit s'entendre
+        if found >= 0.5 {
+            if let Some(p) = &pcm {
+                let _ = std::fs::remove_file(p);
+            }
+            return Ok((r.to_string(), r_timings));
+        }
+        eprintln!("texte de la page écarté : {:.0} % des mots retrouvés", found * 100.0);
+    }
     let (mut text, mut timings) = build_transcript(&words);
     if let (Some((model, mmproj)), Some(pcm)) = (fine, pcm) {
         on_event(ImportEvent::Stage { stage: "text".into() });
@@ -562,7 +576,7 @@ async fn run_ytdlp(
 
 fn needs_cookies(e: &anyhow::Error) -> bool {
     let m = e.to_string().to_lowercase();
-    m.contains("sign in") || m.contains("cookies") || m.contains("not a bot") || m.contains("age")
+    m.contains("sign in") || m.contains("logged-in") || m.contains("cookies") || m.contains("not a bot") || m.contains("age")
 }
 
 async fn run_with_fallback(
@@ -577,12 +591,25 @@ async fn run_with_fallback(
         Err(e) if needs_cookies(&e) => match browser {
             Some(b) => run_ytdlp(data_dir, ytdlp, args, Some(b), on_progress).await,
             None => Err(anyhow!(crate::tr!(
-                "YouTube demande une vérification pour cette vidéo. Choisissez votre navigateur dans Réglages › YouTube pour que Lumen utilise votre session. ({e})",
-                "YouTube asks for a verification for this video. Choose your browser in Settings › YouTube so that Lumen can use your session. ({e})"
+                "Le site demande de se connecter pour cette vidéo. Choisissez votre navigateur dans Réglages › Vidéos en ligne pour que Lumen utilise votre session. ({e})",
+                "The site asks you to sign in for this video. Choose your browser in Settings › Online videos so that Lumen can use your session. ({e})"
             ))),
         },
         Err(e) => Err(e),
     }
+}
+
+/// Ce que yt-dlp sait d'une adresse, sans rien télécharger. Une liste
+/// (playlist, chaîne, podcast) n'est pas dépliée : ses éléments sont seulement nommés.
+pub async fn yt_info(data_dir: &Path, ytdlp: &Path, url: &str, browser: Option<&str>) -> Result<serde_json::Value> {
+    let args: Vec<String> = vec!["-J".into(), "--flat-playlist".into(), "--playlist-items".into(), "1:300".into(), url.into()];
+    let mut quiet = |_p: f64| {};
+    let out = run_with_fallback(data_dir, ytdlp, &args, browser, &mut quiet).await?;
+    let json = out
+        .iter()
+        .find(|l| l.starts_with('{'))
+        .ok_or_else(|| anyhow!(crate::i18n::t("rien à télécharger à cette adresse", "nothing to download at this address")))?;
+    Ok(serde_json::from_str(json)?)
 }
 
 /// Télécharge la piste audio d'une vidéo (YouTube et la plupart des sites
@@ -801,6 +828,30 @@ mod tests {
         }
     }
 
+    /// Texte d'une page gardé si le son le suit, transcription sinon (Whisper seul) :
+    /// LUMEN_ASR_MODEL=ggml-….bin LUMEN_TEST_AUDIO=son.mp3 LUMEN_TEST_LANG=fr cargo test --lib reference_live -- --ignored --nocapture
+    /// (copier d'abord binaries/lumen-whisper-aarch64-apple-darwin en target/debug/deps/lumen-whisper)
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore]
+    async fn reference_live() {
+        let (Ok(whisper), Ok(audio)) = (std::env::var("LUMEN_ASR_MODEL"), std::env::var("LUMEN_TEST_AUDIO")) else { return };
+        let lang = std::env::var("LUMEN_TEST_LANG").unwrap_or_else(|_| "fr".into());
+        let engine = crate::ai::Engine::new();
+        // un texte sans rapport avec le son : Lumen transcrit
+        let other = "Ogni mattina, Marta saliva le scale strette del vecchio faro. Dall'alto, il mare sembrava infinito e calmo.";
+        let (heard, _) = lesson_transcript(&engine, Path::new(&whisper), None, Path::new(&audio), &lang, Some(other), |_| {}).await.unwrap();
+        assert_ne!(heard, other);
+        // le texte de la page : un titre en plus, un mot sur dix différent, autres paragraphes
+        let words: Vec<&str> = heard.split_whitespace().collect();
+        let body: Vec<String> = words.iter().enumerate().map(|(i, w)| if i % 10 == 5 { "autrement".to_string() } else { w.to_string() }).collect();
+        let page = format!("Le journal du jour\n\n{}\n\n{}", body[..body.len() / 2].join(" "), body[body.len() / 2..].join(" "));
+        let (text, timings) = lesson_transcript(&engine, Path::new(&whisper), None, Path::new(&audio), &lang, Some(&page), |_| {}).await.unwrap();
+        let tm: Vec<[f64; 4]> = serde_json::from_str(&timings).unwrap();
+        println!("transcription : {} mots ; texte de la page gardé : {} ; {} mots minutés, du {:.1} s au {:.1} s", words.len(), text == page, tm.len(), tm[0][2], tm.last().unwrap()[2]);
+        assert_eq!(text, page);
+        assert!(tm.len() > words.len() * 8 / 10);
+    }
+
     /// Import réel de bout en bout (Whisper puis Qwen3-ASR, recalage, mise en page) :
     /// LUMEN_ASR_MODEL=ggml-….bin LUMEN_ASR_DIR=dossier de Qwen3-ASR LUMEN_TEST_AUDIO=son.mp3
     /// LUMEN_TEST_LANG=it [LUMEN_AIRY_OUT=texte.txt] cargo test --release --lib transcript_live -- --ignored --nocapture
@@ -821,7 +872,7 @@ mod tests {
         let engine = crate::ai::Engine::new();
         let t = std::time::Instant::now();
         let mut stages = Vec::new();
-        let (text, timings) = lesson_transcript(&engine, Path::new(&whisper), fine, Path::new(&audio), &lang, |e| {
+        let (text, timings) = lesson_transcript(&engine, Path::new(&whisper), fine, Path::new(&audio), &lang, None, |e| {
             if let ImportEvent::Stage { stage } = e {
                 stages.push(stage);
             }

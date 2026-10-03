@@ -123,8 +123,19 @@ export interface DictResult {
   entries: DictEntry[];
   lemma?: string | null;
   form_note?: string | null;
-  /** dictionnaire anglais en cours de téléchargement (interface en anglais) */
+  /** dictionnaire en cours de téléchargement */
   pending?: boolean;
+}
+
+/** Dictionnaire d'une langue, dans la langue de l'interface. */
+export interface DictStatus {
+  /** un dictionnaire existe pour cette langue */
+  exists: boolean;
+  /** il est sur ce Mac */
+  ready: boolean;
+  downloading: boolean;
+  /** livré avec l'application */
+  bundled: boolean;
 }
 
 export interface DayStat {
@@ -237,6 +248,43 @@ export type DownloadEvent =
   | { type: "done" };
 
 export type ImportEvent = { type: "stage"; stage: string } | { type: "progress"; value: number };
+
+/** Son ou vidéo trouvé derrière un lien (miroir de `link::MediaItem`). */
+export interface LinkMedia {
+  /** fichier direct, ou adresse lue par yt-dlp (« ytsearch1: » pour un morceau) */
+  url: string;
+  title: string;
+  /** secondes, 0 si inconnue */
+  duration: number;
+  video: boolean;
+  /** fichier téléchargé tel quel, sans yt-dlp */
+  direct: boolean;
+  image: string;
+  /** AAAA-MM-JJ, vide si inconnue */
+  date: string;
+  /** page d'origine (source de la leçon) */
+  page: string;
+  /** émission, playlist ou album */
+  collection: string;
+}
+
+/** Ce que Lumen a trouvé derrière un lien (miroir de `link::LinkInfo`). */
+export interface LinkInfo {
+  url: string;
+  title: string;
+  /** site, émission, chaîne ou artiste */
+  site: string;
+  image: string;
+  /** page HTML, pour en extraire l'article (vide pour un flux ou un fichier) */
+  html: string;
+  media: LinkMedia[];
+  /** liste (podcast, playlist, album) : on choisit ses éléments */
+  list: boolean;
+  /** Spotify : le son vient du flux public du podcast ("rss") ou de YouTube */
+  via: "" | "rss" | "youtube";
+  /** à montrer si rien d'autre n'est trouvé */
+  note: string;
+}
 
 /** Nombres d'une sauvegarde : ce qui sera retrouvé en la restaurant. */
 export interface BackupCounts {

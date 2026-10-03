@@ -14,6 +14,7 @@ use crate::ai::{self, Priority};
 use crate::backup;
 use crate::db::{self, LessonPatch, NewLesson, PlaylistPatch, TermQuery, TermUpdate};
 use crate::dict::DictResult;
+use crate::link;
 use crate::lingq;
 use crate::media::{self, ImportEvent};
 use crate::models::{self, DownloadEvent};
@@ -72,7 +73,7 @@ pub async fn settings_set(app: tauri::AppHandle, state: State<'_, AppState>, key
     if key == "ui_lang" {
         i18n::set(&value);
     }
-    // interface en anglais : les dictionnaires anglais des langues étudiées arrivent en arrière-plan
+    // les dictionnaires des langues étudiées, dans la langue de l'interface, arrivent en arrière-plan
     if key == "ui_lang" || key == "langs" {
         let langs = db::setting(&state.db.lock(), "langs").unwrap_or_default();
         for lang in langs.split(',').filter(|l| state.dicts.missing(l)) {
@@ -82,15 +83,15 @@ pub async fn settings_set(app: tauri::AppHandle, state: State<'_, AppState>, key
     Ok(())
 }
 
-/// Télécharge en arrière-plan le dictionnaire anglais d'une langue.
+/// Télécharge en arrière-plan le dictionnaire d'une langue, dans la langue de l'interface.
 fn fetch_dict(app: &tauri::AppHandle, lang: &str) {
     use tauri::Manager;
     let (app, lang) = (app.clone(), lang.to_string());
     tauri::async_runtime::spawn(async move {
         let st = app.state::<AppState>();
-        if st.dicts.fetch_en(&lang).await.is_ok() {
-            let _ = app.emit("dict", &lang);
-        }
+        // prêt ou en échec (hors ligne) : l'interface relit l'état dans les deux cas
+        let _ = st.dicts.fetch(&lang).await;
+        let _ = app.emit("dict", &lang);
     });
 }
 
@@ -117,7 +118,7 @@ pub async fn lesson_open(app: tauri::AppHandle, state: State<'_, AppState>, id: 
     let terms = db::terms_for_keys(&conn, &lesson.lang, &keys).map_err(err)?;
     let lang = lesson.lang.clone();
     drop(conn);
-    // prépare le dictionnaire en arrière-plan (ou le télécharge, en anglais)
+    // prépare le dictionnaire en arrière-plan (ou le télécharge)
     if state.dicts.available(&lang) {
         state.dicts.warm(&lang);
     } else if state.dicts.missing(&lang) {
@@ -243,8 +244,18 @@ pub async fn export_vocab(state: State<'_, AppState>, lang: String, path: String
 
 // ---------- dictionnaire ----------
 
+/// État du dictionnaire d'une langue (prêt, en téléchargement) ; le télécharge s'il manque.
 #[tauri::command]
-pub async fn dict_lookup(app: tauri::AppHandle, state: State<'_, AppState>, lang: String, word: String) -> R<DictResult> {
+pub async fn dict_status(app: tauri::AppHandle, state: State<'_, AppState>, lang: String) -> R<crate::dict::DictStatus> {
+    if state.dicts.missing(&lang) {
+        fetch_dict(&app, &lang);
+    }
+    Ok(state.dicts.status(&lang))
+}
+
+/// `after` : la suite de la phrase, pour le japonais et le vietnamien (mots de plusieurs jetons).
+#[tauri::command]
+pub async fn dict_lookup(app: tauri::AppHandle, state: State<'_, AppState>, lang: String, word: String, after: Option<String>) -> R<DictResult> {
     if state.dicts.missing(&lang) {
         fetch_dict(&app, &lang);
         return Ok(DictResult { pending: true, ..Default::default() });
@@ -252,7 +263,7 @@ pub async fn dict_lookup(app: tauri::AppHandle, state: State<'_, AppState>, lang
     if !state.dicts.available(&lang) {
         return Ok(DictResult::default());
     }
-    state.dicts.lookup(&lang, &word).map_err(err)
+    state.dicts.lookup_ctx(i18n::native(), &lang, &word, after.as_deref().unwrap_or("")).map_err(err)
 }
 
 // ---------- IA locale ----------
@@ -794,24 +805,6 @@ pub async fn tts_say(state: State<'_, AppState>, lang: String, text: String, pre
 // ---------- import ----------
 
 #[tauri::command]
-pub async fn fetch_url(url: String) -> R<String> {
-    let client = reqwest::Client::builder()
-        .user_agent("Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15")
-        .timeout(std::time::Duration::from_secs(30))
-        .build()
-        .map_err(err)?;
-    let resp = client.get(&url).send().await.map_err(|e| tr!("Page inaccessible : {e}", "Page unreachable: {e}"))?;
-    if !resp.status().is_success() {
-        return Err(tr!("La page a répondu {}.", "The page answered {}.", resp.status()));
-    }
-    let bytes = resp.bytes().await.map_err(err)?;
-    if bytes.len() > 15_000_000 {
-        return Err(t("Page trop volumineuse.", "This page is too large.").into());
-    }
-    Ok(String::from_utf8_lossy(&bytes).to_string())
-}
-
-#[tauri::command]
 pub async fn read_file(path: String) -> R<Response> {
     let bytes = tokio::fs::read(&path).await.map_err(|e| tr!("Lecture impossible : {e}", "Couldn't read the file: {e}"))?;
     Ok(Response::new(bytes))
@@ -826,10 +819,16 @@ fn text_model(state: &AppState, lang: &str) -> Option<(PathBuf, PathBuf)> {
 
 /// Transcrit un son pour en faire une leçon (Whisper, et Qwen3-ASR s'il est
 /// installé et connaît la langue) : voir `media::lesson_transcript`.
-async fn transcribe_media(state: &AppState, media: &std::path::Path, lang: &str, on_event: &Channel<ImportEvent>) -> R<(String, String)> {
+async fn transcribe_media(
+    state: &AppState,
+    media: &std::path::Path,
+    lang: &str,
+    reference: Option<&str>,
+    on_event: &Channel<ImportEvent>,
+) -> R<(String, String)> {
     let m = active_model(state, "asr")?;
     let whisper = models::path_of(&state.data_dir, m);
-    media::lesson_transcript(&state.ai, &whisper, text_model(state, lang), media, lang, |e| {
+    media::lesson_transcript(&state.ai, &whisper, text_model(state, lang), media, lang, reference, |e| {
         let _ = on_event.send(e);
     })
     .await
@@ -846,7 +845,7 @@ async fn transcribe_into_lesson(
     video_path: Option<String>,
     on_event: &Channel<ImportEvent>,
 ) -> R<i64> {
-    let (text, timings) = transcribe_media(state, &stored, lang, on_event).await?;
+    let (text, timings) = transcribe_media(state, &stored, lang, None, on_event).await?;
     if text.trim().is_empty() {
         let _ = std::fs::remove_file(&stored);
         return Err(t("Aucune parole n'a été reconnue dans ce fichier.", "No speech was recognized in this file.").into());
@@ -893,61 +892,123 @@ pub async fn import_media(
     res
 }
 
+// ---------- import d'un lien : article, vidéo, podcast, Spotify ----------
+
+/// Regarde ce qu'il y a derrière un lien : voir `link::probe`.
 #[tauri::command]
-pub async fn import_youtube(state: State<'_, AppState>, lang: String, url: String, on_event: Channel<ImportEvent>) -> R<i64> {
-    let data_dir = state.data_dir.clone();
+pub async fn link_probe(state: State<'_, AppState>, url: String, on_event: Channel<ImportEvent>) -> R<link::LinkInfo> {
+    let browser = db::setting(&state.db.lock(), "youtube_browser").filter(|b| !b.is_empty());
+    let mut send = |e: ImportEvent| {
+        let _ = on_event.send(e);
+    };
+    link::probe(&state.data_dir, &url, browser.as_deref(), &mut send).await.map_err(err)
+}
+
+/// Importe un son ou une vidéo trouvé par `link_probe` : téléchargement (le
+/// fichier tel quel, ou par yt-dlp avec l'image en parallèle), transcription,
+/// couverture. `text` : le texte de la page, qui devient celui de la leçon si
+/// le son le suit (sinon, transcription).
+#[tauri::command]
+pub async fn import_link(
+    state: State<'_, AppState>,
+    lang: String,
+    item: link::MediaItem,
+    text: Option<String>,
+    on_event: Channel<ImportEvent>,
+) -> R<i64> {
     // vérifie le modèle de transcription avant de télécharger quoi que ce soit
     active_model(&state, "asr")?;
+    let data_dir = state.data_dir.clone();
     let browser = db::setting(&state.db.lock(), "youtube_browser").filter(|b| !b.is_empty());
     let send = |stage: &str| {
         let _ = on_event.send(ImportEvent::Stage { stage: stage.into() });
     };
-    send("tools");
-    let ytdlp = crate::tools::ensure_youtube_tools(&data_dir, |p| {
-        let _ = on_event.send(ImportEvent::Progress { value: p });
-    })
-    .await
-    .map_err(err)?;
-    send("download");
-    let stem = media::new_stem();
     let mut prog = |p: f64| {
         let _ = on_event.send(ImportEvent::Progress { value: p });
     };
-    let (audio, title) = media::yt_audio(&data_dir, &ytdlp, &url, &stem, browser.as_deref(), &mut prog).await.map_err(err)?;
-
-    // l'image se télécharge pendant la transcription
-    let (dd, yt, u, st, br) = (data_dir.clone(), ytdlp.clone(), url.clone(), stem.clone(), browser.clone());
-    let video_task = tokio::spawn(async move {
-        let mut quiet = |_p: f64| {};
-        media::yt_video(&dd, &yt, &u, &st, br.as_deref(), &mut quiet).await
+    let stem = media::new_stem();
+    let mut title = item.title.trim().to_string();
+    let mut video: Option<String> = None;
+    let mut video_task = None;
+    let audio = if item.direct {
+        send(if item.video { "file" } else { "download" });
+        let p = link::download(&data_dir, &item.url, &stem, item.video, &mut prog).await.map_err(err)?;
+        // une vidéo téléchargée telle quelle porte aussi le son
+        if item.video {
+            video = Some(p.display().to_string());
+        }
+        p
+    } else {
+        if crate::tools::find_ytdlp(&data_dir).is_none() {
+            send("tools");
+        }
+        let ytdlp = crate::tools::ensure_youtube_tools(&data_dir, &mut prog).await.map_err(err)?;
+        send("download");
+        let (a, found) = media::yt_audio(&data_dir, &ytdlp, &item.url, &stem, browser.as_deref(), &mut prog).await.map_err(err)?;
+        if title.is_empty() {
+            title = found;
+        }
+        // l'image se télécharge pendant la transcription
+        if item.video {
+            let (dd, yt, u, st, br) = (data_dir.clone(), ytdlp.clone(), item.url.clone(), stem.clone(), browser.clone());
+            video_task = Some(tokio::spawn(async move {
+                let mut quiet = |_p: f64| {};
+                media::yt_video(&dd, &yt, &u, &st, br.as_deref(), &mut quiet).await
+            }));
+        }
+        a
+    };
+    // couverture (podcast, Spotify, sites vidéo) ; YouTube a déjà ses miniatures
+    let cover_task = (!item.image.is_empty() && !link::is_youtube(&item.page) && !link::is_youtube(&item.url)).then(|| {
+        let (dd, u) = (data_dir.clone(), item.image.clone());
+        tokio::spawn(async move { link::fetch_cover(&dd, &u).await })
     });
 
-    let (text, timings) = match transcribe_media(&state, &audio, &lang, &on_event).await {
-        Ok(t) => t,
+    let reference = text.as_deref().map(str::trim).filter(|x| !x.is_empty());
+    let transcript = transcribe_media(&state, &audio, &lang, reference, &on_event).await;
+    if let Some(task) = &video_task {
+        if transcript.is_err() {
+            task.abort();
+        }
+    }
+    if let Some(task) = video_task {
+        if transcript.is_ok() {
+            send("video");
+        }
+        if let Ok(Ok(p)) = task.await {
+            video = Some(p.display().to_string());
+        }
+    }
+    let cover = match cover_task {
+        Some(task) => task.await.ok().flatten(),
+        None => None,
+    };
+    let cleanup = |video: &Option<String>| {
+        let _ = std::fs::remove_file(&audio);
+        if let Some(v) = video {
+            let _ = std::fs::remove_file(v);
+        }
+        if let Some(c) = &cover {
+            let _ = std::fs::remove_file(c);
+        }
+    };
+    let (text, timings) = match transcript {
+        Ok(x) => x,
         Err(e) => {
-            video_task.abort();
-            let _ = std::fs::remove_file(&audio);
+            cleanup(&video);
             return Err(e);
         }
     };
-    send("video");
-    let video = match video_task.await {
-        Ok(Ok(p)) => Some(p.display().to_string()),
-        _ => None,
-    };
     if text.trim().is_empty() {
-        let _ = std::fs::remove_file(&audio);
-        if let Some(v) = &video {
-            let _ = std::fs::remove_file(v);
-        }
-        return Err(t("Aucune parole n'a été reconnue dans cette vidéo.", "No speech was recognized in this video.").into());
+        cleanup(&video);
+        return Err(t("Aucune parole n'a été reconnue à cette adresse.", "No speech was recognized at this address.").into());
     }
     let lesson = NewLesson {
         lang,
-        title,
-        collection: String::new(),
-        kind: "video".into(),
-        source: url,
+        title: if title.is_empty() { t("Sans titre", "Untitled").into() } else { title },
+        collection: item.collection.clone(),
+        kind: if video.is_some() { "video" } else { "audio" }.into(),
+        source: if item.page.is_empty() { item.url.clone() } else { item.page.clone() },
         text,
         media_path: Some(audio.display().to_string()),
         timings: Some(timings.clone()),
@@ -956,6 +1017,9 @@ pub async fn import_youtube(state: State<'_, AppState>, lang: String, url: Strin
     let conn = state.db.lock();
     let id = db::lesson_create(&conn, &lesson).map_err(err)?;
     db::lesson_set_timings(&conn, id, &timings, db::TIMING_PRECISE).map_err(err)?;
+    if let Some(c) = cover {
+        db::lesson_set_cover(&conn, id, Some(&c.display().to_string())).map_err(err)?;
+    }
     Ok(id)
 }
 

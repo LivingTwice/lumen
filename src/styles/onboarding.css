@@ -395,6 +395,47 @@
 .ob-link:hover {
   color: var(--ob-text);
 }
+/* « Qu'est-ce qu'un modèle ? » : une explication qui se déplie sous le texte */
+.ob-what {
+  margin-top: 14px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 32px;
+  padding: 0 14px;
+  border-radius: 999px;
+  border: 1px solid var(--ob-border);
+  background: var(--ob-glass);
+  -webkit-backdrop-filter: blur(16px);
+  backdrop-filter: blur(16px);
+  box-shadow: inset 0 0 0 1px var(--ob-edge);
+  color: var(--ob-muted);
+  font-size: 13.5px;
+  transition: color 0.2s ease, background-color 0.2s ease;
+}
+.ob-what:hover,
+.ob-what[aria-expanded="true"] {
+  color: var(--ob-text);
+  background: var(--ob-glass-hover);
+}
+.ob-what > svg {
+  color: var(--ob-accent);
+}
+.ob-what .chev {
+  display: inline-grid;
+  margin-right: -4px;
+}
+.ob-explain {
+  overflow: hidden;
+  max-width: 560px;
+}
+.ob-explain p {
+  margin: 12px 0 0;
+  font-size: 14.5px;
+  line-height: 1.6;
+  color: var(--ob-muted);
+  text-wrap: pretty;
+}
 .ob-actions {
   display: flex;
   gap: 8px;
@@ -552,7 +593,7 @@
 .ob-grid.profiles {
   grid-template-columns: repeat(3, 1fr);
 }
-/* 31 langues : les six avec dictionnaire en grand, les autres en cartes compactes,
+/* 31 langues : les six plus étudiées en grand, les autres en cartes compactes,
    dans une zone qui défile et s'estompe en haut et en bas */
 .ob-langs-scroll {
   width: min(940px, 100%);

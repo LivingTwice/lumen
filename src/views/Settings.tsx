@@ -4,7 +4,8 @@ import { Segmented, Switch } from "../components/ui";
 import { api, isTauri } from "../lib/api";
 import { confirmAsk } from "../lib/dialogs";
 import { t, type UiLang } from "../lib/i18n";
-import { LANGS, STARTERS, coreLangs, langInfo, langLower, starterCollection, theLang } from "../lib/langs";
+import { LANGS, STARTERS, langInfo, langLower, starterCollection, theLang } from "../lib/langs";
+import { useDictStatus } from "../lib/dicts";
 import { PROFILES } from "../lib/profiles";
 import { formatBytes, useApp } from "../lib/store";
 import { naturalVoiceFor, naturalVoices, pronounce } from "../lib/pronounce";
@@ -92,6 +93,7 @@ export function Settings() {
   const langs = useApp((s) => s.langs)();
   const refreshKnown = useApp((s) => s.refreshKnown);
   const bump = useApp((s) => s.bumpLibrary);
+  const openGuide = useApp((s) => s.openGuide);
   const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
   const upd = useUpdate();
 
@@ -167,9 +169,14 @@ export function Settings() {
             </div>
           </section>
 
-          <section className="set-section">
+          <section className="set-section" id="set-ai">
             <h2>{t("IA locale", "Local AI")}</h2>
-            <p>{t("Choisissez la puissance des modèles. Ils sont téléchargés une seule fois puis fonctionnent hors ligne.", "Choose how powerful the models are. They are downloaded once, then work offline.")}</p>
+            <p>
+              {t("Choisissez la puissance des modèles. Ils sont téléchargés une seule fois puis fonctionnent hors ligne.", "Choose how powerful the models are. They are downloaded once, then work offline.")}{" "}
+              <button className="guide-more" onClick={() => openGuide(3)}>
+                {t("Qu'est-ce qu'un modèle ?", "What is a model?")}
+              </button>
+            </p>
             <div className="profile-grid" style={{ marginBottom: 14 }}>
               {PROFILES.map((p) => (
                 <button key={p.id} className={`profile ${activeProfile === p.id ? "on" : ""}`} onClick={() => pickProfile(p.id)}>
@@ -239,9 +246,7 @@ export function Settings() {
                       <strong>{l.name}</strong>
                       <span>
                         {l.native}
-                        {coreLangs().includes(l.code)
-                          ? t(" · dictionnaire hors ligne inclus", " · offline dictionary (downloaded on first use)")
-                          : t(" · traduction par l'IA et voix naturelle", " · AI translation and natural voice")}
+                        <DictNote code={l.code} />
                       </span>
                     </div>
                     <Switch on onChange={() => toggleLang(l.code)} label={t(`Ne plus étudier ${langLower(l.code)}`, `Stop studying ${l.name}`)} />
@@ -510,6 +515,15 @@ export function Settings() {
               </div>
               <div className="set-row">
                 <div className="grow">
+                  <strong>{t("Petit guide", "Short guide")}</strong>
+                  <span>{t("Le principe de Lumen et le rôle de chaque modèle d'IA, en quatre images.", "How Lumen works and what each AI model does, in four pictures.")}</span>
+                </div>
+                <button className="btn sm soft" onClick={() => openGuide()}>
+                  <Icon name="bulb" size={14} /> {t("Ouvrir le guide", "Open the guide")}
+                </button>
+              </div>
+              <div className="set-row">
+                <div className="grow">
                   <strong>{t("Écran d'accueil", "Welcome screen")}</strong>
                   <span>{t("Revoir l'aube de Lumen. Vos leçons et votre vocabulaire restent intacts.", "See Lumen's dawn again. Your lessons and vocabulary stay intact.")}</span>
                 </div>
@@ -522,8 +536,8 @@ export function Settings() {
                   <strong>{t("Crédits", "Credits")}</strong>
                   <span>
                     {t(
-                      "Dictionnaires : Wiktionnaire via kaikki.org (CC BY-SA 4.0). Traduction : Qwen3.5 (Apache 2.0) par llama.cpp (MIT). Transcription : Qwen3-ASR (Apache 2.0) par llama.cpp et Whisper (MIT) par whisper.cpp. Polices : Literata, Newsreader, Geist (OFL).",
-                      "Dictionaries: Wiktionary via kaikki.org (CC BY-SA 4.0). Translation: Qwen3.5 (Apache 2.0) with llama.cpp (MIT). Transcription: Qwen3-ASR (Apache 2.0) with llama.cpp, and Whisper (MIT) with whisper.cpp. Fonts: Literata, Newsreader, Geist (OFL).",
+                      "Dictionnaires : Wiktionnaire via kaikki.org ; JMdict et KANJIDIC2, selon la licence de l'Electronic Dictionary Research and Development Group ; corpus Universal Dependencies (tous CC BY-SA 4.0). Traduction : Qwen3.5 (Apache 2.0) par llama.cpp (MIT). Transcription : Qwen3-ASR (Apache 2.0) par llama.cpp et Whisper (MIT) par whisper.cpp. Polices : Literata, Newsreader, Geist (OFL).",
+                      "Dictionaries: Wiktionary via kaikki.org; JMdict and KANJIDIC2, used under the Electronic Dictionary Research and Development Group licence; Universal Dependencies treebanks (all CC BY-SA 4.0). Translation: Qwen3.5 (Apache 2.0) with llama.cpp (MIT). Transcription: Qwen3-ASR (Apache 2.0) with llama.cpp, and Whisper (MIT) with whisper.cpp. Fonts: Literata, Newsreader, Geist (OFL).",
                     )}
                   </span>
                 </div>
@@ -534,4 +548,15 @@ export function Settings() {
       </div>
     </>
   );
+}
+
+/** « · dictionnaire hors ligne inclus », « · dictionnaire en téléchargement… » */
+function DictNote({ code }: { code: LangCode }) {
+  const d = useDictStatus(code);
+  if (!d) return null;
+  if (!d.exists) return <>{t(" · traduction par l'IA et voix naturelle", " · AI translation and natural voice")}</>;
+  if (d.bundled) return <>{t(" · dictionnaire hors ligne inclus", " · offline dictionary included")}</>;
+  if (d.ready) return <>{t(" · dictionnaire hors ligne prêt", " · offline dictionary ready")}</>;
+  if (d.downloading) return <>{t(" · dictionnaire en téléchargement…", " · dictionary downloading…")}</>;
+  return <>{t(" · dictionnaire hors ligne, téléchargé au premier usage", " · offline dictionary, downloaded on first use")}</>;
 }

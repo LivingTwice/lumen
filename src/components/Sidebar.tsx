@@ -2,6 +2,7 @@ import { motion } from "motion/react";
 import { useEffect, useState } from "react";
 import { api } from "../lib/api";
 import { useChat } from "../lib/chat";
+import { useDictStatus } from "../lib/dicts";
 import { LANGS, langInfo } from "../lib/langs";
 import { useApp, type View } from "../lib/store";
 import type { LangCode, LessonSummary } from "../lib/types";
@@ -35,6 +36,7 @@ export function Sidebar() {
   const settings = useApp((s) => s.settings);
   const lang = useApp((s) => s.lang)();
   const langs = useApp((s) => s.langs)();
+  const dict = useDictStatus(lang);
   const setSetting = useApp((s) => s.setSetting);
   const refreshKnown = useApp((s) => s.refreshKnown);
   // une réponse du chat s'écrit pendant qu'on est ailleurs : la lueur le signale
@@ -194,10 +196,16 @@ export function Sidebar() {
                 ? t("Voix : téléchargement…", "Voice: downloading…")
                 : t("Voix naturelle : à installer", "Natural voice: to install")}
           </span>
-          <span className="ai-row">
-            <span className="dot ok" />
-            {t("Dictionnaire hors ligne", "Offline dictionary")}
-          </span>
+          {dict?.exists !== false && (
+            <span className="ai-row">
+              <span className={`dot ${!dict || dict.ready ? "ok" : dict.downloading ? "busy" : ""}`} />
+              {!dict || dict.ready
+                ? t("Dictionnaire hors ligne", "Offline dictionary")
+                : dict.downloading
+                  ? t("Dictionnaire : téléchargement…", "Dictionary: downloading…")
+                  : t("Dictionnaire : à télécharger", "Dictionary: to download")}
+            </span>
+          )}
         </button>
       </div>
     </aside>

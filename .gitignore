@@ -12,3 +12,4 @@ compilation*.log
 publication.log
 public
 src-tauri/resources/dicts-en
+src-tauri/resources/dicts-v2

@@ -6,6 +6,7 @@ mod backup;
 mod commands;
 mod db;
 mod dict;
+mod link;
 mod lingq;
 mod media;
 mod models;
@@ -68,6 +69,7 @@ pub fn run() {
             commands::activity_add,
             commands::export_vocab,
             commands::dict_lookup,
+            commands::dict_status,
             commands::ai_word,
             commands::ai_sentence,
             commands::ai_simplify,
@@ -84,10 +86,10 @@ pub fn run() {
             commands::model_delete,
             commands::tts_say,
             commands::lesson_voice,
-            commands::fetch_url,
             commands::read_file,
             commands::import_media,
-            commands::import_youtube,
+            commands::link_probe,
+            commands::import_link,
             commands::lesson_fetch_video,
             commands::lesson_resync,
             commands::lingq_scan,

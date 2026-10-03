@@ -32,6 +32,10 @@ export const EXPR_MAX_WORDS = 8;
 /** Jusqu'à 5 mots, l'IA donne le sens en contexte ; au-delà, elle traduit le passage entier. */
 const SENSE_MAX_WORDS = 5;
 
+/** Une sélection de quelques mots peut être une entrée du dictionnaire (« zum Beispiel »,
+ *  « học sinh ») ; en japonais, découpé caractère par caractère, un mot entier. */
+const dictLookable = (lang: LangCode, sel: Selection) => !sel.isPhrase || sel.words <= (lang === "ja" ? 10 : 4);
+
 const statusOpts = (): { s: Status; label: string; sw: string }[] => [
   { s: 1, label: "1", sw: "var(--w-l1)" },
   { s: 2, label: "2", sw: "var(--w-l2)" },
@@ -54,6 +58,9 @@ interface Props {
 
 export function WordPanel({ lang, sel, term, onStatus, onTranslation, onSelectPhrase, onAsk, onClose }: Props) {
   const settings = useApp((s) => s.settings);
+  const setSetting = useApp((s) => s.setSetting);
+  const openGuide = useApp((s) => s.openGuide);
+  const guideSeen = settings.guide_seen === "1";
   const go = useApp((s) => s.go);
   const llmReady = useApp((s) => s.models.some((m) => m.kind === "llm" && m.installed));
   const llmDownloading = useApp((s) => s.models.some((m) => m.kind === "llm" && !!s.downloads[m.id] && !s.downloads[m.id].error));
@@ -84,9 +91,10 @@ export function WordPanel({ lang, sel, term, onStatus, onTranslation, onSelectPh
     setSlow(false);
     const slowTimer = window.setTimeout(() => id === reqId.current && setSlow(true), 2500);
 
-    if (!sel.isPhrase) {
+    if (dictLookable(lang, sel)) {
+      // la suite de la phrase : le mot japonais ou vietnamien qui commence ici
       api()
-        .dictLookup(lang, sel.surface)
+        .dictLookup(lang, sel.surface, sel.after)
         .then((d) => id === reqId.current && setDict(d))
         .catch(() => {});
     }
@@ -150,6 +158,29 @@ export function WordPanel({ lang, sel, term, onStatus, onTranslation, onSelectPh
     setMine(term?.translation ?? "");
   }, [term?.translation]);
 
+  // dictionnaire en téléchargement : le mot s'affiche dès qu'il arrive (une seule relecture)
+  const pending = !!dict?.pending;
+  useEffect(() => {
+    if (!pending || !sel) return;
+    const id = reqId.current;
+    let alive = true;
+    let unlisten: (() => void) | undefined;
+    void api()
+      .dictListen((l) => {
+        if (l !== lang || id !== reqId.current) return;
+        api()
+          .dictLookup(lang, sel.surface, sel.after)
+          .then((d) => id === reqId.current && setDict({ ...d, pending: false }))
+          .catch(() => {});
+      })
+      .then((u) => (alive ? (unlisten = u) : u()));
+    return () => {
+      alive = false;
+      unlisten?.();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pending, key, lang]);
+
   // la prononciation se prépare dès le toucher : le haut-parleur répond aussitôt
   const surface = sel?.surface ?? "";
   useEffect(() => {
@@ -179,6 +210,30 @@ export function WordPanel({ lang, sel, term, onStatus, onTranslation, onSelectPh
               )}
             </p>
           </motion.div>
+          {/* première visite : le petit guide se propose, une seule fois */}
+          <AnimatePresence>
+            {!guideSeen && (
+              <motion.div
+                className="guide-invite"
+                initial={{ opacity: 0, y: 10, scale: 0.98 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: 6, scale: 0.98 }}
+                transition={{ type: "spring", stiffness: 300, damping: 26, delay: 0.5 }}
+              >
+                <div className="update-head">
+                  <span className="update-dot" />
+                  <strong>{t("Nouveau dans Lumen ?", "New to Lumen?")}</strong>
+                </div>
+                <button className="icon-btn close" onClick={() => void setSetting("guide_seen", "1")} aria-label={t("Plus tard", "Later")}>
+                  <Icon name="close" size={12} />
+                </button>
+                <p>{t("Le principe, la lanterne et les modèles d'IA en quatre images, le temps d'un café.", "The idea, the lantern and the AI models in four pictures, over a coffee.")}</p>
+                <button className="btn sm primary glow" onClick={() => openGuide()}>
+                  <Icon name="bulb" size={14} /> {t("Ouvrir le petit guide", "Open the short guide")}
+                </button>
+              </motion.div>
+            )}
+          </AnimatePresence>
           <div className="wp-block" style={{ marginTop: "auto" }}>
             <span className="eyebrow">{t("Légende", "Legend")}</span>
             <div className="wp-legend">
@@ -235,6 +290,11 @@ export function WordPanel({ lang, sel, term, onStatus, onTranslation, onSelectPh
               <span>{t("Discuter de la leçon", "Chat about the lesson")}</span>
             </div>
           </div>
+          {guideSeen && (
+            <button className="guide-link" onClick={() => openGuide()}>
+              <Icon name="bulb" size={14} /> {t("Comment marche Lumen ?", "How does Lumen work?")}
+            </button>
+          )}
         </div>
       </div>
     );
@@ -243,8 +303,11 @@ export function WordPanel({ lang, sel, term, onStatus, onTranslation, onSelectPh
   const status = term?.status ?? 0;
   const entries = dict?.entries ?? [];
   const lemma = dict?.lemma;
-  const firstIpa = entries.find((e) => e.ipa)?.ipa;
-  const firstPos = entries[0]?.pos;
+  // japonais, vietnamien : la première entrée peut être un mot plus long que le caractère
+  // ou la syllabe touchés ; sa lecture et sa nature restent alors dans son propre titre
+  const spans = (lang === "ja" || lang === "vi") && !!entries[0] && entries[0].word.toLowerCase() !== sel.surface.toLowerCase();
+  const firstIpa = spans ? undefined : entries.find((e) => e.ipa)?.ipa;
+  const firstPos = spans ? undefined : entries[0]?.pos;
   const statusLabel =
     status === 0
       ? t("Nouveau", "New")
@@ -281,7 +344,7 @@ export function WordPanel({ lang, sel, term, onStatus, onTranslation, onSelectPh
             </div>
             <div className="wp-sub">
               {sel.isPhrase && <span className="chip">{term ? t("Expression", "Phrase") : t(`${sel.words} mots sélectionnés`, `${sel.words} words selected`)}</span>}
-              {firstIpa && <span className="ipa">/{firstIpa}/</span>}
+              {firstIpa && <span className="ipa">{lang === "ja" ? firstIpa : `/${firstIpa}/`}</span>}
               {firstPos && <span>{firstPos}</span>}
               {lemma && (
                 <span>
@@ -385,7 +448,8 @@ export function WordPanel({ lang, sel, term, onStatus, onTranslation, onSelectPh
                   <div key={i}>
                     {(entries.length > 1 || e.word !== sel.surface.toLowerCase()) && (
                       <div className="pos">
-                        {e.word} · {e.pos}
+                        {e.word}
+                        {lang === "ja" && e.ipa && e.ipa !== e.word ? `【${e.ipa}】` : ""} · {e.pos}
                       </div>
                     )}
                     {e.glosses.slice(0, 3).map((g, j) => (

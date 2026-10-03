@@ -16,25 +16,26 @@ import {
   extractSubtitles,
   type Chapter,
 } from "../lib/importers";
-import { count, t } from "../lib/i18n";
+import { count, formatNumber, locale, pick, t } from "../lib/i18n";
 import { inLang } from "../lib/langs";
-import { formatBytes, useApp } from "../lib/store";
-import type { ImportEvent, NewLesson } from "../lib/types";
+import { formatBytes, formatDuration, useApp } from "../lib/store";
+import type { ImportEvent, LinkInfo, LinkMedia, NewLesson } from "../lib/types";
 
-type Tab = "text" | "web" | "file" | "media" | "youtube";
+type Tab = "text" | "link" | "file" | "media";
 
 const tabs = (): { id: Tab; label: string; hint: string; icon: IconName }[] => [
   { id: "text", label: t("Texte", "Text"), hint: t("Coller", "Paste"), icon: "text" },
-  { id: "web", label: t("Page web", "Web page"), hint: t("Article, blog", "Article, blog"), icon: "globe" },
+  { id: "link", label: t("Lien", "Link"), hint: t("Web, vidéo, podcast", "Web, video, podcast"), icon: "link" },
   { id: "file", label: t("Fichier", "File"), hint: "EPUB, PDF, SRT…", icon: "file" },
   { id: "media", label: t("Audio, vidéo", "Audio, video"), hint: "Transcription", icon: "wave" },
-  { id: "youtube", label: "YouTube", hint: t("Lien vidéo", "Video link"), icon: "youtube" },
 ];
 
 const stages = (): Record<string, string> => ({
+  probe: t("Lecture du lien", "Reading the link"),
   copy: t("Copie du fichier", "Copying the file"),
   tools: t("Installation des composants vidéo", "Installing the video components"),
   download: t("Téléchargement du son", "Downloading the sound"),
+  file: t("Téléchargement du fichier", "Downloading the file"),
   video: t("Finalisation de la vidéo", "Finishing the video"),
   decode: t("Lecture du son", "Reading the sound"),
   model: t("Préparation du modèle", "Preparing the model"),
@@ -76,6 +77,45 @@ interface Pending {
   collection?: string;
 }
 
+/** Ce qu'on importe d'un lien qui offre à la fois un texte et un son. */
+type Choice = "both" | "media" | "article";
+
+/** Lien analysé : ce qu'il contient et ce que l'utilisateur en garde. */
+interface Found {
+  info: LinkInfo;
+  article: { title: string; text: string; words: number } | null;
+  choice: Choice;
+  /** éléments cochés d'une liste, dans l'ordre de la liste */
+  picked: number[];
+}
+
+/** Un lien seul, collé dans le champ de texte. */
+const LONE_LINK = /^(https?:\/\/|www\.)\S+$/i;
+
+/** Nom des éléments d'une liste, accordé : « 3 épisodes », « 12 vidéos », « 10 morceaux ». */
+function itemsLabel(info: LinkInfo, n: number) {
+  if (info.via === "youtube") return count(n, "morceau", "morceaux", "song", "songs");
+  if (info.media.length && info.media.every((m) => m.video)) return count(n, "vidéo", "vidéos", "video", "videos");
+  return count(n, "épisode", "épisodes", "episode", "episodes");
+}
+
+function shortDate(d: string) {
+  const date = new Date(`${d}T12:00:00`);
+  if (Number.isNaN(date.getTime())) return "";
+  const year = date.getFullYear() === new Date().getFullYear() ? undefined : "numeric";
+  return date.toLocaleDateString(locale(), { day: "numeric", month: "short", year });
+}
+
+/** Vignette du lien : l'image trouvée, sinon une icône dans un halo. */
+function LinkThumb({ src, icon }: { src: string; icon: IconName }) {
+  const [failed, setFailed] = useState(false);
+  return (
+    <span className="link-thumb">
+      {src && !failed ? <img src={src} alt="" draggable={false} onError={() => setFailed(true)} /> : <Icon name={icon} size={26} stroke={1.6} />}
+    </span>
+  );
+}
+
 export function ImportSheet() {
   const open = useApp((s) => s.importOpen);
   const files = useApp((s) => s.importFiles);
@@ -99,6 +139,7 @@ export function ImportSheet() {
   const [preview, setPreview] = useState<Pending | null>(null);
   const [book, setBook] = useState<{ title: string; chapters: (Chapter & { on: boolean })[] } | null>(null);
   const [mediaFiles, setMediaFiles] = useState<string[]>([]);
+  const [found, setFound] = useState<Found | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const asrReady = models.some((m) => m.kind === "asr" && m.installed);
@@ -113,6 +154,7 @@ export function ImportSheet() {
     setPreview(null);
     setBook(null);
     setMediaFiles([]);
+    setFound(null);
     setError(null);
   };
 
@@ -181,15 +223,70 @@ export function ImportSheet() {
       finish(ids, t("Leçon créée", "Lesson created"));
     });
 
-  // ---------- web ----------
-  const fetchWeb = () =>
-    run(t("Lecture de la page", "Reading the page"), async () => {
-      let u = url.trim();
-      if (!/^https?:\/\//.test(u)) u = "https://" + u;
-      const html = await api().fetchUrl(u);
-      const art = extractArticle(html, u);
-      setPreview({ title: art.title, text: art.text, kind: "web", source: u });
+  // ---------- lien : article, vidéo, podcast, Spotify ----------
+  const probeLink = () =>
+    run(t("Lecture du lien", "Reading the link"), async () => {
+      const info = await api().linkProbe(url.trim(), onImportEvent(""));
+      let article: Found["article"] = null;
+      if (info.html) {
+        try {
+          const a = extractArticle(info.html, info.url);
+          const words = wordCount(a.text);
+          if (words >= 40) article = { title: a.title || info.title, text: a.text, words };
+        } catch {
+          // pas d'article lisible : le son ou la vidéo seulement
+        }
+      }
+      if (!info.media.length) {
+        if (!article) throw info.note || t("Lumen n'a trouvé ni texte ni son à importer à cette adresse.", "Lumen found no text or sound to import at this address.");
+        setPreview({ title: article.title, text: article.text, kind: "web", source: info.url });
+        return;
+      }
+      // un long article accompagné d'un son : le texte d'abord ; un texte court : le son, recalé sur le texte s'il le suit
+      const choice: Choice = !article ? "media" : article.words >= 150 ? "article" : info.list ? "media" : "both";
+      setFound({ info, article, choice, picked: [0] });
     });
+
+  const importFound = () => {
+    if (!found) return;
+    const { info, article, choice } = found;
+    if (choice === "article" && article) {
+      setPreview({ title: article.title, text: article.text, kind: "web", source: info.url });
+      return;
+    }
+    const items: LinkMedia[] = info.list ? found.picked.map((i) => info.media[i]) : info.media.slice(0, 1);
+    const text = choice === "both" && article ? article.text : null;
+    void run(t("Préparation", "Preparing"), async () => {
+      const ids: number[] = [];
+      let failed = 0;
+      let firstError: unknown = null;
+      for (let i = 0; i < items.length; i++) {
+        const prefix = items.length > 1 ? `${i + 1}/${items.length} · ` : "";
+        try {
+          ids.push(await api().importLink(lang, items[i], text, onImportEvent(prefix)));
+        } catch (e) {
+          // un élément d'une liste qui échoue n'arrête pas les suivants
+          if (items.length === 1) throw e;
+          failed++;
+          firstError ??= e;
+        }
+      }
+      if (!ids.length) throw firstError;
+      finish(
+        ids,
+        ids.length > 1
+          ? t(`${ids.length} leçons créées`, `${ids.length} lessons created`)
+          : items[0].video
+            ? t("Vidéo transcrite", "Video transcribed")
+            : t("Transcription prête", "Transcript ready"),
+      );
+      if (failed)
+        toast(
+          `${pick(failed, `${failed} import n'a pas abouti`, `${failed} imports n'ont pas abouti`, `${failed} import failed`, `${failed} imports failed`)}${t(" : ", ": ")}${errorText(firstError)}`,
+          "error",
+        );
+    });
+  };
 
   // ---------- fichiers ----------
   async function loadDocs(paths: string[]) {
@@ -245,7 +342,7 @@ export function ImportSheet() {
   const onImportEvent = (stagePrefix: string) => (e: ImportEvent) => {
     if (e.type === "stage") {
       setBusy(`${stagePrefix}${stages()[e.stage] ?? e.stage}`);
-      setProgress(["transcribe", "timing", "text", "download", "tools"].includes(e.stage) ? 0 : null);
+      setProgress(["transcribe", "timing", "text", "download", "file", "tools"].includes(e.stage) ? 0 : null);
     } else setProgress(e.value);
   };
 
@@ -257,12 +354,6 @@ export function ImportSheet() {
         ids.push(await api().importMedia(lang, mediaFiles[i], null, onImportEvent(prefix)));
       }
       finish(ids, ids.length > 1 ? t(`${ids.length} transcriptions prêtes`, `${ids.length} transcripts ready`) : t("Transcription prête", "Transcript ready"));
-    });
-
-  const importYt = () =>
-    run(t("Téléchargement", "Downloading"), async () => {
-      const id = await api().importYoutube(lang, url.trim(), onImportEvent(""));
-      finish([id], t("Vidéo transcrite", "Video transcribed"));
     });
 
   const AsrMissing = () => {
@@ -298,13 +389,33 @@ export function ImportSheet() {
           {t("Créer la leçon", "Create the lesson")}
         </button>
       );
-    if (tab === "web" && !preview)
+    if (tab === "link" && !preview && !found)
       footer = (
-        <button className="btn primary" disabled={url.trim().length < 4} onClick={fetchWeb}>
-          {t("Récupérer l'article", "Get the article")}
+        <button className="btn primary" disabled={url.trim().length < 4} onClick={probeLink}>
+          {t("Ouvrir le lien", "Open the link")}
         </button>
       );
-    if ((tab === "web" || tab === "file") && preview)
+    if (tab === "link" && !preview && found) {
+      const n = found.info.list ? found.picked.length : 1;
+      const wantsMedia = found.choice !== "article";
+      footer = (
+        <>
+          <button className="btn ghost" onClick={() => setFound(null)}>
+            {t("Retour", "Back")}
+          </button>
+          <button className="btn primary" disabled={wantsMedia && (!asrReady || n === 0)} onClick={importFound}>
+            {!wantsMedia
+              ? t("Voir le texte", "See the text")
+              : found.info.list
+                ? `${t("Importer", "Import")} ${itemsLabel(found.info, n)}`
+                : found.info.media[0].video
+                  ? t("Importer la vidéo", "Import the video")
+                  : t("Importer le son", "Import the sound")}
+          </button>
+        </>
+      );
+    }
+    if ((tab === "link" || tab === "file") && preview)
       footer = (
         <>
           <button className="btn ghost" onClick={() => setPreview(null)}>
@@ -332,12 +443,6 @@ export function ImportSheet() {
           {mediaFiles.length > 1 ? t(`Transcrire ${mediaFiles.length} fichiers`, `Transcribe ${mediaFiles.length} files`) : t("Transcrire", "Transcribe")}
         </button>
       );
-    if (tab === "youtube")
-      footer = (
-        <button className="btn primary" disabled={!url.trim() || !asrReady} onClick={importYt}>
-          {t("Importer la vidéo", "Import the video")}
-        </button>
-      );
   }
 
   return (
@@ -354,6 +459,7 @@ export function ImportSheet() {
                 setTab(tb.id);
                 setPreview(null);
                 setBook(null);
+                setFound(null);
                 setError(null);
               }}
             >
@@ -386,7 +492,7 @@ export function ImportSheet() {
             <span className="import-hint">{t("Tout se passe sur votre Mac. Rien n'est envoyé en ligne.", "Everything happens on your Mac. Nothing is sent online.")}</span>
           </motion.div>
         ) : (
-          <motion.div key={tab + (preview ? "p" : "") + (book ? "b" : "")} className="import-pane" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}>
+          <motion.div key={tab + (preview ? "p" : "") + (book ? "b" : "") + (found ? "f" : "")} className="import-pane" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}>
             {error && (
               <div className="file-item" style={{ background: "color-mix(in srgb, var(--danger) 12%, transparent)", color: "var(--danger)" }}>
                 <Icon name="ban" size={16} /> <span className="grow" style={{ whiteSpace: "normal" }}>{error}</span>
@@ -430,19 +536,66 @@ export function ImportSheet() {
                     autoFocus
                   />
                 </div>
-                <span className="import-hint num">{count(wordCount(text), "mot", "mots", "word", "words")}</span>
+                {LONE_LINK.test(text.trim()) ? (
+                  <div className="file-item link-pasted">
+                    <Icon name="link" size={16} />
+                    <span className="grow">{t("Vous avez collé un lien.", "You pasted a link.")}</span>
+                    <button
+                      className="btn sm accent"
+                      onClick={() => {
+                        setUrl(text.trim());
+                        setText("");
+                        setTab("link");
+                      }}
+                    >
+                      {t("L'ouvrir comme lien", "Open it as a link")}
+                    </button>
+                  </div>
+                ) : (
+                  <span className="import-hint num">{count(wordCount(text), "mot", "mots", "word", "words")}</span>
+                )}
               </>
             )}
 
-            {!preview && tab === "web" && (
+            {!preview && tab === "link" && !found && (
               <>
                 <div className="field">
-                  <label htmlFor="imp-url">{t("Adresse de la page", "Page address")}</label>
-                  <input id="imp-url" className="input" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://…" onKeyDown={(e) => e.key === "Enter" && url.trim() && fetchWeb()} autoFocus />
+                  <label htmlFor="imp-url">{t("Adresse", "Address")}</label>
+                  <input
+                    id="imp-url"
+                    className="input"
+                    value={url}
+                    onChange={(e) => setUrl(e.target.value)}
+                    placeholder="https://…"
+                    onKeyDown={(e) => e.key === "Enter" && url.trim().length >= 4 && probeLink()}
+                    autoFocus
+                  />
                 </div>
-                <span className="import-hint">{t("Lumen garde uniquement le texte de l'article, sans menus ni publicités.", "Lumen keeps only the text of the article, with no menus or ads.")}</span>
+                <div className="link-sources" aria-hidden="true">
+                  {(
+                    [
+                      ["globe", t("Articles et blogs", "Articles and blogs")],
+                      ["youtube", t("YouTube et mille sites vidéo", "YouTube and a thousand video sites")],
+                      ["podcast", t("Podcasts et radios", "Podcasts and radio shows")],
+                      ["music", "Spotify"],
+                    ] as [IconName, string][]
+                  ).map(([icon, label]) => (
+                    <span key={icon} className="link-source">
+                      <Icon name={icon} size={14} /> {label}
+                    </span>
+                  ))}
+                </div>
+                <span className="import-hint">
+                  {t(
+                    "Collez n'importe quel lien : Lumen trouve l'article, la vidéo ou les épisodes qui s'y cachent, et vous choisissez quoi importer. Le son est transcrit mot à mot sur votre Mac.",
+                    "Paste any link: Lumen finds the article, video or episodes behind it, and you choose what to import. The sound is transcribed word by word on your Mac.",
+                  )}
+                  {info && !info.ytdlp ? t(" Pour les vidéos, Lumen installe la première fois ses composants (environ 40 Mo).", " For videos, Lumen installs its components the first time (about 40 MB).") : ""}
+                </span>
               </>
             )}
+
+            {!preview && tab === "link" && found && <LinkFound found={found} onChange={setFound} asrMissing={!asrReady && found.choice !== "article" ? <AsrMissing /> : null} />}
 
             {!preview && tab === "file" && !book && (
               <button className="file-drop" onClick={chooseDocs} disabled={!isTauri}>
@@ -499,25 +652,134 @@ export function ImportSheet() {
               </>
             )}
 
-            {tab === "youtube" && (
-              <>
-                {!asrReady && <AsrMissing />}
-                <div className="field">
-                  <label htmlFor="imp-yt">{t("Lien de la vidéo", "Video link")}</label>
-                  <input id="imp-yt" className="input" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://www.youtube.com/watch?v=…" />
-                </div>
-                <span className="import-hint">
-                  {t(
-                    "YouTube et la plupart des sites vidéo. Le son est transcrit mot à mot sur votre Mac pendant que l'image se télécharge, pour regarder la vidéo avec la transcription synchronisée.",
-                    "YouTube and most video sites. The sound is transcribed word by word on your Mac while the picture downloads, so you can watch the video with the transcript in sync.",
-                  )}
-                  {info && !info.ytdlp ? t(" La première fois, Lumen installe ses composants vidéo (environ 40 Mo).", " The first time, Lumen installs its video components (about 40 MB).") : ""}
-                </span>
-              </>
-            )}
           </motion.div>
         )}
       </AnimatePresence>
     </Sheet>
+  );
+}
+
+/** Ce qu'un lien contient, et le choix de ce qu'on en importe. */
+function LinkFound({ found, onChange, asrMissing }: { found: Found; onChange(f: Found): void; asrMissing: React.ReactNode }) {
+  const { info, article, choice, picked } = found;
+  const first = info.media[0];
+  const n = info.media.length;
+  const video = info.list ? info.media.every((m) => m.video) : first.video;
+
+  const facts: string[] = [];
+  if (info.list) facts.push(itemsLabel(info, n));
+  else {
+    facts.push(info.via === "youtube" ? t("Morceau", "Song") : video ? t("Vidéo", "Video") : first.collection ? t("Épisode", "Episode") : t("Son", "Audio"));
+    if (first.duration > 0) facts.push(formatDuration(first.duration));
+    if (first.date) facts.push(shortDate(first.date));
+  }
+  if (article) facts.push(t(`article de ${count(article.words, "mot", "mots", "word", "words")}`, `${formatNumber(article.words)}-word article`));
+
+  const options: { id: Choice; icon: IconName; label: string; hint: string }[] = [];
+  if (article) {
+    if (!info.list)
+      options.push({
+        id: "both",
+        icon: "sparkle",
+        label: video ? t("La vidéo, avec le texte de la page", "The video, with the page's text") : t("Le son, avec le texte de la page", "The sound, with the page's text"),
+        hint: t(
+          "Le texte de la page devient la leçon et la lanterne suit la voix. S'il ne correspond pas à ce qu'on entend, Lumen transcrit le son.",
+          "The page's text becomes the lesson and the lantern follows the voice. If it doesn't match what is said, Lumen transcribes the sound.",
+        ),
+      });
+    options.push({
+      id: "media",
+      icon: video ? "video" : "wave",
+      label: info.list
+        ? t(`Les ${itemsLabel(info, n)} de la page`, `The page's ${itemsLabel(info, n)}`)
+        : video
+          ? t("La vidéo, transcrite", "The video, transcribed")
+          : t("Le son, transcrit", "The sound, transcribed"),
+      hint: t("Transcription mot à mot sur votre Mac, synchronisée avec le son.", "Word-by-word transcript on your Mac, in sync with the sound."),
+    });
+    options.push({
+      id: "article",
+      icon: "text",
+      label: t("Le texte de l'article", "The article's text"),
+      hint: `${count(article.words, "mot", "mots", "word", "words")}${t(", sans le son", ", without the sound")}`,
+    });
+  }
+
+  const title = info.title || article?.title || first.title;
+  // le nom du site seulement s'il apporte quelque chose (un podcast porte souvent le nom de son émission)
+  const site = info.site && info.site.toLowerCase() !== title.toLowerCase() ? info.site : "";
+  const all = picked.length === n;
+  const toggle = (i: number, on: boolean) =>
+    onChange({ ...found, picked: on ? [...picked, i].sort((a, b) => a - b) : picked.filter((x) => x !== i) });
+
+  return (
+    <>
+      <div className="link-card">
+        <LinkThumb src={info.image || first.image} icon={info.via === "youtube" ? "music" : info.list && !video ? "podcast" : video ? "video" : article ? "globe" : "wave"} />
+        <div className="link-meta">
+          {site && <span className="link-site">{site}</span>}
+          <strong className="link-title">{title}</strong>
+          <span className="link-facts num">{facts.join(" · ")}</span>
+        </div>
+      </div>
+
+      {info.via && (
+        <p className="link-note">
+          <Icon name="sparkle" size={15} />
+          <span>
+            {info.via === "rss"
+              ? info.list
+                ? t("Spotify protège ses fichiers : Lumen a retrouvé ce podcast dans son flux public.", "Spotify protects its files: Lumen found this podcast in its public feed.")
+                : t("Spotify protège ses fichiers : Lumen a retrouvé cet épisode dans le flux public du podcast.", "Spotify protects its files: Lumen found this episode in the podcast's public feed.")
+              : t("Spotify protège ses fichiers : Lumen prend le son du même morceau sur YouTube.", "Spotify protects its files: Lumen takes the sound of the same song from YouTube.")}
+          </span>
+        </p>
+      )}
+
+      {options.length > 0 && (
+        <div className="link-choices" role="radiogroup" aria-label={t("Quoi importer", "What to import")}>
+          {options.map((o) => (
+            <button
+              key={o.id}
+              type="button"
+              role="radio"
+              aria-checked={choice === o.id}
+              className={`link-choice ${choice === o.id ? "on" : ""}`}
+              onClick={() => onChange({ ...found, choice: o.id })}
+            >
+              <Icon name={o.icon} size={18} />
+              <span className="link-choice-text">
+                <strong>{o.label}</strong>
+                <span>{o.hint}</span>
+              </span>
+              <span className="link-radio" aria-hidden="true" />
+            </button>
+          ))}
+        </div>
+      )}
+
+      {info.list && choice !== "article" && (
+        <>
+          <div className="link-list-head">
+            <span className="muted num">{t(`${picked.length} sur ${n}`, `${picked.length} of ${n}`)}</span>
+            <button className="btn ghost sm" onClick={() => onChange({ ...found, picked: all ? [] : info.media.map((_, i) => i) })}>
+              {all ? t("Tout décocher", "Uncheck all") : t("Tout cocher", "Check all")}
+            </button>
+          </div>
+          <div className="chapter-list link-list">
+            {info.media.map((m, i) => (
+              <label key={`${i}-${m.url}`} className="chapter-item">
+                <input type="checkbox" checked={picked.includes(i)} onChange={(e) => toggle(i, e.target.checked)} />
+                <span className="link-item-title">{m.title || t("Sans titre", "Untitled")}</span>
+                {m.date && <span className="muted num link-item-meta">{shortDate(m.date)}</span>}
+                {m.duration > 0 && <span className="muted num link-item-meta">{formatDuration(m.duration)}</span>}
+              </label>
+            ))}
+          </div>
+        </>
+      )}
+
+      {asrMissing}
+    </>
   );
 }
