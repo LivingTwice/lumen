@@ -8,10 +8,11 @@ use std::sync::Arc;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 use tauri::ipc::{Channel, Response};
-use tauri::State;
+use tauri::{Emitter, State};
 
 use crate::ai::{self, Priority};
-use crate::db::{self, LessonPatch, NewLesson, TermQuery, TermUpdate};
+use crate::backup;
+use crate::db::{self, LessonPatch, NewLesson, PlaylistPatch, TermQuery, TermUpdate};
 use crate::dict::DictResult;
 use crate::lingq;
 use crate::media::{self, ImportEvent};
@@ -153,6 +154,28 @@ pub async fn lesson_set_cover(state: State<'_, AppState>, id: i64, data: Option<
     Ok(new_path)
 }
 
+// ---------- playlists ----------
+
+#[tauri::command]
+pub async fn playlists_list(state: State<'_, AppState>, lang: String) -> R<Vec<db::Playlist>> {
+    db::playlists_list(&state.db.lock(), &lang).map_err(err)
+}
+
+#[tauri::command]
+pub async fn playlist_create(state: State<'_, AppState>, lang: String, name: String, lessons: Vec<i64>) -> R<i64> {
+    db::playlist_create(&mut state.db.lock(), &lang, &name, &lessons).map_err(err)
+}
+
+#[tauri::command]
+pub async fn playlist_update(state: State<'_, AppState>, id: i64, patch: PlaylistPatch) -> R<()> {
+    db::playlist_update(&mut state.db.lock(), id, &patch).map_err(err)
+}
+
+#[tauri::command]
+pub async fn playlist_delete(state: State<'_, AppState>, id: i64) -> R<()> {
+    db::playlist_delete(&state.db.lock(), id).map_err(err)
+}
+
 // ---------- vocabulaire ----------
 
 #[tauri::command]
@@ -246,7 +269,7 @@ pub async fn ai_word(
     on_event: Channel<AiEvent>,
 ) -> R<WordAnswer> {
     let m = active_model(&state, "llm")?;
-    let key = hash(&["w3", m.id, &lang, &text::normalize(&word), sentence.trim()]);
+    let key = hash(&["w3", m.id, &lang, &text::normalize_for(&word, &lang), sentence.trim()]);
     if let Some(v) = db::cache_get(&state.db.lock(), &key) {
         let (t, n) = v.split_once('\u{1f}').unwrap_or((&v, ""));
         return Ok(WordAnswer { translation: t.to_string(), note: n.to_string(), cached: true });
@@ -373,6 +396,173 @@ pub async fn ai_warmup(state: State<'_, AppState>) -> R<bool> {
     Ok(true)
 }
 
+// ---------- chat ----------
+
+/// Place de la leçon jointe et des échanges précédents dans la mémoire du modèle (en octets).
+const CHAT_LESSON_BYTES: usize = 24_000;
+const CHAT_HISTORY_BYTES: usize = 16_000;
+/// Longueur maximale d'une réponse, réflexion non comprise (en jetons).
+const CHAT_ANSWER_TOKENS: usize = 1600;
+
+#[derive(Serialize)]
+pub struct ChatThread {
+    chat: db::ChatSummary,
+    messages: Vec<db::ChatMessage>,
+}
+
+#[derive(serde::Deserialize)]
+pub struct ChatOptions {
+    /// réflexion du modèle avant de répondre
+    think: bool,
+    /// "low", "medium" ou "high" : longueur permise à la réflexion
+    effort: String,
+    /// passage lu dans la leçon jointe (position UTF-16), pour les longues leçons
+    focus: Option<usize>,
+}
+
+#[derive(Serialize, Clone)]
+#[serde(tag = "type", rename_all = "camelCase")]
+pub enum ChatEvent {
+    Thought { text: String },
+    Answer { text: String },
+}
+
+#[derive(Serialize)]
+pub struct ChatReply {
+    chat: db::ChatSummary,
+    /// question et réponse enregistrées (aucune si l'arrêt est venu avant le premier mot)
+    user: Option<db::ChatMessage>,
+    assistant: Option<db::ChatMessage>,
+    stopped: bool,
+}
+
+#[tauri::command]
+pub async fn chats_list(state: State<'_, AppState>, lang: String) -> R<Vec<db::ChatSummary>> {
+    db::chats_list(&state.db.lock(), &lang).map_err(err)
+}
+
+#[tauri::command]
+pub async fn chat_open(state: State<'_, AppState>, id: i64) -> R<ChatThread> {
+    let c = state.db.lock();
+    Ok(ChatThread { chat: db::chat_get(&c, id).map_err(err)?, messages: db::chat_messages(&c, id).map_err(err)? })
+}
+
+#[tauri::command]
+pub async fn chat_create(state: State<'_, AppState>, lang: String, lesson: Option<i64>) -> R<db::ChatSummary> {
+    let c = state.db.lock();
+    let id = db::chat_create(&c, &lang, lesson).map_err(err)?;
+    db::chat_get(&c, id).map_err(err)
+}
+
+#[tauri::command]
+pub async fn chat_update(state: State<'_, AppState>, id: i64, patch: db::ChatPatch) -> R<db::ChatSummary> {
+    let c = state.db.lock();
+    db::chat_update(&c, id, &patch).map_err(err)?;
+    db::chat_get(&c, id).map_err(err)
+}
+
+#[tauri::command]
+pub async fn chat_delete(state: State<'_, AppState>, id: i64) -> R<()> {
+    db::chat_delete(&state.db.lock(), id).map_err(err)
+}
+
+/// Pose une question au chat. La réflexion (si elle est demandée) puis la
+/// réponse arrivent au fil de l'eau ; la question et la réponse sont
+/// enregistrées à la fin. Annulable avec `model_cancel("chat:<id>")` : ce qui
+/// est déjà écrit est gardé.
+#[tauri::command]
+pub async fn chat_send(
+    state: State<'_, AppState>,
+    id: i64,
+    text: String,
+    options: ChatOptions,
+    on_event: Channel<ChatEvent>,
+) -> R<ChatReply> {
+    let text = text.trim().to_string();
+    if text.is_empty() {
+        return Err("Écrivez d'abord votre question.".into());
+    }
+    let m = active_model(&state, "llm")?;
+    let path = models::path_of(&state.data_dir, m);
+    // tout est lu d'un coup : aucun verrou n'est tenu pendant la génération
+    let (chat, history, lesson, known) = {
+        let c = state.db.lock();
+        let chat = db::chat_get(&c, id).map_err(err)?;
+        let history: Vec<(String, String)> = db::chat_messages(&c, id)
+            .map_err(err)?
+            .into_iter()
+            .filter(|m| !m.content.trim().is_empty())
+            .map(|m| (m.role, m.content))
+            .collect();
+        let lesson = match chat.lesson_id {
+            Some(l) => db::lesson_brief(&c, l).map_err(err)?,
+            None => None,
+        };
+        let known = db::known_words(&c, &chat.lang).unwrap_or(0);
+        (chat, history, lesson, known)
+    };
+    let excerpt = lesson.map(|(title, text)| {
+        let (text, partial) = ai::lesson_excerpt(&text, options.focus, CHAT_LESSON_BYTES);
+        (title, text, partial)
+    });
+    let context = excerpt.as_ref().map(|(title, text, partial)| ai::LessonContext { title, text, partial: *partial });
+    let hints: Vec<String> = ai::quoted_words(&text).iter().filter_map(|w| ai::dict_hint(&state.dicts, &chat.lang, w)).collect();
+    let messages = ai::chat_messages(&chat.lang, known, context.as_ref(), ai::recent_history(&history, CHAT_HISTORY_BYTES), &text, &hints);
+
+    let key = format!("chat:{id}");
+    let cancel = Arc::new(AtomicBool::new(false));
+    {
+        let mut dl = state.downloads.lock();
+        if dl.contains_key(&key) {
+            return Err("Lumen répond déjà dans cette conversation.".into());
+        }
+        dl.insert(key.clone(), cancel.clone());
+    }
+    let g = ai::Gen {
+        max_tokens: CHAT_ANSWER_TOKENS,
+        think: options.think.then(|| ai::think_budget(&options.effort)),
+        sampling: ai::Sampling::Natural,
+        priority: Priority::Stoppable(cancel),
+    };
+    let st = state.inner();
+    // durée de la réflexion : du premier mot pensé au premier mot de la réponse
+    let mut thinking_since: Option<std::time::Instant> = None;
+    let mut thought_secs = 0.0;
+    let res = tokio::task::block_in_place(|| {
+        st.ai.run(&path, &messages, g, |piece| {
+            match piece {
+                ai::Piece::Thought(t) => {
+                    thinking_since.get_or_insert_with(std::time::Instant::now);
+                    let _ = on_event.send(ChatEvent::Thought { text: t.to_string() });
+                }
+                ai::Piece::Answer(t) => {
+                    if let Some(since) = thinking_since.take() {
+                        thought_secs = since.elapsed().as_secs_f64();
+                    }
+                    let _ = on_event.send(ChatEvent::Answer { text: t.to_string() });
+                }
+            }
+            true
+        })
+    });
+    state.downloads.lock().remove(&key);
+    let out = res.map_err(err)?;
+    if let Some(since) = thinking_since {
+        thought_secs = since.elapsed().as_secs_f64();
+    }
+    let answer = out.answer.trim();
+    if answer.is_empty() {
+        if out.stopped {
+            // arrêt avant le premier mot : rien n'est enregistré, la question revient dans le champ
+            return Ok(ChatReply { chat, user: None, assistant: None, stopped: true });
+        }
+        return Err("L'IA n'a pas su répondre. Reformulez votre question, ou réessayez.".into());
+    }
+    let (user, assistant) = db::chat_append(&mut state.db.lock(), id, &text, answer, &out.thought, thought_secs, &ai::chat_title(&text)).map_err(err)?;
+    let chat = db::chat_get(&state.db.lock(), id).map_err(err)?;
+    Ok(ChatReply { chat, user: Some(user), assistant: Some(assistant), stopped: out.stopped })
+}
+
 // ---------- modèles ----------
 
 #[derive(Serialize)]
@@ -394,7 +584,7 @@ pub async fn models_list(state: State<'_, AppState>) -> R<Vec<ModelRow>> {
     Ok(models::CATALOG
         .iter()
         .map(|m| {
-            let part = models::path_of(&state.data_dir, m).with_extension("part");
+            let part = models::part_of(&state.data_dir, m);
             ModelRow {
                 info: m.clone(),
                 installed: models::installed(&state.data_dir, m),
@@ -440,11 +630,121 @@ pub async fn model_delete(state: State<'_, AppState>, id: String) -> R<()> {
     if state.ai.is_loaded(&p) {
         state.ai.unload();
     }
-    let _ = std::fs::remove_file(p.with_extension("part"));
-    if p.exists() {
-        std::fs::remove_file(p).map_err(err)?;
+    let _ = std::fs::remove_file(models::part_of(&state.data_dir, m));
+    if let Some(c) = models::companion_path(&state.data_dir, m) {
+        let _ = std::fs::remove_file(c.with_extension("part"));
+        let _ = std::fs::remove_file(c);
+    }
+    if p.is_dir() {
+        std::fs::remove_dir_all(&p).map_err(err)?;
+    } else if p.exists() {
+        std::fs::remove_file(&p).map_err(err)?;
+    }
+    if m.kind == "tts" {
+        crate::voice::remove_engine(&state.data_dir);
     }
     Ok(())
+}
+
+// ---------- voix naturelle ----------
+
+/// Voix choisie pour une langue (Réglages › Voix), sinon le réglage général.
+fn voice_for(state: &AppState, lang: &str) -> R<String> {
+    let s = db::settings_all(&state.db.lock()).map_err(err)?;
+    Ok(s.get(&format!("tts_voice_{lang}")).or_else(|| s.get("tts_voice")).cloned().unwrap_or_else(|| "0".into()))
+}
+
+fn voice_model(state: &AppState) -> R<&'static models::ModelInfo> {
+    models::CATALOG
+        .iter()
+        .find(|m| m.kind == "tts" && models::installed(&state.data_dir, m))
+        .ok_or_else(|| "NO_VOICE: aucune voix naturelle n'est installée".to_string())
+}
+
+#[derive(Serialize)]
+pub struct VoicedLesson {
+    media_path: String,
+    timings: String,
+    timing_v: i64,
+    duration: f64,
+}
+
+/// Crée l'audio d'une leçon de texte avec la voix naturelle. Si Whisper est
+/// installé, il réécoute l'audio pour caler la lanterne au mot près.
+/// Annulable avec `model_cancel("voice:<id>")`.
+#[tauri::command]
+pub async fn lesson_voice(state: State<'_, AppState>, id: i64, on_event: Channel<ImportEvent>) -> R<VoicedLesson> {
+    let m = voice_model(&state)?;
+    let (lang, text, _) = db::lesson_media(&state.db.lock(), id).map_err(err)?;
+    let voice = voice_for(&state, &lang)?;
+    let key = format!("voice:{id}");
+    let cancel = Arc::new(AtomicBool::new(false));
+    {
+        let mut dl = state.downloads.lock();
+        if dl.contains_key(&key) {
+            return Err("L'audio de cette leçon est déjà en cours de création.".into());
+        }
+        dl.insert(key.clone(), cancel.clone());
+    }
+    let asr = active_model(&state, "asr").ok();
+    // avec Whisper : 85 % pour la voix, 15 % pour le recalage
+    let share = if asr.is_some() { 0.85 } else { 1.0 };
+    let _ = on_event.send(ImportEvent::Stage { stage: "voice".into() });
+    let res = crate::voice::lesson_audio(&state.data_dir, m, &lang, &text, &voice, cancel, |p| {
+        let _ = on_event.send(ImportEvent::Progress { value: p * share });
+    })
+    .await;
+    state.downloads.lock().remove(&key);
+    let audio = res.map_err(err)?;
+    let mut timings = serde_json::to_string(&audio.timings).map_err(err)?;
+    let mut version = 1;
+    if let Some(asr) = asr {
+        let _ = on_event.send(ImportEvent::Stage { stage: "align".into() });
+        let words = media::transcribe(&models::path_of(&state.data_dir, asr), &audio.path, &lang, None, |e| {
+            if let ImportEvent::Progress { value } = e {
+                let _ = on_event.send(ImportEvent::Progress { value: 85.0 + value * 0.15 });
+            }
+        })
+        .await;
+        if let Ok(words) = words {
+            let (aligned, found) = media::align_timings(&text, &lang, &words);
+            // la voix lit exactement le texte : un bon recalage retrouve presque tout
+            if found >= 0.6 {
+                timings = aligned;
+                version = db::TIMING_PRECISE;
+            }
+        }
+    }
+    let media_path = audio.path.to_string_lossy().into_owned();
+    let old = db::lesson_set_voice(&state.db.lock(), id, &media_path, &timings, version, audio.duration).map_err(err)?;
+    if let Some(old) = old {
+        let _ = std::fs::remove_file(old);
+    }
+    Ok(VoicedLesson { media_path, timings, timing_v: version, duration: audio.duration })
+}
+
+/// Prononce un mot ou une expression avec la voix naturelle et renvoie le
+/// fichier WAV. `prefetch` : préparation en arrière-plan (au toucher d'un mot),
+/// abandonnée si une demande plus récente arrive entre-temps.
+#[tauri::command]
+pub async fn tts_say(state: State<'_, AppState>, lang: String, text: String, prefetch: bool) -> R<String> {
+    let m = voice_model(&state)?;
+    let text: String = text.split_whitespace().collect::<Vec<_>>().join(" ").chars().take(600).collect();
+    if text.is_empty() {
+        return Err("Rien à prononcer.".into());
+    }
+    let voice = voice_for(&state, &lang)?;
+    let cached = crate::voice::cached_path(&state.data_dir, m, &lang, &text, &voice);
+    if cached.exists() {
+        return Ok(cached.to_string_lossy().into_owned());
+    }
+    let my = state.voice_epoch.fetch_add(1, Ordering::SeqCst) + 1;
+    let _turn = state.voice_lock.lock().await;
+    if prefetch && state.voice_epoch.load(Ordering::SeqCst) != my {
+        return Err("interrompu".into());
+    }
+    let path = crate::voice::say(&state.data_dir, m, &lang, &text, &voice).await.map_err(err)?;
+    Ok(path.to_string_lossy().into_owned())
 }
 
 // ---------- import ----------
@@ -473,6 +773,25 @@ pub async fn read_file(path: String) -> R<Response> {
     Ok(Response::new(bytes))
 }
 
+/// Qwen3-ASR (modèle et partie audio), s'il est installé et connaît la langue.
+fn text_model(state: &AppState, lang: &str) -> Option<(PathBuf, PathBuf)> {
+    crate::asr::language_name(lang)?;
+    let m = models::CATALOG.iter().find(|m| m.kind == "asrtext" && models::installed(&state.data_dir, m))?;
+    Some((models::path_of(&state.data_dir, m), models::companion_path(&state.data_dir, m)?))
+}
+
+/// Transcrit un son pour en faire une leçon (Whisper, et Qwen3-ASR s'il est
+/// installé et connaît la langue) : voir `media::lesson_transcript`.
+async fn transcribe_media(state: &AppState, media: &std::path::Path, lang: &str, on_event: &Channel<ImportEvent>) -> R<(String, String)> {
+    let m = active_model(state, "asr")?;
+    let whisper = models::path_of(&state.data_dir, m);
+    media::lesson_transcript(&state.ai, &whisper, text_model(state, lang), media, lang, |e| {
+        let _ = on_event.send(e);
+    })
+    .await
+    .map_err(err)
+}
+
 async fn transcribe_into_lesson(
     state: &AppState,
     lang: &str,
@@ -483,14 +802,7 @@ async fn transcribe_into_lesson(
     video_path: Option<String>,
     on_event: &Channel<ImportEvent>,
 ) -> R<i64> {
-    let m = active_model(state, "asr")?;
-    let model_path = models::path_of(&state.data_dir, m);
-    let words = media::transcribe(&model_path, &stored, lang, |e| {
-        let _ = on_event.send(e);
-    })
-    .await
-    .map_err(err)?;
-    let (text, timings) = media::build_transcript(&words);
+    let (text, timings) = transcribe_media(state, &stored, lang, on_event).await?;
     if text.trim().is_empty() {
         let _ = std::fs::remove_file(&stored);
         return Err("Aucune parole n'a été reconnue dans ce fichier.".into());
@@ -566,18 +878,12 @@ pub async fn import_youtube(state: State<'_, AppState>, lang: String, url: Strin
         media::yt_video(&dd, &yt, &u, &st, br.as_deref(), &mut quiet).await
     });
 
-    let m = active_model(&state, "asr")?;
-    let model_path = models::path_of(&data_dir, m);
-    let words = match media::transcribe(&model_path, &audio, &lang, |e| {
-        let _ = on_event.send(e);
-    })
-    .await
-    {
-        Ok(w) => w,
+    let (text, timings) = match transcribe_media(&state, &audio, &lang, &on_event).await {
+        Ok(t) => t,
         Err(e) => {
             video_task.abort();
             let _ = std::fs::remove_file(&audio);
-            return Err(err(e));
+            return Err(e);
         }
     };
     send("video");
@@ -585,7 +891,6 @@ pub async fn import_youtube(state: State<'_, AppState>, lang: String, url: Strin
         Ok(Ok(p)) => Some(p.display().to_string()),
         _ => None,
     };
-    let (text, timings) = media::build_transcript(&words);
     if text.trim().is_empty() {
         let _ = std::fs::remove_file(&audio);
         if let Some(v) = &video {
@@ -619,7 +924,7 @@ pub async fn lesson_resync(state: State<'_, AppState>, id: i64, on_event: Channe
     let media = media.ok_or("Cette leçon n'a pas d'audio à recaler.")?;
     let m = active_model(&state, "asr")?;
     let model_path = models::path_of(&state.data_dir, m);
-    let words = media::transcribe(&model_path, std::path::Path::new(&media), &lang, |e| {
+    let words = media::transcribe(&model_path, std::path::Path::new(&media), &lang, None, |e| {
         let _ = on_event.send(e);
     })
     .await
@@ -700,4 +1005,39 @@ pub async fn lingq_cancel(state: State<'_, AppState>) -> R<()> {
         flag.store(true, Ordering::Relaxed);
     }
     Ok(())
+}
+
+// ---------- sauvegarde (iCloud Drive ou dossier choisi) ----------
+
+#[tauri::command]
+pub async fn backup_status(state: State<'_, AppState>) -> R<backup::Status> {
+    let st = state.inner();
+    Ok(tokio::task::block_in_place(|| backup::status(st)))
+}
+
+/// Sauvegarde maintenant ; renvoie l'état à jour (aussi diffusé par l'événement « backup »).
+#[tauri::command]
+pub async fn backup_run(app: tauri::AppHandle, state: State<'_, AppState>) -> R<backup::Status> {
+    let st = state.inner();
+    let res = tokio::task::block_in_place(|| backup::run_now(st));
+    let status = tokio::task::block_in_place(|| backup::status(st));
+    let _ = app.emit("backup", &status);
+    res.map(|_| status)
+}
+
+#[tauri::command]
+pub async fn backup_list(state: State<'_, AppState>) -> R<Vec<backup::Info>> {
+    let st = state.inner();
+    tokio::task::block_in_place(|| backup::list_for(st))
+}
+
+/// Remplace la progression de ce Mac par une sauvegarde (`day` : version d'un jour précédent).
+#[tauri::command]
+pub async fn backup_restore(state: State<'_, AppState>, key: String, day: Option<String>, on_event: Channel<ImportEvent>) -> R<backup::Restored> {
+    let st = state.inner();
+    tokio::task::block_in_place(|| {
+        backup::restore_for(st, &key, day.as_deref(), |e| {
+            let _ = on_event.send(e);
+        })
+    })
 }

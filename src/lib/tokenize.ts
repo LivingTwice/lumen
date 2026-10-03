@@ -1,17 +1,17 @@
 import type { Token } from "./types";
 
-/** Même normalisation que le backend (text.rs). */
-export function normalize(s: string): string {
-  return s
-    .trim()
-    .toLowerCase()
-    .replace(/’/g, "'")
-    .normalize("NFD")
-    .replace(/[́̀]/g, "")
-    .normalize("NFC")
-    .split(/\s+/)
-    .filter(Boolean)
-    .join(" ");
+/**
+ * Langues où les accents aigu et grave ne distinguent pas les mots (accent
+ * tonique des textes russes…) : retirés de la clé. Ailleurs (vietnamien, grec,
+ * tchèque, français…), ils font partie du mot. Miroir de `strips_accents` (text.rs).
+ */
+const STRIPS_ACCENTS = new Set(["", "en", "it", "de", "pt", "ru", "es", "uk", "bg"]);
+
+/** Même normalisation que le backend (text.rs, `normalize_for`). */
+export function normalize(s: string, lang = ""): string {
+  let t = s.trim().toLowerCase().replace(/’/g, "'");
+  t = STRIPS_ACCENTS.has(lang) ? t.normalize("NFD").replace(/[\u0301\u0300]/g, "").normalize("NFC") : t.normalize("NFC");
+  return t.split(/\s+/).filter(Boolean).join(" ");
 }
 
 const LETTER = /\p{L}/u;
@@ -23,7 +23,7 @@ export function tokenize(text: string, lang: string): Token[] {
   const out: Token[] = [];
   const push = (t: string, s: number) => {
     const w = LETTER.test(t);
-    out.push({ t, w, k: w ? normalize(t) : "", s, e: s + t.length });
+    out.push({ t, w, k: w ? normalize(t, lang) : "", s, e: s + t.length });
   };
   for (const part of seg.segment(text)) {
     const t = part.segment;
@@ -103,7 +103,8 @@ function countWords(tokens: Token[], a: number, b: number) {
   return n;
 }
 
-const SENTENCE_END = /[.!?…;]|\n/;
+// ponctuation de fin de phrase (latine, grecque « ; », japonaise, hindi, arabe), comme text.rs
+const SENTENCE_END = /[.!?…;。！？।؟]|\n/;
 
 /** Bornes (indices de jetons) de la phrase qui contient le jeton i. */
 export function sentenceBounds(tokens: Token[], i: number): [number, number] {

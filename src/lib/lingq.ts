@@ -77,7 +77,10 @@ export const useLingq = create<LingqState>((set, get) => ({
         set({ phase: "idle", error: "Ce compte LingQ ne contient rien dans les langues que Lumen propose." });
         return;
       }
-      set({ phase: "ready", account, chosen: account.map((a) => a.lang) });
+      // par défaut, seulement les langues déjà étudiées dans Lumen (les autres se cochent à la main)
+      const studied = useApp.getState().langs();
+      const mine = account.map((a) => a.lang).filter((l) => studied.includes(l));
+      set({ phase: "ready", account, chosen: mine.length ? mine : account.map((a) => a.lang) });
     } catch (e) {
       set({ phase: "idle", error: errorText(e) });
     }
@@ -97,6 +100,9 @@ export const useLingq = create<LingqState>((set, get) => ({
     if (!chosen.length || (!vocab && !lessons)) return;
     set({ phase: "importing", error: "", stage: null, done: 0, total: 0, lastLesson: "", report: null });
     const app = useApp.getState();
+    // langues étudiées au départ : l'import n'ajoute que des langues nouvelles,
+    // jamais une langue retirée dans les Réglages pendant qu'il tournait
+    const before = app.langs();
     try {
       const report = await api().lingqImport(key, { langs: chosen, vocab, lessons, audio: lessons && audio }, (e) => {
         if (e.type === "stage") set({ stage: { lang: e.lang, stage: e.stage }, done: 0, total: 0 });
@@ -104,8 +110,8 @@ export const useLingq = create<LingqState>((set, get) => ({
         else set({ lastLesson: e.title });
       });
       // les langues importées rejoignent celles étudiées dans Lumen
-      const langs = app.langs();
-      const added = chosen.filter((l) => !langs.includes(l));
+      const langs = useApp.getState().langs();
+      const added = chosen.filter((l) => !langs.includes(l) && !before.includes(l));
       if (added.length) await app.setSetting("langs", [...langs, ...added].join(","));
       set({ phase: "done", report, stage: null });
       app.bumpLibrary();

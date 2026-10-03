@@ -1,20 +1,13 @@
 import { AnimatePresence, motion, useMotionValue, useSpring, useTransform } from "motion/react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Icon } from "../components/Icon";
-import { api } from "../lib/api";
-import { LANGS, STARTERS } from "../lib/langs";
+import { Orb, Switch } from "../components/ui";
+import { api, errorText } from "../lib/api";
+import { RESTORE_STAGE, formatWhen, pickBackupFolder, reloadProgress, useBackup } from "../lib/backup";
+import { CORE_LANGS, LANGS, STARTERS, langInfo, type LangInfo } from "../lib/langs";
 import { PROFILES } from "../lib/profiles";
-import { formatBytes, useApp } from "../lib/store";
-import type { LangCode } from "../lib/types";
-
-const HELLO: Record<LangCode, string> = {
-  en: "Hello",
-  it: "Ciao",
-  de: "Hallo",
-  pt: "Olá",
-  ru: "Привет",
-  es: "Hola",
-};
+import { formatBytes, formatNumber, useApp } from "../lib/store";
+import type { BackupInfo, BackupRestored, LangCode } from "../lib/types";
 
 const EASE = [0.16, 1, 0.3, 1] as const;
 // marge au-dessus de la scène pour que les rayons de l'astre ne soient pas coupés
@@ -50,6 +43,21 @@ export function Onboarding() {
   const stageRef = useRef<HTMLDivElement>(null);
   const orbRef = useRef<HTMLDivElement>(null);
   const [H, setH] = useState(800);
+  // sauvegarde : retrouver une progression (étape 4), ou sauvegarder la nouvelle
+  const backup = useBackup((s) => s.status);
+  const restoring = useBackup((s) => s.restoring);
+  const restoreError = useBackup((s) => s.restoreError);
+  const [found, setFound] = useState<BackupInfo[] | null>(null);
+  const [searchError, setSearchError] = useState("");
+  const [picked, setPicked] = useState<string | null>(null);
+  const [restored, setRestored] = useState<BackupRestored | null>(null);
+  const [saveCloud, setSaveCloud] = useState(true);
+  // proposée tant que l'utilisateur n'a pas choisi (pas en relecture d'une sauvegarde déjà réglée)
+  const offerBackup = !!backup?.dir && !backup.decided;
+
+  useEffect(() => {
+    void useBackup.getState().refresh();
+  }, []);
 
   // parallaxe douce : le ciel suit légèrement le pointeur
   const mx = useMotionValue(0);
@@ -88,6 +96,38 @@ export function Onboarding() {
 
   const toggle = (c: LangCode) => setLangs((l) => (l.includes(c) ? l.filter((x) => x !== c) : [...l, c]));
 
+  const langCard = (l: LangInfo, delay: number) => {
+    const on = langs.includes(l.code);
+    return (
+      <motion.button
+        key={l.code}
+        className={`ob-card ${on ? "on" : ""}`}
+        onClick={() => toggle(l.code)}
+        onMouseMove={glow}
+        aria-pressed={on}
+        title={`${l.name} · ${l.native}`}
+        initial={{ opacity: 0, y: 18 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay, duration: 0.6, ease: EASE }}
+      >
+        <span className="hello" lang={l.code} dir={l.rtl ? "rtl" : undefined}>
+          {l.hello}
+        </span>
+        <span className="meta">
+          <span className="dot-lang" style={{ background: l.color }} />
+          {CORE_LANGS.includes(l.code) ? `${l.name} · ${l.native}` : l.name}
+        </span>
+        <AnimatePresence>
+          {on && (
+            <motion.span className="tick" initial={{ scale: 0 }} animate={{ scale: 1 }} exit={{ scale: 0 }} transition={{ type: "spring", stiffness: 500, damping: 22 }}>
+              <Icon name="check" size={14} stroke={2.6} />
+            </motion.span>
+          )}
+        </AnimatePresence>
+      </motion.button>
+    );
+  };
+
   const startDownload = () => {
     const p = PROFILES.find((x) => x.id === profile)!;
     void setSetting("llm_model", p.llm);
@@ -96,9 +136,59 @@ export function Onboarding() {
     setN(3);
   };
 
-  const finish = async () => {
+  const startBloom = () => {
     const r = orbRef.current?.getBoundingClientRect();
     setBloom({ x: r ? r.left + r.width / 2 : window.innerWidth / 2, y: r ? r.top + r.height / 2 : window.innerHeight / 3 });
+  };
+
+  // ---------- retrouver une progression ----------
+
+  const search = async () => {
+    setFound(null);
+    setSearchError("");
+    try {
+      const list = (await api().backupList()).filter((b) => !b.newer);
+      setFound(list);
+      setPicked(list[0]?.key ?? null);
+    } catch (e) {
+      setFound([]);
+      setSearchError(errorText(e));
+    }
+  };
+
+  const openRestore = () => {
+    useBackup.setState({ restoreError: "" });
+    setN(4);
+    void search();
+  };
+
+  const chooseFolder = async () => {
+    const dir = await pickBackupFolder();
+    if (!dir) return;
+    await setSetting("backup_dir", dir);
+    void search();
+  };
+
+  const doRestore = async () => {
+    const info = found?.find((b) => b.key === picked);
+    if (!info) return;
+    const r = await useBackup.getState().restore(info, null);
+    if (!r) return;
+    setRestored(r);
+    // les modèles d'IA ne voyagent pas avec la sauvegarde : on propose de les télécharger
+    setN(models.some((m) => m.kind === "llm" && m.installed) ? 3 : 2);
+  };
+
+  const finishRestored = async () => {
+    startBloom();
+    await new Promise((res) => setTimeout(res, 950));
+    setReplay(false);
+    // la base restaurée est relue : l'accueil laisse place à la bibliothèque
+    await reloadProgress();
+  };
+
+  const finish = async () => {
+    startBloom();
     const started = performance.now();
     await setSetting("langs", langs.join(","));
     await setSetting("lang", langs[0]);
@@ -113,9 +203,12 @@ export function Onboarding() {
     await refreshKnown();
     const wait = 950 - (performance.now() - started);
     if (wait > 0) await new Promise((res) => setTimeout(res, wait));
+    if (offerBackup) await setSetting("backup_on", saveCloud ? "1" : "0");
     await setSetting("onboarded", "1");
     setReplay(false);
     openLesson(first);
+    // macOS demande l'accès à iCloud Drive maintenant, juste après le choix
+    if (offerBackup && saveCloud) void useBackup.getState().save();
   };
 
   useEffect(() => {
@@ -204,10 +297,15 @@ export function Onboarding() {
               <motion.p className="ob-lead" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 2.3, duration: 1 }}>
                 Apprenez une langue comme vous avez appris la vôtre : en lisant et en écoutant ce qui vous passionne. Un mot à la fois, jusqu'à ce que tout s'éclaire.
               </motion.p>
-              <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 2.8, duration: 0.8, ease: EASE }}>
+              <motion.div className="ob-welcome-actions" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 2.8, duration: 0.8, ease: EASE }}>
                 <button className="ob-cta" onClick={() => setN(1)}>
                   Commencer <Icon name="forward" size={16} stroke={2} />
                 </button>
+                {!replay && (
+                  <button className="ob-restore-link" onClick={openRestore}>
+                    <Icon name="cloud" size={15} /> J'ai déjà utilisé Lumen : retrouver ma progression
+                  </button>
+                )}
               </motion.div>
             </motion.div>
           )}
@@ -215,38 +313,12 @@ export function Onboarding() {
           {n === 1 && (
             <motion.div key="1" className="ob-step form" {...stepAnim}>
               <h2>Quelles langues voulez-vous apprendre ?</h2>
-              <p className="ob-sub">Chacune a sa bibliothèque, son vocabulaire et son dictionnaire hors ligne. Vous pourrez en ajouter plus tard.</p>
-              <div className="ob-grid langs">
-                {LANGS.map((l, i) => {
-                  const on = langs.includes(l.code);
-                  return (
-                    <motion.button
-                      key={l.code}
-                      className={`ob-card ${on ? "on" : ""}`}
-                      onClick={() => toggle(l.code)}
-                      onMouseMove={glow}
-                      aria-pressed={on}
-                      initial={{ opacity: 0, y: 18 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      transition={{ delay: 0.15 + i * 0.06, duration: 0.6, ease: EASE }}
-                    >
-                      <span className="hello" lang={l.code}>
-                        {HELLO[l.code]}
-                      </span>
-                      <span className="meta">
-                        <span className="dot-lang" style={{ background: l.color }} />
-                        {l.name} · {l.native}
-                      </span>
-                      <AnimatePresence>
-                        {on && (
-                          <motion.span className="tick" initial={{ scale: 0 }} animate={{ scale: 1 }} exit={{ scale: 0 }} transition={{ type: "spring", stiffness: 500, damping: 22 }}>
-                            <Icon name="check" size={14} stroke={2.6} />
-                          </motion.span>
-                        )}
-                      </AnimatePresence>
-                    </motion.button>
-                  );
-                })}
+              <p className="ob-sub">Chacune a sa bibliothèque et son vocabulaire. Vous pourrez en ajouter ou en retirer plus tard.</p>
+              <div className="ob-langs-scroll">
+                <div className="ob-group">Avec dictionnaire hors ligne</div>
+                <div className="ob-grid langs">{LANGS.filter((l) => CORE_LANGS.includes(l.code)).map((l, i) => langCard(l, 0.15 + i * 0.06))}</div>
+                <div className="ob-group">Avec la traduction par l'IA et la voix naturelle</div>
+                <div className="ob-grid langs compact">{LANGS.filter((l) => !CORE_LANGS.includes(l.code)).map((l, i) => langCard(l, 0.5 + i * 0.025))}</div>
               </div>
               <div className="ob-actions">
                 <button className="ob-link" onClick={() => setN(0)}>
@@ -296,12 +368,34 @@ export function Onboarding() {
             </motion.div>
           )}
 
-          {n === 3 && (
+          {n === 3 && restored && (
+            <motion.div key="3r" className="ob-step ready" {...stepAnim}>
+              <h2>Bon retour</h2>
+              <p className="ob-sub">
+                {formatNumber(restored.counts.known)} mots connus et {formatNumber(restored.counts.lessons)} leçon{restored.counts.lessons > 1 ? "s" : ""} vous attendent, exactement là où vous les aviez laissés.
+              </p>
+              <button className="ob-cta" onClick={finishRestored} disabled={!!bloom}>
+                Retrouver ma bibliothèque <Icon name="library" size={16} />
+              </button>
+            </motion.div>
+          )}
+
+          {n === 3 && !restored && (
             <motion.div key="3" className="ob-step ready" {...stepAnim}>
               <h2>Tout est prêt</h2>
               <p className="ob-sub">
                 Une courte histoire vous attend dans chaque langue choisie. Touchez les mots inconnus, écoutez la page, puis terminez-la : les mots compris rejoignent votre vocabulaire.
               </p>
+              {offerBackup && (
+                <motion.label className="ob-backup" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.35, duration: 0.6, ease: EASE }}>
+                  <Icon name="cloud" size={20} />
+                  <span>
+                    <strong>Sauvegarder ma progression dans {backup.icloud ? "iCloud Drive" : "le dossier choisi"}</strong>
+                    <small>Une copie à l'abri, retrouvée en un clic si ce Mac s'efface ou sur un nouveau Mac.</small>
+                  </span>
+                  <Switch on={saveCloud} onChange={setSaveCloud} label="Sauvegarder ma progression" />
+                </motion.label>
+              )}
               <button className="ob-cta" onClick={finish} disabled={!!bloom || !langs.length}>
                 Ouvrir ma première lecture <Icon name="book" size={16} />
               </button>
@@ -312,10 +406,86 @@ export function Onboarding() {
               )}
             </motion.div>
           )}
+
+          {n === 4 && (
+            <motion.div key="4" className="ob-step form" {...stepAnim}>
+              <h2>Retrouver ma progression</h2>
+              <p className="ob-sub">Vos mots, vos expressions, vos leçons et vos réglages reviennent tels que vous les aviez laissés.</p>
+              {restoring ? (
+                <div className="ob-restoring">
+                  <Orb size={30} />
+                  <strong>{RESTORE_STAGE[restoring.stage] ?? "Restauration…"}</strong>
+                  <div className="ob-progress">
+                    <i style={{ width: `${restoring.stage === "media" ? 8 + restoring.value * 92 : restoring.stage === "apply" ? 100 : 8}%` }} />
+                  </div>
+                </div>
+              ) : found === null ? (
+                <div className="ob-search">
+                  <Orb size={20} /> Recherche dans {backup?.icloud === false ? "le dossier choisi" : "votre iCloud Drive"}…
+                </div>
+              ) : found.length ? (
+                <div className="ob-grid backups">
+                  {found.map((b, i) => (
+                    <motion.button
+                      key={b.key}
+                      className={`ob-card backup ${picked === b.key ? "on" : ""}`}
+                      onClick={() => setPicked(b.key)}
+                      onMouseMove={glow}
+                      aria-pressed={picked === b.key}
+                      initial={{ opacity: 0, y: 18 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ delay: 0.1 + i * 0.07, duration: 0.6, ease: EASE }}
+                    >
+                      <span className="ob-device">
+                        <Icon name="laptop" size={15} /> {b.device_name}
+                      </span>
+                      <strong className="pname">{formatNumber(b.counts.known)} mots connus</strong>
+                      <span className="pdesc">
+                        {formatNumber(b.counts.lessons)} leçon{b.counts.lessons > 1 ? "s" : ""}
+                        {b.counts.langs.length ? ` en ${b.counts.langs.map((l) => langInfo(l).name.toLowerCase()).join(", ")}` : ""}
+                        <br />
+                        Sauvegardée {formatWhen(b.saved_at)}
+                      </span>
+                      <AnimatePresence>
+                        {picked === b.key && (
+                          <motion.span className="tick" initial={{ scale: 0 }} animate={{ scale: 1 }} exit={{ scale: 0 }} transition={{ type: "spring", stiffness: 500, damping: 22 }}>
+                            <Icon name="check" size={14} stroke={2.6} />
+                          </motion.span>
+                        )}
+                      </AnimatePresence>
+                    </motion.button>
+                  ))}
+                </div>
+              ) : (
+                <p className="ob-empty">{searchError || `Aucune sauvegarde de Lumen dans ${backup?.icloud === false ? "ce dossier" : "votre iCloud Drive"}.`}</p>
+              )}
+              {restoreError && !restoring && <p className="ob-error">{restoreError}</p>}
+              <div className="ob-actions">
+                <button className="ob-link" onClick={() => setN(0)} disabled={!!restoring}>
+                  Retour
+                </button>
+                {found !== null && !found.length ? (
+                  <>
+                    <button className="ob-link" onClick={chooseFolder}>
+                      Choisir un dossier…
+                    </button>
+                    <button className="ob-cta" onClick={() => setN(1)}>
+                      Commencer sans sauvegarde <Icon name="forward" size={16} stroke={2} />
+                    </button>
+                  </>
+                ) : (
+                  <button className="ob-cta" onClick={doRestore} disabled={!picked || !!restoring || found === null}>
+                    Restaurer <Icon name="forward" size={16} stroke={2} />
+                  </button>
+                )}
+              </div>
+            </motion.div>
+          )}
         </AnimatePresence>
       </div>
 
       <div className="ob-dots" aria-hidden="true">
+        {/* la restauration (étape 4) n'a pas de point : elle remplace les étapes 1 à 3 */}
         {[0, 1, 2, 3].map((i) => (
           <i key={i} className={i === n ? "on" : ""} />
         ))}

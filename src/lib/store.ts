@@ -2,7 +2,7 @@ import { create } from "zustand";
 import { api, errorText } from "./api";
 import type { AppInfo, DownloadEvent, LangCode, ModelRow } from "./types";
 
-export type View = "library" | "reader" | "vocab" | "progress" | "settings";
+export type View = "library" | "playlists" | "reader" | "chat" | "vocab" | "progress" | "settings";
 
 export interface Toast {
   id: number;
@@ -24,12 +24,22 @@ export const DEFAULTS: Record<string, string> = {
   word_style: "tint",
   auto_sentence: "1",
   finish_marks_known: "1",
+  reader_sidebar: "1",
+  tts_voice: "0",
   tts_rate: "0.95",
   llm_model: "qwen3.5-2b",
   asr_model: "whisper-turbo",
+  // chat : réflexion du modèle avant de répondre, et sa longueur
+  chat_think: "0",
+  chat_effort: "medium",
   langs: "",
   lang: "",
   onboarded: "",
+  // sauvegarde : "" tant que l'utilisateur n'a pas choisi ; dossier vide = iCloud Drive
+  backup_on: "",
+  backup_dir: "",
+  backup_audio: "1",
+  backup_video: "0",
 };
 
 interface AppStore {
@@ -38,6 +48,12 @@ interface AppStore {
   settings: Record<string, string>;
   view: View;
   lessonId: number | null;
+  /** playlist affichée dans la vue Playlists (null : toutes les playlists) */
+  playlistId: number | null;
+  /** playlist suivie par la leçon en cours (null : leçon ouverte seule) */
+  queue: number | null;
+  /** la leçon qui s'ouvre démarre sa lecture d'elle-même (playlist qui s'enchaîne) */
+  autoplay: boolean;
   importOpen: boolean;
   importFiles: string[] | null;
   toasts: Toast[];
@@ -55,7 +71,9 @@ interface AppStore {
   lang(): LangCode;
   langs(): LangCode[];
   go(view: View): void;
-  openLesson(id: number): void;
+  openPlaylist(id: number | null): void;
+  /** ouvre une leçon ; dans une playlist, la leçon suivante s'enchaîne à la fin */
+  openLesson(id: number, opts?: { playlist?: number; autoplay?: boolean }): void;
   /** oublie la leçon en cours si c'est celle-ci (supprimée) */
   forgetLesson(id: number): void;
   openImport(files?: string[] | null): void;
@@ -70,12 +88,18 @@ interface AppStore {
 
 let toastId = 0;
 
+/** File des écritures de réglages (dans l'ordre des clics). */
+let writes: Promise<unknown> = Promise.resolve();
+
 export const useApp = create<AppStore>((set, get) => ({
   ready: false,
   info: null,
   settings: { ...DEFAULTS },
   view: "library",
   lessonId: null,
+  playlistId: null,
+  queue: null,
+  autoplay: false,
   importOpen: false,
   importFiles: null,
   toasts: [],
@@ -93,7 +117,8 @@ export const useApp = create<AppStore>((set, get) => ({
     const [info, settings] = await Promise.all([api().appInfo(), api().settingsGet()]);
     // la dernière leçon ouverte reste « en cours » d'un lancement à l'autre
     const last = Number(settings.last_lesson) || null;
-    set({ info, settings: { ...DEFAULTS, ...settings }, lessonId: last, ready: true });
+    const queue = (last && Number(settings.last_playlist)) || null;
+    set({ info, settings: { ...DEFAULTS, ...settings }, lessonId: last, queue, ready: true });
     await get().refreshModels();
     await get().refreshKnown();
     // prépare l'IA en arrière-plan dès l'ouverture de l'application
@@ -106,7 +131,10 @@ export const useApp = create<AppStore>((set, get) => ({
 
   async setSetting(key, value) {
     set((s) => ({ settings: { ...s.settings, [key]: value } }));
-    await api().settingsSet(key, value);
+    // écritures à la file : la dernière valeur choisie est toujours la dernière enregistrée
+    const write = writes.then(() => api().settingsSet(key, value));
+    writes = write.catch(() => {});
+    await write;
   },
 
   lang() {
@@ -125,14 +153,21 @@ export const useApp = create<AppStore>((set, get) => ({
     set({ view });
   },
 
-  openLesson(id) {
-    set({ lessonId: id, view: "reader" });
+  openPlaylist(id) {
+    set({ view: "playlists", playlistId: id });
+  },
+
+  openLesson(id, opts = {}) {
+    // la playlist reste suivie quand on revient à la même leçon (« Lecture en cours »)
+    const queue = opts.playlist ?? (id === get().lessonId ? get().queue : null);
+    set({ lessonId: id, view: "reader", queue, autoplay: !!opts.autoplay });
     if (get().settings.last_lesson !== String(id)) void get().setSetting("last_lesson", String(id));
+    if ((get().settings.last_playlist ?? "") !== String(queue ?? "")) void get().setSetting("last_playlist", queue ? String(queue) : "");
   },
 
   forgetLesson(id) {
     if (get().lessonId !== id) return;
-    set({ lessonId: null });
+    set({ lessonId: null, queue: null });
     void get().setSetting("last_lesson", "");
   },
 

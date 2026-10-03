@@ -6,7 +6,7 @@ import { api, errorText, isTauri } from "../lib/api";
 import { pickSavePath } from "../lib/dialogs";
 import { langInfo } from "../lib/langs";
 import { formatNumber, useApp } from "../lib/store";
-import { sayWord } from "../lib/tts";
+import { pronounce } from "../lib/pronounce";
 import type { Term, TermQuery } from "../lib/types";
 
 const PAGE = 60;
@@ -120,7 +120,7 @@ export function Vocabulary() {
                 >
                   <span className="vocab-term" style={{ display: "flex", alignItems: "center", gap: 6 }}>
                     {t.term}
-                    <button className="icon-btn" style={{ width: 26, height: 26 }} onClick={() => sayWord(t.term, lang, settings[`voice_${lang}`])} aria-label={`Prononcer ${t.term}`}>
+                    <button className="icon-btn" style={{ width: 26, height: 26 }} onClick={() => void pronounce(t.term, lang, settings[`voice_${lang}`])} aria-label={`Prononcer ${t.term}`}>
                       <Icon name="speaker" size={14} />
                     </button>
                   </span>

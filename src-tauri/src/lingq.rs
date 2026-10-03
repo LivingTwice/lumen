@@ -24,7 +24,7 @@ use crate::text;
 
 const API: &str = "https://www.lingq.com/api";
 /// Langues que Lumen sait étudier.
-const LANGS: [&str; 6] = ["en", "es", "it", "de", "pt", "ru"];
+const LANGS: &[&str] = crate::text::LANGS;
 
 /// Clé refusée : arrête tout l'import (les autres erreurs ne touchent
 /// qu'une leçon).
@@ -286,7 +286,9 @@ pub async fn scan(key: &str) -> Result<Vec<LangSummary>> {
         }
     }
     let mut out = Vec::new();
-    for lang in LANGS {
+    // les langues du compte quand LingQ les donne (moins d'appels), sinon toutes
+    let candidates: Vec<&str> = if known.is_empty() { LANGS.to_vec() } else { LANGS.iter().copied().filter(|l| known.contains_key(*l)).collect() };
+    for lang in candidates {
         let known_words = match known.get(lang) {
             Some(n) => *n,
             None => c.count(&format!("v2/{lang}/known-words/")).await?,
@@ -391,7 +393,7 @@ fn round2(x: f64) -> f64 {
 
 /// LingQ ne donne qu'un horodatage par phrase : on répartit sa durée sur
 /// ses mots, au prorata de leur longueur, pour que la lanterne suive l'audio.
-fn spread_words(sentence: &str, lang: &str, base: usize, t0: f64, t1: f64, out: &mut Vec<[f64; 4]>) {
+pub(crate) fn spread_words(sentence: &str, lang: &str, base: usize, t0: f64, t1: f64, out: &mut Vec<[f64; 4]>) {
     let words: Vec<text::Token> = text::tokenize(sentence, lang).into_iter().filter(|t| t.w).collect();
     let weight = |t: &text::Token| (t.e - t.s) as f64 + 1.0;
     let total: f64 = words.iter().map(weight).sum();

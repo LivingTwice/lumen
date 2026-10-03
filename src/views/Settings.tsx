@@ -3,12 +3,14 @@ import { Icon } from "../components/Icon";
 import { Segmented, Switch } from "../components/ui";
 import { api, isTauri } from "../lib/api";
 import { confirmAsk } from "../lib/dialogs";
-import { LANGS, STARTERS, langInfo } from "../lib/langs";
+import { LANGS, STARTERS, langInfo, theLang } from "../lib/langs";
 import { PROFILES } from "../lib/profiles";
 import { formatBytes, useApp } from "../lib/store";
+import { NATURAL_VOICES, naturalVoiceFor, pronounce } from "../lib/pronounce";
 import { loadVoices, sayWord, voicesFor } from "../lib/tts";
 import { useUpdate } from "../lib/updater";
 import type { LangCode, ModelRow } from "../lib/types";
+import { BackupSection } from "./BackupSection";
 import { LingqSection } from "./LingqSection";
 
 function ModelLine({ m }: { m: ModelRow }) {
@@ -18,8 +20,9 @@ function ModelLine({ m }: { m: ModelRow }) {
   const refresh = useApp((s) => s.refreshModels);
   const setSetting = useApp((s) => s.setSetting);
   const settings = useApp((s) => s.settings);
-  const activeKey = m.kind === "llm" ? "llm_model" : "asr_model";
-  const isActive = settings[activeKey] === m.id;
+  // la voix n'a qu'un modèle : pas de choix « Utiliser »
+  const activeKey = m.kind === "llm" ? "llm_model" : m.kind === "asr" ? "asr_model" : null;
+  const isActive = !!activeKey && settings[activeKey] === m.id;
 
   const remove = async () => {
     if (!(await confirmAsk(`Supprimer ${m.name} (${formatBytes(m.size)}) de ce Mac ?`, "Supprimer le modèle", "Supprimer"))) return;
@@ -51,7 +54,7 @@ function ModelLine({ m }: { m: ModelRow }) {
       </div>
       {m.installed ? (
         <>
-          {!isActive && (
+          {activeKey && !isActive && (
             <button className="btn sm soft" onClick={() => setSetting(activeKey, m.id)}>
               Utiliser
             </button>
@@ -65,7 +68,7 @@ function ModelLine({ m }: { m: ModelRow }) {
           Annuler
         </button>
       ) : (
-        <button className="btn sm outline" onClick={() => (setSetting(activeKey, m.id), download(m.id))}>
+        <button className="btn sm outline" onClick={() => (activeKey && setSetting(activeKey, m.id), download(m.id))}>
           <Icon name="download" size={14} /> {m.partial > 0 || dl?.error ? "Reprendre" : "Télécharger"}
         </button>
       )}
@@ -105,7 +108,10 @@ export function Settings() {
     const next = has ? langs.filter((l) => l !== code) : [...langs, code];
     await setSetting("langs", next.join(","));
     if (!has) {
-      await api().lessonCreate({ lang: code, title: STARTERS[code].title, text: STARTERS[code].text, collection: "Pour commencer" });
+      // la leçon d'accueil, sans doublon si la langue avait déjà été étudiée
+      const s = STARTERS[code];
+      const exists = (await api().lessonsList(code)).some((x) => x.title === s.title);
+      if (!exists) await api().lessonCreate({ lang: code, title: s.title, text: s.text, collection: "Pour commencer" });
       bump();
     }
     if (has && code === lang) {
@@ -166,28 +172,56 @@ export function Settings() {
                 .map((m) => (
                   <ModelLine key={m.id} m={m} />
                 ))}
+              <div className="set-row">
+                <div className="grow">
+                  <span className="eyebrow">Texte des transcriptions</span>
+                  <span>Facultatif, conseillé : Qwen3-ASR écrit le texte, plus juste et sans phrase sautée, et Whisper repère chaque mot dans le temps pour la lanterne. Il couvre 23 langues ; l'estonien, le letton, le lituanien, le slovaque, le slovène, le croate, le bulgare et l'ukrainien restent transcrits par Whisper seul.</span>
+                </div>
+              </div>
+              {models
+                .filter((m) => m.kind === "asrtext")
+                .map((m) => (
+                  <ModelLine key={m.id} m={m} />
+                ))}
             </div>
           </section>
 
-          <section className="set-section">
+          <section className="set-section" id="set-langs">
             <h2>Langues étudiées</h2>
-            <p>Chaque langue a sa bibliothèque, son vocabulaire et ses progrès.</p>
+            <p>Chaque langue a sa bibliothèque, son vocabulaire et ses progrès. Retirer une langue garde ses leçons et ses mots.</p>
             <div className="set-card">
-              {LANGS.map((l) => (
-                <div key={l.code} className="set-row">
-                  <span className="lang-badge" style={{ background: l.color }}>
-                    {l.badge}
-                  </span>
-                  <div className="grow">
-                    <strong>{l.name}</strong>
-                    <span>
-                      {l.native}
-                      {info?.dict_langs.includes(l.code) ? " · dictionnaire hors ligne inclus" : ""}
+              {langs.map((code) => {
+                const l = langInfo(code);
+                return (
+                  <div key={l.code} className="set-row">
+                    <span className="lang-badge" style={{ background: l.color }}>
+                      {l.badge}
                     </span>
+                    <div className="grow">
+                      <strong>{l.name}</strong>
+                      <span>
+                        {l.native}
+                        {info?.dict_langs.includes(l.code) ? " · dictionnaire hors ligne inclus" : " · traduction par l'IA et voix naturelle"}
+                      </span>
+                    </div>
+                    <Switch on onChange={() => toggleLang(l.code)} label={`Ne plus étudier ${l.name.toLowerCase()}`} />
                   </div>
-                  <Switch on={langs.includes(l.code)} onChange={() => toggleLang(l.code)} label={`Étudier ${l.name}`} />
-                </div>
-              ))}
+                );
+              })}
+            </div>
+            <div className="lang-add">
+              <span className="eyebrow">Ajouter une langue</span>
+              <div className="lang-chips">
+                {LANGS.filter((l) => !langs.includes(l.code)).map((l) => (
+                  <button key={l.code} className="lang-chip" onClick={() => toggleLang(l.code)} title={`${l.name} · ${l.native}`}>
+                    <span className="lang-badge" style={{ background: l.color }}>
+                      {l.badge}
+                    </span>
+                    {l.name}
+                    <Icon name="plus" size={13} stroke={2.2} />
+                  </button>
+                ))}
+              </div>
             </div>
           </section>
 
@@ -251,12 +285,51 @@ export function Settings() {
 
           <section className="set-section">
             <h2>Voix</h2>
-            <p>Les voix du système, hors ligne. Pour de meilleures voix : Réglages Système › Accessibilité › Contenu énoncé › Voix du système › Gérer les voix.</p>
+            <p>La voix naturelle prononce les mots et les expressions que vous touchez, et lit toute une leçon de texte avec le bouton « Créer l'audio ». Elle est calculée sur votre Mac, seulement quand vous en avez besoin. Les voix du système lisent la leçon à voix haute sans préparation.</p>
             <div className="set-card">
               <div className="set-row">
                 <div className="grow">
-                  <strong>Voix pour l'{langInfo(lang).name.toLowerCase()}</strong>
-                  <span>{voices.length ? `${voices.length} voix disponibles` : "Aucune voix installée pour cette langue"}</span>
+                  <span className="eyebrow">Voix naturelle</span>
+                </div>
+              </div>
+              {models
+                .filter((m) => m.kind === "tts")
+                .map((m) => (
+                  <ModelLine key={m.id} m={m} />
+                ))}
+              {models.some((m) => m.kind === "tts" && m.installed) && (
+                <div className="set-row">
+                  <div className="grow">
+                    <strong>Voix pour {theLang(lang)}</strong>
+                    <span>10 voix, comprises dans le téléchargement ; elle lit aussi l'audio créé pour vos leçons</span>
+                  </div>
+                  <select className="select" value={naturalVoiceFor(lang)} onChange={(e) => setSetting(`tts_voice_${lang}`, e.target.value)} aria-label="Voix naturelle">
+                    {["Voix féminines", "Voix masculines"].map((g) => (
+                      <optgroup key={g} label={g}>
+                        {NATURAL_VOICES.filter((v) => v.group === g).map((v) => (
+                          <option key={v.id} value={v.id}>
+                            {v.name}
+                          </option>
+                        ))}
+                      </optgroup>
+                    ))}
+                  </select>
+                  <button className="icon-btn" onClick={() => void pronounce(STARTERS[lang].text.split(/[.!?。]/)[0].split(/\s+/).slice(0, 8).join(" "), lang, settings[voiceKey])} aria-label="Écouter la voix naturelle">
+                    <Icon name="speaker" />
+                  </button>
+                </div>
+              )}
+              <div className="set-row">
+                <div className="grow">
+                  <span className="eyebrow">Lecture à voix haute</span>
+                </div>
+              </div>
+              <div className="set-row">
+                <div className="grow">
+                  <strong>Voix du système pour {theLang(lang)}</strong>
+                  <span>
+                    {voices.length ? `${voices.length} voix disponible${voices.length > 1 ? "s" : ""}` : "Aucune voix installée pour cette langue"} · d'autres voix dans Réglages Système › Accessibilité › Contenu énoncé
+                  </span>
                 </div>
                 <select className="select" value={settings[voiceKey] ?? ""} onChange={(e) => setSetting(voiceKey, e.target.value)} aria-label="Voix">
                   <option value="">Automatique (la plus naturelle)</option>
@@ -302,6 +375,8 @@ export function Settings() {
               </div>
             </div>
           </section>
+
+          <BackupSection />
 
           <LingqSection />
 
@@ -389,7 +464,7 @@ export function Settings() {
                 <div className="grow">
                   <strong>Crédits</strong>
                   <span>
-                    Dictionnaires : Wiktionnaire via kaikki.org (CC BY-SA 4.0). Traduction : Qwen3.5 (Apache 2.0) par llama.cpp (MIT). Transcription : Whisper (MIT) par whisper.cpp. Polices : Literata, Newsreader, Geist (OFL).
+                    Dictionnaires : Wiktionnaire via kaikki.org (CC BY-SA 4.0). Traduction : Qwen3.5 (Apache 2.0) par llama.cpp (MIT). Transcription : Qwen3-ASR (Apache 2.0) par llama.cpp et Whisper (MIT) par whisper.cpp. Polices : Literata, Newsreader, Geist (OFL).
                   </span>
                 </div>
               </div>

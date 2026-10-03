@@ -2408,6 +2408,8 @@ dependencies = [
  "futures-util",
  "hex",
  "llama-cpp-2",
+ "objc2",
+ "objc2-foundation",
  "parking_lot",
  "reqwest",
  "rusqlite",

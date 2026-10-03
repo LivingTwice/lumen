@@ -1,15 +1,18 @@
 import { AnimatePresence, motion } from "motion/react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Icon } from "./components/Icon";
 import { Sidebar } from "./components/Sidebar";
 import { Orb, Toasts } from "./components/ui";
 import { isTauri } from "./lib/api";
 import { MEDIA_EXT, TEXT_EXT, extOf } from "./lib/importers";
+import { startBackupEvents } from "./lib/backup";
 import { useApp } from "./lib/store";
 import { startUpdateChecks } from "./lib/updater";
 import { ImportSheet } from "./views/ImportSheet";
+import { Chat } from "./views/Chat";
 import { Library } from "./views/Library";
 import { Onboarding } from "./views/Onboarding";
+import { Playlists } from "./views/Playlists";
 import { Progress } from "./views/Progress";
 import { Settings } from "./views/Settings";
 import { Vocabulary } from "./views/Vocabulary";
@@ -66,6 +69,20 @@ export function App() {
   const onboarded = useApp((s) => s.settings.onboarded);
   const replay = useApp((s) => s.replay);
   const [failed, setFailed] = useState<string | null>(null);
+  // barre latérale repliée dans une leçon (réglage reader_sidebar), visible partout ailleurs
+  const sideHidden = useApp((s) => s.view === "reader" && s.settings.reader_sidebar === "0");
+  // pendant le repli, le contenu est rogné ; ensuite les menus peuvent déborder
+  const [sliding, setSliding] = useState(false);
+  const firstSide = useRef(true);
+  useEffect(() => {
+    if (firstSide.current) {
+      firstSide.current = false;
+      return;
+    }
+    setSliding(true);
+    const t = window.setTimeout(() => setSliding(false), 600);
+    return () => window.clearTimeout(t);
+  }, [sideHidden]);
 
   useTheme();
   const dropping = useFileDrop(ready && !!onboarded);
@@ -73,7 +90,10 @@ export function App() {
   useEffect(() => {
     if (isTauri && navigator.userAgent.includes("Mac")) document.documentElement.classList.add("vibrant");
     init()
-      .then(() => startUpdateChecks())
+      .then(() => {
+        startUpdateChecks();
+        startBackupEvents();
+      })
       .catch((e) => setFailed(String(e)));
   }, [init]);
 
@@ -109,8 +129,10 @@ export function App() {
   if (!onboarded || replay) return <Onboarding />;
 
   return (
-    <div className="app">
-      <Sidebar />
+    <div className={`app ${sideHidden ? "side-hidden" : ""}`}>
+      <div className={`sidebar-shell ${sideHidden || sliding ? "clip" : ""}`} inert={sideHidden}>
+        <Sidebar />
+      </div>
       <main className="main">
         <AnimatePresence mode="wait" initial={false}>
           <motion.div
@@ -122,7 +144,9 @@ export function App() {
             transition={{ duration: 0.22, ease: [0.2, 0.8, 0.2, 1] }}
           >
             {view === "library" && <Library />}
+            {view === "playlists" && <Playlists />}
             {view === "reader" && <Reader />}
+            {view === "chat" && <Chat />}
             {view === "vocab" && <Vocabulary />}
             {view === "progress" && <Progress />}
             {view === "settings" && <Settings />}

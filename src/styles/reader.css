@@ -21,6 +21,11 @@
   align-items: center;
   gap: 8px;
   padding: 0 16px;
+  transition: padding-left 0.45s var(--ease-out);
+}
+/* barre latérale repliée sur Mac : on laisse la place aux boutons de la fenêtre */
+:root.vibrant:not(.cinema-mode) .app.side-hidden .reader-top {
+  padding-left: 84px;
 }
 .reader-top .title-mini {
   flex: 1;
@@ -147,16 +152,43 @@
 .page .w.sel {
   box-shadow: 0 0 0 2px var(--accent), 0 0 18px var(--accent-soft);
 }
-.page .w.sel-range {
-  background: var(--accent-soft);
-  border-radius: 0;
-  box-shadow: 0 0 0 2px var(--accent-soft);
+/* plusieurs mots surlignés : une seule bande continue, espaces compris */
+.page .w.sel-range,
+.page .sel-gap {
+  background: var(--w-sel);
+  box-shadow: none;
 }
+.page .w.sel-range {
+  border-radius: 0;
+}
+.page .w.sel-range.sel-a {
+  border-radius: 0.24em 0 0 0.24em;
+}
+.page .w.sel-range.sel-b {
+  border-radius: 0 0.24em 0.24em 0;
+}
+.page .sel-gap {
+  padding: 0.04em 0;
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+}
+/* expressions enregistrées : un trait continu sous tout le groupe de mots,
+   à la couleur de son niveau d'apprentissage */
 .page .ph {
   text-decoration: underline;
   text-decoration-thickness: 2px;
   text-underline-offset: 0.28em;
+  text-decoration-skip-ink: none;
   text-decoration-color: var(--w-phrase);
+}
+.page .ph.p1 {
+  text-decoration-color: var(--w-ln1);
+}
+.page .ph.p2 {
+  text-decoration-color: var(--w-ln2);
+}
+.page .ph.p3 {
+  text-decoration-color: var(--w-ln3);
 }
 .page .ph.p4 {
   text-decoration-color: transparent;
@@ -169,6 +201,22 @@
 .player-resync {
   white-space: nowrap;
   flex-shrink: 0;
+}
+/* « Créer l'audio » (voix naturelle) et sa progression */
+.player-voice {
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+span.player-voice {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--muted);
+}
+span.player-voice .icon-btn {
+  width: 22px;
+  height: 22px;
 }
 /* fenêtre étroite : la barre se resserre par paliers plutôt que de déborder */
 .player {
@@ -190,6 +238,9 @@
 }
 @container (max-width: 720px) {
   .player-resync .resync-label {
+    display: none;
+  }
+  .player-label {
     display: none;
   }
 }
@@ -439,6 +490,149 @@
   white-space: nowrap;
 }
 
+/* ---------- playlist : bandeau du haut et leçon suivante ---------- */
+
+.pl-strip-slot {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  justify-content: center;
+}
+.pl-strip {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+  max-width: 100%;
+  padding: 3px;
+  border-radius: 12px;
+  background: var(--chip);
+}
+.pl-strip .icon-btn {
+  width: 28px;
+  height: 28px;
+  border-radius: 9px;
+}
+.pl-strip .icon-btn:disabled {
+  opacity: 0.32;
+  background: transparent;
+  cursor: default;
+}
+.pl-strip-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  height: 28px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  font-size: 12.5px;
+  font-weight: 550;
+  color: var(--text);
+  transition: background-color 0.18s ease;
+}
+.pl-strip-name:hover {
+  background: var(--chip-hover);
+}
+.pl-strip-name .icon {
+  flex-shrink: 0;
+  color: var(--light-strong);
+}
+.pl-strip-name .name {
+  max-width: 260px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.pl-strip-name .pos {
+  flex-shrink: 0;
+  font-weight: 500;
+  color: var(--muted);
+}
+.up-next {
+  position: absolute;
+  z-index: 15;
+  left: 0;
+  right: 0;
+  bottom: 92px;
+  width: min(520px, calc(100% - 32px));
+  margin: 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 10px;
+  border-radius: 18px;
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--bg-elev) 92%, transparent);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  box-shadow: var(--shadow-l), 0 0 60px var(--light-veil);
+}
+.up-thumb {
+  width: 96px;
+  flex-shrink: 0;
+}
+.up-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.up-body strong {
+  font-family: var(--font-display);
+  font-size: 18px;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.up-go {
+  position: relative;
+  flex-shrink: 0;
+  width: 48px;
+  height: 48px;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--text);
+  display: grid;
+  place-items: center;
+  transition: transform 0.15s ease;
+}
+.up-go .up-ring {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  transform: rotate(-90deg);
+}
+.up-go .ring-bg {
+  fill: var(--chip);
+  stroke: var(--chip-hover);
+  stroke-width: 3;
+  transition: fill 0.2s ease;
+}
+.up-go .ring {
+  fill: none;
+  stroke: var(--light-strong);
+  stroke-width: 3;
+  stroke-linecap: round;
+  filter: drop-shadow(0 0 4px var(--light));
+}
+.up-go .icon {
+  position: relative;
+  margin-left: 2px;
+}
+.up-go:hover .ring-bg {
+  fill: var(--chip-hover);
+}
+.up-go:active {
+  transform: scale(0.94);
+}
+
 /* ---------- scène vidéo ---------- */
 
 .video-stage {
@@ -446,6 +640,9 @@
   padding: 0 28px 10px;
   display: flex;
   justify-content: center;
+  /* pas d'étirement : au retour du plein écran, WebKit gardait la hauteur
+     étirée et le cadre retombait à 0 (la vidéo disparaissait) */
+  align-items: flex-start;
   position: relative;
 }
 .video-frame {
@@ -516,8 +713,7 @@
   opacity: 0;
   transition: opacity 0.25s ease;
 }
-.video-frame:hover .video-tools,
-.cinema .video-tools {
+.video-frame:hover .video-tools {
   opacity: 1;
 }
 .video-tools .icon-btn {
@@ -530,54 +726,6 @@
   color: #1b1208;
   background: var(--light);
 }
-
-/* sous-titres interactifs */
-.subtitle {
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  padding: 40px 6% 16px;
-  text-align: center;
-  background: linear-gradient(180deg, transparent, rgba(0, 0, 0, 0.62) 55%);
-  cursor: default;
-}
-.subtitle p {
-  margin: 0;
-  font-family: var(--font-read);
-  font-size: clamp(16px, 1.6vw, 22px);
-  line-height: 1.5;
-  color: #fff;
-  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.6);
-}
-.subtitle .sw {
-  cursor: pointer;
-  border-radius: 5px;
-  padding: 0 2px;
-  transition: background-color 0.2s ease, color 0.2s ease, box-shadow 0.25s ease;
-}
-.subtitle .sw:hover {
-  background: rgba(255, 255, 255, 0.18);
-}
-.subtitle .sw.s0 {
-  box-shadow: inset 0 -2px 0 rgba(160, 175, 255, 0.85);
-}
-.subtitle .sw.s1,
-.subtitle .sw.s2,
-.subtitle .sw.s3 {
-  box-shadow: inset 0 -2px 0 rgba(255, 180, 94, 0.9);
-}
-.subtitle .sw.now {
-  background: rgba(255, 196, 120, 0.42);
-  box-shadow: 0 0 18px rgba(255, 180, 94, 0.55);
-}
-.video-stage.compact .subtitle {
-  padding: 24px 4% 8px;
-}
-.video-stage.compact .subtitle p {
-  font-size: 14px;
-  line-height: 1.4;
-}
 .video-get {
   background: #f3eee8;
   color: #1b1208;
@@ -586,15 +734,10 @@
   background: #fff;
   box-shadow: 0 0 24px rgba(255, 180, 94, 0.4);
 }
-.subtitle-tr {
-  margin-top: 6px !important;
-  font-family: var(--font-ui) !important;
-  font-size: clamp(13px, 1.2vw, 16px) !important;
-  color: rgba(255, 236, 214, 0.9) !important;
-}
 
-/* mode cinéma : la vidéo occupe tout, le panneau du mot reste à droite */
-:root.cinema-mode .sidebar {
+/* plein écran : l'image en haut, les sous-titres dans le noir juste dessous,
+   le panneau du mot reste à droite. Rien n'est écrit sur l'image. */
+:root.cinema-mode .sidebar-shell {
   display: none;
 }
 .reader.cinema .reader-col {
@@ -607,45 +750,128 @@
 .reader.cinema .reader-scroll {
   display: none;
 }
-.reader.cinema .video-stage {
-  flex: 1;
-  min-height: 0;
-  padding: 0 20px 12px;
-}
-.reader.cinema .video-frame {
-  max-width: none;
-  max-height: none;
-  height: 100%;
-  aspect-ratio: auto;
-  border-radius: 12px;
-  box-shadow: none;
-}
-.reader.cinema .subtitle {
-  padding-bottom: 28px;
-}
-.reader.cinema .subtitle p {
-  font-size: clamp(20px, 2.1vw, 32px);
-}
 .reader.cinema .player {
   background: #0d0b0a;
   border-top-color: rgba(255, 255, 255, 0.06);
   color: #eee;
 }
-.cinema-hint {
-  position: absolute;
-  bottom: 22px;
-  left: 50%;
-  transform: translateX(-50%);
-  font-size: 12px;
-  color: rgba(255, 255, 255, 0.5);
-  white-space: nowrap;
-  pointer-events: none;
-  display: none;
+.video-stage.cinema {
+  flex: 1;
+  min-height: 0;
+  padding: 0 28px;
+  flex-direction: column;
+  align-items: center;
+  overflow: hidden;
+  container-type: size;
+  /* hauteur réservée aux sous-titres : l'image ne descend jamais dessous */
+  --band: clamp(124px, 24cqh, 220px);
 }
-.reader.cinema .cinema-hint {
+.video-stage.cinema .video-frame {
+  flex: none;
+  /* centrage sûr : si une phrase très longue déborde, c'est le bas qui cède */
+  margin-top: auto;
+  width: min(100cqw, calc((100cqh - var(--band)) * var(--ar)));
+  max-width: none;
+  max-height: none;
+  aspect-ratio: var(--ar);
+  border-radius: 10px;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.05), 0 40px 90px -40px rgba(255, 170, 90, 0.22);
+}
+
+/* sous-titres interactifs, sous l'image */
+.subtitle-band {
+  flex: none;
+  margin-bottom: auto;
+  width: 100%;
+  max-width: 1100px;
+  min-height: var(--band);
+  padding: clamp(14px, 2.6cqh, 26px) 12px 16px;
+  text-align: center;
+  cursor: default;
+  animation: band-in 0.6s var(--ease-out) 0.1s both;
+}
+.sub-box {
+  position: relative;
+}
+.sub-line {
+  position: relative;
+  z-index: 1;
+  margin: 0;
+  font-family: var(--font-read);
+  font-size: clamp(22px, min(3cqw, 5cqh), 40px);
+  line-height: 1.5;
+  color: #f6f0e8;
+  animation: sub-in 0.2s ease-out both;
+}
+/* la lanterne, derrière le mot prononcé */
+.sub-lantern {
+  position: absolute;
+  left: 0;
+  top: 0;
+  z-index: 0;
+  pointer-events: none;
+  border-radius: 0.45em;
+}
+.sub-lantern::before {
+  content: "";
+  position: absolute;
+  inset: -60% -30%;
+  background: radial-gradient(closest-side, rgba(255, 190, 110, 0.42), rgba(255, 180, 94, 0.15) 60%, rgba(255, 180, 94, 0));
+  filter: blur(2px);
+}
+.sub-lantern::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: rgba(255, 196, 120, 0.16);
+  box-shadow: 0 0 0 1px rgba(255, 196, 120, 0.42);
+}
+.subtitle-band .sw {
+  cursor: pointer;
+  border-radius: 5px;
+  padding: 0 2px;
+  transition: background-color 0.2s ease, color 0.2s ease, box-shadow 0.25s ease;
+}
+.subtitle-band .sw:hover {
+  background: rgba(255, 255, 255, 0.12);
+}
+.subtitle-band .sw.s0 {
+  box-shadow: inset 0 -2px 0 rgba(160, 175, 255, 0.85);
+}
+.subtitle-band .sw.s1,
+.subtitle-band .sw.s2,
+.subtitle-band .sw.s3 {
+  box-shadow: inset 0 -2px 0 rgba(255, 180, 94, 0.9);
+}
+.sub-tr {
+  margin: 8px 0 0;
+  font-size: clamp(14px, min(1.5cqw, 2.4cqh), 19px);
+  line-height: 1.45;
+  color: rgba(255, 236, 214, 0.7);
+}
+.sub-hint {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.6;
+  color: rgba(255, 255, 255, 0.5);
+}
+.sub-hint span {
   display: block;
-  top: 16px;
-  bottom: auto;
+  margin-top: 4px;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.34);
+}
+@keyframes band-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+}
+@keyframes sub-in {
+  from {
+    opacity: 0;
+  }
 }
 
 /* ---------- panneau du mot ---------- */
@@ -688,6 +914,11 @@
   -webkit-user-select: text;
   overflow-wrap: anywhere;
 }
+/* passage de plusieurs mots : plus petit pour rester lisible */
+.wp-word h2.long {
+  font-size: 21px;
+  line-height: 1.4;
+}
 .wp-sub {
   display: flex;
   flex-wrap: wrap;
@@ -727,6 +958,44 @@
   box-shadow: 0 0 10px var(--light);
   animation: pulse 1s ease-in-out infinite;
   vertical-align: middle;
+}
+.wp-ai.passage {
+  font-size: 17px;
+  font-weight: 450;
+  line-height: 1.5;
+}
+/* rappel de l'expression qui contient le mot touché */
+.wp-expr {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 11px 13px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 0.2s ease, border-color 0.2s ease, box-shadow 0.3s ease;
+}
+.wp-expr:hover {
+  background: var(--light-veil);
+  border-color: var(--border-strong);
+  box-shadow: 0 0 22px var(--light-soft);
+}
+.wp-expr strong {
+  font-family: var(--font-read);
+  font-size: 17px;
+  font-weight: 520;
+  line-height: 1.35;
+  text-decoration: underline;
+  text-decoration-thickness: 2px;
+  text-underline-offset: 0.26em;
+  text-decoration-color: var(--w-ln1);
+}
+.wp-expr-tr {
+  font-size: 13.5px;
+  color: var(--muted);
 }
 .wp-note {
   padding: 11px 13px;

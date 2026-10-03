@@ -6,10 +6,13 @@ import { api, errorText, isNoModel } from "../../lib/api";
 import { LEVELS, langInfo } from "../../lib/langs";
 import { formatNumber, useApp } from "../../lib/store";
 import { paginate, sentenceBounds } from "../../lib/tokenize";
-import type { OpenedLesson, Term } from "../../lib/types";
+import type { LessonSummary, OpenedLesson, Term } from "../../lib/types";
 import { Player, type PlayerHandle, type PlaybackState } from "./Player";
+import { useChat } from "../../lib/chat";
+import { PlaylistStrip, UpNext, usePlaylist } from "./PlaylistBar";
+import { AsideTabs, ReaderChat, type AsideTab } from "./ReaderChat";
 import { VideoStage } from "./VideoStage";
-import { WordPanel, type Selection } from "./WordPanel";
+import { EXPR_MAX_WORDS, WordPanel, type Selection } from "./WordPanel";
 
 interface Range {
   a: number;
@@ -51,9 +54,12 @@ export function Reader() {
   const settings = useApp((s) => s.settings);
   const toast = useApp((s) => s.toast);
   const go = useApp((s) => s.go);
+  const setSetting = useApp((s) => s.setSetting);
   const bump = useApp((s) => s.bumpLibrary);
   const refreshKnown = useApp((s) => s.refreshKnown);
   const openLesson = useApp((s) => s.openLesson);
+  const openPlaylist = useApp((s) => s.openPlaylist);
+  const autoplay = useApp((s) => s.autoplay);
 
   const [data, setData] = useState<OpenedLesson | null>(null);
   const [terms, setTerms] = useState<Record<string, Term>>({});
@@ -65,6 +71,9 @@ export function Reader() {
   const [scrolled, setScrolled] = useState(false);
   const [simplify, setSimplify] = useState(false);
   const [glowKeys, setGlowKeys] = useState<Set<string>>(new Set());
+  const [upNext, setUpNext] = useState<LessonSummary | null>(null);
+  // panneau de droite : le mot touché, ou le chat sur la leçon
+  const [aside, setAside] = useState<AsideTab>("word");
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const pageRef = useRef<HTMLDivElement>(null);
@@ -96,6 +105,8 @@ export function Reader() {
     setRange(null);
     setCursor(-1);
     setComplete(null);
+    setUpNext(null);
+    setCinema(false);
     session.current = { read: 0, known: 0, lingqs: 0 };
     api()
       .lessonOpen(lessonId)
@@ -124,6 +135,32 @@ export function Reader() {
   const pages = useMemo(() => paginate(tokens), [tokens]);
   const pr = pages[page] ?? { start: 0, end: 0, words: 0 };
   const lang = lesson?.lang ?? "en";
+  const pl = usePlaylist(lesson);
+
+  // la demande de lecture automatique ne vaut que pour cette ouverture
+  useEffect(() => {
+    if (data && useApp.getState().autoplay) useApp.setState({ autoplay: false });
+  }, [data]);
+
+  // fin de l'écoute dans une playlist : la leçon suivante s'annonce
+  const onFinished = useCallback(() => {
+    if (!pl || !lesson) return;
+    const nextId = pl.lessons[pl.lessons.indexOf(lesson.id) + 1];
+    if (!nextId) {
+      toast(`Fin de la playlist « ${pl.name} »`, "light");
+      void api().playlistUpdate(pl.id, { current: 0 });
+      return;
+    }
+    setCinema(false);
+    api()
+      .lessonsList(lesson.lang)
+      .then((all) => setUpNext(all.find((l) => l.id === nextId) ?? null))
+      .catch(() => {});
+  }, [pl, lesson, toast]);
+  // l'écoute reprend sur cette leçon : la suivante attendra
+  useEffect(() => {
+    if (mediaPlaying) setUpNext(null);
+  }, [mediaPlaying]);
 
   const statusOf = useCallback((k: string): number => terms[k]?.status ?? 0, [terms]);
 
@@ -263,6 +300,7 @@ export function Reader() {
     for (let i = a; i <= b; i++) if (tokens[i].w) words.push(tokens[i].k);
     const isPhrase = words.length > 1;
     const ph = !isPhrase ? phraseCover.get(a) : null;
+    const phSurface = ph ? clean(lesson.text.slice(tokens[ph.a].s, tokens[ph.b].e)) : "";
     return {
       surface: clean(lesson.text.slice(selStart, selEnd)),
       key: words.join(" "),
@@ -270,10 +308,11 @@ export function Reader() {
       before: clean(lesson.text.slice(sentStart, selStart)).trimStart(),
       after: clean(lesson.text.slice(selEnd, sentEnd)).trimEnd(),
       isPhrase,
+      words: words.length,
       tokenIndex: a,
-      phrase: ph ? { key: ph.key, a: ph.a, b: ph.b } : null,
+      phrase: ph ? { key: ph.key, a: ph.a, b: ph.b, surface: phSurface, translation: terms[ph.key]?.translation ?? "" } : null,
     };
-  }, [range, tokens, lesson, phraseCover]);
+  }, [range, tokens, lesson, phraseCover, terms]);
 
   const setStatus = useCallback(
     (key: string, status: number, extra?: Partial<Term>) => {
@@ -313,6 +352,7 @@ export function Reader() {
       while (b > a && !tokens[b].w) b--;
       if (!tokens[a]?.w) return;
       setRange({ a, b });
+      setAside("word");
       if (a === b) {
         const k = tokens[a].k;
         if (statusOf(k) === 0) {
@@ -401,6 +441,8 @@ export function Reader() {
 
   const findNext = async () => {
     if (!lesson) return null;
+    // dans une playlist, la suivante est la sienne ; sinon, celle de la collection
+    if (pl) return pl.lessons[pl.lessons.indexOf(lesson.id) + 1] ?? null;
     const all = await api().lessonsList(lesson.lang);
     const same = all.filter((l) => l.collection && l.collection === lesson.collection).sort((a, b) => a.created_at - b.created_at || a.id - b.id);
     const idx = same.findIndex((l) => l.id === lesson.id);
@@ -460,18 +502,34 @@ export function Reader() {
       for (let i = pr.start; i < pr.end; i++) if (tokens[i].w) words.push(i);
       const cur = range ? words.indexOf(range.a) : -1;
       const key = e.key.toLowerCase();
-      if (e.key === "ArrowRight" || e.key === "ArrowLeft") {
+      // statut au clavier : un mot, ou une sélection assez courte pour devenir une expression
+      const canStatus = !!selection && selection.words <= EXPR_MAX_WORDS;
+      if ((e.key === "ArrowRight" || e.key === "ArrowLeft") && e.shiftKey && range) {
+        // Maj + flèches : la sélection s'allonge ou se raccourcit d'un mot par la fin
+        e.preventDefault();
+        const end = words.indexOf(range.b);
+        if (cur < 0 || end < 0) return;
+        if (e.key === "ArrowRight") {
+          if (end < words.length - 1) setRange({ a: range.a, b: words[end + 1] });
+        } else if (end > cur) setRange({ a: range.a, b: words[end - 1] });
+        else if (cur > 0) setRange({ a: words[cur - 1], b: range.b });
+      } else if (e.key === "ArrowRight" || e.key === "ArrowLeft") {
         e.preventDefault();
         const n = e.key === "ArrowRight" ? (cur < 0 ? 0 : Math.min(words.length - 1, cur + 1)) : cur < 0 ? words.length - 1 : Math.max(0, cur - 1);
         if (words[n] !== undefined) select(words[n], words[n]);
-      } else if (["1", "2", "3"].includes(key) && selection) {
+      } else if (["1", "2", "3"].includes(key) && canStatus) {
         setStatus(selection.key, Number(key));
-      } else if ((key === "k" || key === "4") && selection) {
+      } else if ((key === "k" || key === "4") && canStatus) {
         setStatus(selection.key, 4);
-      } else if (key === "x" && selection) {
+      } else if (key === "x" && canStatus) {
         setStatus(selection.key, 5);
-      } else if (key === "0" && selection) {
+      } else if (key === "0" && canStatus) {
         setStatus(selection.key, 0);
+      } else if (key === "c") {
+        // le chat sur la leçon, prêt à écrire
+        e.preventDefault();
+        setAside("chat");
+        useChat.getState().focus();
       } else if (e.key === " ") {
         e.preventDefault();
         playerRef.current?.toggle();
@@ -491,7 +549,35 @@ export function Reader() {
     return () => window.removeEventListener("keydown", onKey);
   });
 
+  // le chat cadre l'extrait des longues leçons sur la page lue
+  const pageStart = tokens[pr.start]?.s ?? 0;
+  useEffect(() => {
+    if (lesson) useChat.setState({ reading: { lesson: lesson.id, offset: pageStart } });
+  }, [lesson, pageStart]);
+
   // ---------- lanterne (mot prononcé) ----------
+  // la colonne change de largeur (barre latérale repliée, fenêtre redimensionnée) :
+  // les lignes se recomposent, la lanterne se recale une fois le mouvement fini
+  const [relayout, setRelayout] = useState(0);
+  const loaded = !!data;
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    let w = el.clientWidth;
+    let t = 0;
+    const ro = new ResizeObserver(() => {
+      if (el.clientWidth === w) return;
+      w = el.clientWidth;
+      window.clearTimeout(t);
+      t = window.setTimeout(() => setRelayout((n) => n + 1), 120);
+    });
+    ro.observe(el);
+    return () => {
+      ro.disconnect();
+      window.clearTimeout(t);
+    };
+  }, [loaded]);
+
   useLayoutEffect(() => {
     const container = pageRef.current;
     if (!container || cursor < 0 || cursor < pr.start || cursor >= pr.end) {
@@ -517,6 +603,9 @@ export function Reader() {
     const newLine = !prev || Math.abs(target.y - prev.y) > target.height * 0.5;
     lanternBox.current = { y: target.y, height: target.height };
     if (!lanternOn || !samePage || newLine) {
+      // la glissade vers le mot précédent (fin de la ligne d'avant) tourne peut-être
+      // encore : sans l'arrêter, elle écraserait le saut et ramènerait la lanterne à droite
+      lantern.stop();
       lantern.set(target);
       setLanternOn(true);
     } else void lantern.start({ ...target, transition: { type: "spring", stiffness: 760, damping: 50, mass: 0.5 } });
@@ -527,7 +616,7 @@ export function Reader() {
       if (r.top < sr.top + 80 || r.bottom > sr.bottom - 120) sc.scrollBy({ top: r.top - sr.top - sr.height * 0.35, behavior: "smooth" });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cursor, page, pr.start, pr.end]);
+  }, [cursor, page, pr.start, pr.end, relayout]);
 
   if (!lessonId) {
     return (
@@ -569,6 +658,7 @@ export function Reader() {
     const t = tokens[i];
     const ph = phraseCover.get(i);
     const inPhrase = ph && i > ph.a && i <= ph.b;
+    const inSel = range && range.a !== range.b && i > range.a && i < range.b;
     if (!t.w) {
       const parts = t.t.split(/\n+/);
       if (parts.length > 1) {
@@ -579,8 +669,8 @@ export function Reader() {
         if (tail.trim()) current.push(tail);
       } else {
         current.push(
-          inPhrase ? (
-            <span key={i} className={`ph p${ph!.status}`}>
+          inPhrase || inSel ? (
+            <span key={i} className={`${inPhrase ? `ph p${ph!.status}` : ""} ${inSel ? "sel-gap" : ""}`}>
               {t.t}
             </span>
           ) : (
@@ -593,7 +683,7 @@ export function Reader() {
     const st = statusOf(t.k);
     const selected = range && i >= range.a && i <= range.b;
     let cls = `w s${st}`;
-    if (selected) cls += range!.a === range!.b ? " sel" : " sel-range";
+    if (selected) cls += range!.a === range!.b ? " sel" : ` sel-range${i === range!.a ? " sel-a" : ""}${i === range!.b ? " sel-b" : ""}`;
     if (ph) cls += ` ph p${ph.status}`;
     if (i === cursor) cls += " cur";
     if (i === resumeAt) cls += " resume";
@@ -619,17 +709,39 @@ export function Reader() {
   const li = langInfo(lang);
   const isLast = page === pages.length - 1;
   const isVideo = lesson.kind === "video" || !!lesson.video_path;
+  const sideHidden = settings.reader_sidebar === "0";
 
   return (
     <div className={`reader ${cinema ? "cinema" : ""}`}>
       <div className="reader-col">
         <div className="reader-top drag" data-tauri-drag-region>
-          <button className="icon-btn no-drag" onClick={() => go("library")} aria-label="Retour à la bibliothèque">
+          {!cinema && (
+            <button
+              className="icon-btn no-drag"
+              onClick={() => setSetting("reader_sidebar", sideHidden ? "1" : "0")}
+              aria-label={sideHidden ? "Afficher la barre latérale" : "Masquer la barre latérale"}
+              title={sideHidden ? "Afficher la barre latérale" : "Masquer la barre latérale pour lire plus au large"}
+            >
+              <Icon name="sidebar" size={18} />
+            </button>
+          )}
+          <button
+            className="icon-btn no-drag"
+            onClick={() => (pl ? openPlaylist(pl.id) : go("library"))}
+            aria-label={pl ? "Retour à la playlist" : "Retour à la bibliothèque"}
+            title={pl ? `Retour à « ${pl.name} »` : undefined}
+          >
             <Icon name="back" size={18} />
           </button>
-          <span className={`title-mini ${scrolled ? "show" : ""}`} data-tauri-drag-region>
-            {lesson.title}
-          </span>
+          {pl ? (
+            <div className="pl-strip-slot" data-tauri-drag-region>
+              <PlaylistStrip pl={pl} lessonId={lesson.id} playing={() => !!playerRef.current?.isPlaying()} />
+            </div>
+          ) : (
+            <span className={`title-mini ${scrolled ? "show" : ""}`} data-tauri-drag-region>
+              {lesson.title}
+            </span>
+          )}
           <button className="btn sm soft no-drag" onClick={() => setSimplify(true)} title="Réécrire ce texte à un niveau plus simple">
             <Icon name="sparkle" size={14} /> Simplifier
           </button>
@@ -659,15 +771,23 @@ export function Reader() {
           <div className="reader-inner">
             <header className="reader-head">
               <div className="reader-crumb">
-                <button onClick={() => go("library")}>Bibliothèque</button>
-                {lesson.collection && (
+                {pl ? (
+                  <>
+                    <button onClick={() => openPlaylist(null)}>Playlists</button>
+                    <span>›</span>
+                    <button onClick={() => openPlaylist(pl.id)}>{pl.name}</button>
+                  </>
+                ) : (
+                  <button onClick={() => go("library")}>Bibliothèque</button>
+                )}
+                {!pl && lesson.collection && (
                   <>
                     <span>›</span>
                     <span>{lesson.collection}</span>
                   </>
                 )}
               </div>
-              <h1>{lesson.title}</h1>
+              <h1 dir="auto">{lesson.title}</h1>
               <div className="reader-chips">
                 <span className="chip">{li.name}</span>
                 <span className="chip num">
@@ -689,6 +809,7 @@ export function Reader() {
                 onPointerDown={onPointerDown}
                 onPointerOver={onPointerOver}
                 lang={lang}
+                dir={li.rtl ? "rtl" : undefined}
                 initial={{ opacity: 0, x: 24, filter: "blur(4px)" }}
                 animate={{ opacity: 1, x: 0, filter: "blur(0px)" }}
                 exit={{ opacity: 0, x: -24, filter: "blur(4px)" }}
@@ -744,7 +865,7 @@ export function Reader() {
         </div>
 
         <Player
-          key={`player-${lesson.id}`}
+          key={`player-${lesson.id}-${lesson.media_path ?? ""}`}
           ref={playerRef}
           lesson={lesson}
           tokens={tokens}
@@ -755,7 +876,21 @@ export function Reader() {
           videoHost={videoHost}
           onState={onPlayback}
           onResynced={(t) => setData((d) => (d ? { ...d, lesson: { ...d.lesson, timings: t, timing_v: 2 } } : d))}
+          onVoiced={(v) => setData((d) => (d ? { ...d, lesson: { ...d.lesson, ...v, position: 0 } } : d))}
+          autoplay={autoplay}
+          onFinished={onFinished}
         />
+
+        <AnimatePresence>
+          {upNext && pl && (
+            <UpNext
+              key={upNext.id}
+              next={upNext}
+              onGo={() => openLesson(upNext.id, { playlist: pl.id, autoplay: true })}
+              onCancel={() => setUpNext(null)}
+            />
+          )}
+        </AnimatePresence>
 
         <AnimatePresence>
           {complete && (
@@ -790,7 +925,7 @@ export function Reader() {
                     Bibliothèque
                   </button>
                   {complete.next ? (
-                    <button className="btn primary lg glow" onClick={() => openLesson(complete.next!)}>
+                    <button className="btn primary lg glow" onClick={() => openLesson(complete.next!, pl ? { playlist: pl.id } : undefined)}>
                       Leçon suivante <Icon name="forward" size={16} />
                     </button>
                   ) : (
@@ -811,16 +946,39 @@ export function Reader() {
         </AnimatePresence>
       </div>
 
-      <WordPanel
-        lang={lang}
-        sel={selection}
-        term={selection ? terms[selection.key] : undefined}
-        onStatus={(k, s) => setStatus(k, s)}
-        onTranslation={onTranslation}
-        onPlayFrom={(i) => playerRef.current?.playFrom(i)}
-        onSelectPhrase={(a, b) => setRange({ a, b })}
-        onClose={() => setRange(null)}
-      />
+      <aside className="word-panel" aria-label="Panneau latéral">
+        <div className="wp-top drag" data-tauri-drag-region>
+          <AsideTabs value={aside} onChange={setAside} />
+        </div>
+        <AnimatePresence mode="wait" initial={false}>
+          <motion.div
+            key={aside}
+            className="aside-body"
+            initial={{ opacity: 0, x: aside === "chat" ? 12 : -12 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, x: aside === "chat" ? -12 : 12 }}
+            transition={{ duration: 0.2, ease: [0.2, 0.8, 0.2, 1] }}
+          >
+            {aside === "word" ? (
+              <WordPanel
+                lang={lang}
+                sel={selection}
+                term={selection ? terms[selection.key] : undefined}
+                onStatus={(k, s) => setStatus(k, s)}
+                onTranslation={onTranslation}
+                onSelectPhrase={(a, b) => setRange({ a, b })}
+                onAsk={(q) => {
+                  setAside("chat");
+                  void useChat.getState().ask({ id: lesson.id, title: lesson.title, lang }, q);
+                }}
+                onClose={() => setRange(null)}
+              />
+            ) : (
+              <ReaderChat lesson={{ id: lesson.id, title: lesson.title, lang }} />
+            )}
+          </motion.div>
+        </AnimatePresence>
+      </aside>
 
       <SimplifySheet open={simplify} onClose={() => setSimplify(false)} lessonTitle={lesson.title} text={lesson.text} lang={lang} />
     </div>

@@ -38,6 +38,9 @@ const STAGES: Record<string, string> = {
   decode: "Lecture du son",
   model: "Préparation du modèle",
   transcribe: "Transcription",
+  // avec Qwen3-ASR : Whisper repère les mots, puis Qwen3-ASR écrit le texte
+  timing: "Repérage des mots",
+  text: "Écriture du texte",
 };
 
 function wordCount(t: string) {
@@ -242,7 +245,7 @@ export function ImportSheet() {
   const onImportEvent = (stagePrefix: string) => (e: ImportEvent) => {
     if (e.type === "stage") {
       setBusy(`${stagePrefix}${STAGES[e.stage] ?? e.stage}`);
-      setProgress(["transcribe", "download", "tools"].includes(e.stage) ? 0 : null);
+      setProgress(["transcribe", "timing", "text", "download", "tools"].includes(e.stage) ? 0 : null);
     } else setProgress(e.value);
   };
 

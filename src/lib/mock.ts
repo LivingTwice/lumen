@@ -4,12 +4,18 @@
 import type { Api, TermUpdate } from "./api";
 import { tokenize, normalize } from "./tokenize";
 import type {
+  BackupCounts,
+  BackupInfo,
+  BackupStatus,
+  ChatMessage,
+  ChatSummary,
   DayStat,
   LangCode,
   Lesson,
   LessonSummary,
   ModelRow,
   NewLesson,
+  Playlist,
   Stats,
   Term,
 } from "./types";
@@ -21,6 +27,9 @@ interface Db {
   activity: Record<string, DayStat & { lang: string }>;
   nextId: number;
   installed: string[];
+  playlists?: Playlist[];
+  chats?: (Omit<ChatSummary, "lesson_title" | "count" | "preview"> & { messages: ChatMessage[] })[];
+  backup?: { last_at: number | null; size: number };
 }
 
 const KEY = "lumen-mock-db";
@@ -47,6 +56,8 @@ const today = () => new Date().toISOString().slice(0, 10);
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 let lingqCancelled = false;
+/** réponses du chat en cours (identifiant de conversation → arrêt demandé) */
+const chatStops = new Map<number, boolean>();
 const STARTERS_MOCK =
   "Every morning, Martha climbed the narrow stairs of the old lighthouse. From the top, the sea looked endless and calm.\n\nOne day, she found a letter hidden between two stones. The paper was damp, but the words could still be read.";
 
@@ -64,6 +75,20 @@ const MOCK_DICT: Record<string, [string, string, string]> = {
 export function createMockApi(): Api {
   let db = load();
   const commit = () => save(db);
+  const playlists = () => (db.playlists ??= []);
+  const chats = () => (db.chats ??= []);
+  const chatSummary = (c: ReturnType<typeof chats>[number]): ChatSummary => {
+    const last = c.messages[c.messages.length - 1];
+    const { messages, ...rest } = c;
+    return {
+      ...rest,
+      lesson_title: db.lessons.find((l) => l.id === c.lesson_id)?.title ?? null,
+      count: messages.length,
+      preview: last ? last.content.replace(/\*\*/g, "").replace(/\s+/g, " ").slice(0, 160) : "",
+    };
+  };
+  /** mêmes règles que le natif : sans doublon, leçons de la langue de la playlist */
+  const fill = (lang: string, ids: number[]) => [...new Set(ids)].filter((id) => db.lessons.some((l) => l.id === id && l.lang === lang));
 
   const bump = (lang: string, field: keyof DayStat, n: number) => {
     const k = `${today()}|${lang}`;
@@ -76,8 +101,10 @@ export function createMockApi(): Api {
     { id: "qwen3.5-0.8b", kind: "llm", name: "Qwen3.5 0.8B", detail: "Très rapide, pour les Mac avec 8 Go de mémoire", size: 533e6, url: "", file: "", ram_gb: 8 },
     { id: "qwen3.5-2b", kind: "llm", name: "Qwen3.5 2B", detail: "L'équilibre idéal entre qualité et vitesse", size: 1281e6, url: "", file: "", ram_gb: 8 },
     { id: "qwen3.5-4b", kind: "llm", name: "Qwen3.5 4B", detail: "Les traductions les plus fines, à partir de 16 Go", size: 2741e6, url: "", file: "", ram_gb: 16 },
+    { id: "qwen3-asr-1.7b", kind: "asrtext", name: "Qwen3-ASR 1.7B", detail: "Texte des transcriptions plus juste que Whisper, sans phrase sautée, dans 23 langues ; Whisper garde le minutage des mots", size: 2520744288, url: "", file: "", ram_gb: 16 },
     { id: "whisper-small", kind: "asr", name: "Whisper Small", detail: "Transcription légère et rapide", size: 190e6, url: "", file: "", ram_gb: 8 },
-    { id: "whisper-turbo", kind: "asr", name: "Whisper Large v3 Turbo", detail: "Transcription très précise, 99 langues", size: 574e6, url: "", file: "", ram_gb: 8 },
+    { id: "whisper-turbo", kind: "asr", name: "Whisper Large v3 Turbo", detail: "Transcription et minutage des mots, très précis, 99 langues", size: 574e6, url: "", file: "", ram_gb: 8 },
+    { id: "supertonic-3", kind: "tts", name: "Supertonic 3", detail: "Voix naturelle pour les mots, les expressions et l'audio des leçons, dans les 31 langues", size: 149e6, url: "", file: "", ram_gb: 8 },
   ];
 
   const summary = (l: Lesson): LessonSummary => {
@@ -110,6 +137,44 @@ export function createMockApi(): Api {
       cover_path: l.cover_path ?? null,
     };
   };
+
+  // sauvegarde : ce navigateur, et une sauvegarde fictive d'un autre Mac pour essayer la restauration
+  const backupListeners = new Set<(s: BackupStatus) => void>();
+  const backupCounts = (): BackupCounts => {
+    const terms = Object.values(db.terms);
+    return {
+      known: terms.filter((t) => t.status === 4 && !t.term.includes(" ")).length,
+      learning: terms.filter((t) => t.status >= 1 && t.status <= 3).length,
+      phrases: terms.filter((t) => t.term.includes(" ") && t.status !== 5).length,
+      lessons: db.lessons.length,
+      langs: (db.settings.langs ?? "").split(",").filter(Boolean) as LangCode[],
+    };
+  };
+  const backupStatus = (): BackupStatus => {
+    const b = (db.backup ??= { last_at: null, size: 0 });
+    const custom = db.settings.backup_dir ?? "";
+    const saved = db.settings.backup_on === "1" && b.last_at !== null;
+    return {
+      enabled: db.settings.backup_on === "1",
+      decided: !!db.settings.backup_on,
+      dir: custom ? `${custom}/Lumen` : "~/Library/Mobile Documents/com~apple~CloudDocs/Lumen",
+      icloud: !custom,
+      icloud_available: true,
+      running: false,
+      last_at: saved ? b.last_at : null,
+      size: saved ? b.size : 0,
+      media_size: saved && db.settings.backup_audio !== "0" ? 186e6 : 0,
+      media_count: saved ? 12 : 0,
+      counts: backupCounts(),
+      cloud: saved ? (custom ? "local" : "uploaded") : "unknown",
+      cloud_error: null,
+      error: null,
+      local_audio: 186e6,
+      local_video: 1.4e9,
+    };
+  };
+  const OTHER_MAC: BackupCounts = { known: 4210, learning: 812, phrases: 37, lessons: 52, langs: ["it", "en"] };
+  const dayAgo = (n: number) => new Date(Date.now() - n * 86400e3).toISOString().slice(0, 10);
 
   const fakeStream = async (text: string, onPiece: (t: string) => void) => {
     for (const part of text.match(/.{1,4}/gsu) ?? []) {
@@ -184,6 +249,35 @@ export function createMockApi(): Api {
     },
     async lessonDelete(id) {
       db.lessons = db.lessons.filter((l) => l.id !== id);
+      for (const c of chats()) if (c.lesson_id === id) c.lesson_id = null;
+      for (const p of playlists()) {
+        p.lessons = p.lessons.filter((x) => x !== id);
+        if (p.current === id) p.current = null;
+      }
+      commit();
+    },
+    async playlistsList(lang) {
+      return playlists()
+        .filter((p) => p.lang === lang)
+        .map((p) => ({ ...p, lessons: [...p.lessons], current: p.current && p.lessons.includes(p.current) ? p.current : null }))
+        .sort((a, b) => b.created_at - a.created_at || b.id - a.id);
+    },
+    async playlistCreate(lang, name, lessons) {
+      const id = Math.max(0, ...playlists().map((p) => p.id)) + 1;
+      playlists().push({ id, lang, name: name.trim().replace(/\s+/g, " ").slice(0, 120) || "Nouvelle playlist", lessons: fill(lang, lessons), current: null, created_at: Date.now() / 1000 });
+      commit();
+      return id;
+    },
+    async playlistUpdate(id, patch) {
+      const p = playlists().find((x) => x.id === id);
+      if (!p) return;
+      if (patch.name !== undefined) p.name = patch.name.trim().replace(/\s+/g, " ").slice(0, 120) || "Nouvelle playlist";
+      if (patch.lessons) p.lessons = fill(p.lang, patch.lessons);
+      if (patch.current !== undefined) p.current = patch.current > 0 ? patch.current : null;
+      commit();
+    },
+    async playlistDelete(id) {
+      db.playlists = playlists().filter((p) => p.id !== id);
       commit();
     },
     async lessonSetCover(id, data) {
@@ -201,7 +295,7 @@ export function createMockApi(): Api {
       return url;
     },
     async termSet(u: TermUpdate) {
-      const term = normalize(u.term);
+      const term = normalize(u.term, u.lang);
       const k = `${u.lang}|${term}`;
       const prev = db.terms[k];
       if (u.status === 0) {
@@ -224,9 +318,9 @@ export function createMockApi(): Api {
     async termsMarkKnown(lang, keys, wordsRead) {
       let added = 0;
       for (const raw of new Set(keys)) {
-        const k = `${lang}|${normalize(raw)}`;
+        const k = `${lang}|${normalize(raw, lang)}`;
         if (!db.terms[k]) {
-          db.terms[k] = { term: normalize(raw), status: 4, translation: "", note: "", lemma: "", context: "", updated_at: Date.now() / 1000 };
+          db.terms[k] = { term: normalize(raw, lang), status: 4, translation: "", note: "", lemma: "", context: "", updated_at: Date.now() / 1000 };
           added++;
         }
       }
@@ -304,6 +398,88 @@ export function createMockApi(): Api {
     async aiWarmup() {
       return db.installed.some((m) => m.startsWith("qwen"));
     },
+    async chatsList(lang) {
+      return chats()
+        .filter((c) => c.lang === lang)
+        .sort((a, b) => b.updated_at - a.updated_at || b.id - a.id)
+        .map(chatSummary);
+    },
+    async chatOpen(id) {
+      const c = chats().find((x) => x.id === id);
+      if (!c) throw "Cette conversation n'existe plus.";
+      return { chat: chatSummary(c), messages: c.messages };
+    },
+    async chatCreate(lang, lesson) {
+      const id = Math.max(0, ...chats().map((c) => c.id)) + 1;
+      const now = Date.now() / 1000;
+      const lesson_id = lesson && db.lessons.some((l) => l.id === lesson && l.lang === lang) ? lesson : null;
+      const c = { id, lang, title: "", lesson_id, created_at: now, updated_at: now, messages: [] };
+      chats().push(c);
+      commit();
+      return chatSummary(c);
+    },
+    async chatUpdate(id, patch) {
+      const c = chats().find((x) => x.id === id);
+      if (!c) throw "Cette conversation n'existe plus.";
+      if (patch.title !== undefined) c.title = patch.title.trim().replace(/\s+/g, " ").slice(0, 120);
+      if (patch.lesson !== undefined) c.lesson_id = db.lessons.some((l) => l.id === patch.lesson && l.lang === c.lang) ? patch.lesson : null;
+      commit();
+      return chatSummary(c);
+    },
+    async chatDelete(id) {
+      db.chats = chats().filter((c) => c.id !== id);
+      commit();
+    },
+    async chatSend(id, text, options, onEvent) {
+      if (!db.installed.some((m) => m.startsWith("qwen"))) throw "NO_MODEL:Aucun modèle de traduction n'est installé. Ouvrez Réglages › IA locale.";
+      const c = chats().find((x) => x.id === id);
+      if (!c) throw "Cette conversation n'existe plus.";
+      chatStops.set(id, false);
+      const lesson = db.lessons.find((l) => l.id === c.lesson_id);
+      const stream = async (full: string, type: "thought" | "answer", pace: number) => {
+        let out = "";
+        for (const part of full.match(/\S+\s*/g) ?? []) {
+          if (chatStops.get(id)) break;
+          await sleep(pace);
+          out += part;
+          onEvent({ type, text: part });
+        }
+        return out;
+      };
+      await sleep(350);
+      let thought = "";
+      let thoughtSecs = 0;
+      if (options.think) {
+        const t0 = Date.now();
+        const len = options.effort === "low" ? 1 : options.effort === "high" ? 4 : 2;
+        thought = await stream(
+          Array.from({ length: len }, () => `The learner asks: "${text.slice(0, 60)}". I should answer in French, give the base form, the grammar, then one or two examples with their translation.`).join(" "),
+          "thought",
+          28,
+        );
+        thoughtSecs = (Date.now() - t0) / 1000;
+      }
+      const answer = await stream(
+        `Voici ce que l'on peut dire${lesson ? ` à partir de « ${lesson.title} »` : ""} :\n\n- **Sens** : réponse simulée à « ${text.slice(0, 80)} ».\n- **Grammaire** : dans l'application, Qwen répond ici, calculé sur votre Mac.\n\n| Personne | Forme |\n| --- | --- |\n| io | salivo |\n| tu | salivi |\n\n*Exemple* : *Marta saliva le scale.* (Marta montait l'escalier.)`,
+        "answer",
+        34,
+      );
+      const stopped = !!chatStops.get(id);
+      chatStops.delete(id);
+      if (!answer.trim()) return { chat: chatSummary(c), user: null, assistant: null, stopped };
+      const now = Date.now() / 1000;
+      const nextId = Math.max(0, ...chats().flatMap((x) => x.messages.map((m) => m.id))) + 1;
+      const user: ChatMessage = { id: nextId, role: "user", content: text.trim(), thought: "", thought_secs: 0, created_at: now };
+      const assistant: ChatMessage = { id: nextId + 1, role: "assistant", content: answer.trim(), thought: thought.trim(), thought_secs: thoughtSecs, created_at: now };
+      c.messages.push(user, assistant);
+      if (!c.title) c.title = text.trim().split("\n")[0].slice(0, 60);
+      c.updated_at = now;
+      commit();
+      return { chat: chatSummary(c), user, assistant, stopped };
+    },
+    async chatStop(id) {
+      if (chatStops.has(id)) chatStops.set(id, true);
+    },
     async modelsList() {
       const llm = db.settings.llm_model ?? "qwen3.5-2b";
       const asr = db.settings.asr_model ?? "whisper-turbo";
@@ -323,6 +499,18 @@ export function createMockApi(): Api {
     async modelDelete(id) {
       db.installed = db.installed.filter((x) => x !== id);
       commit();
+    },
+    async lessonVoice(_id, onEvent) {
+      for (let i = 1; i <= 10; i++) {
+        await sleep(120);
+        onEvent({ type: "progress", value: i * 10 });
+      }
+      throw "NO_VOICE: la voix naturelle fonctionne dans l'application Mac";
+    },
+    async lessonVoiceCancel() {},
+    async ttsSay() {
+      // l'aperçu navigateur n'a pas le moteur : la voix du système prend le relais
+      throw "NO_VOICE: la voix naturelle fonctionne dans l'application Mac";
     },
     async fetchUrl() {
       throw "L'import de pages web fonctionne dans l'application Mac.";
@@ -398,6 +586,70 @@ export function createMockApi(): Api {
     },
     async lingqCancel() {
       lingqCancelled = true;
+    },
+    async backupStatus() {
+      return backupStatus();
+    },
+    async backupRun() {
+      await sleep(900);
+      db.backup = { last_at: Math.floor(Date.now() / 1000), size: 2.4e6 + db.lessons.length * 4e4 };
+      commit();
+      const s = backupStatus();
+      backupListeners.forEach((f) => f(s));
+      return s;
+    },
+    async backupList() {
+      await sleep(700);
+      const now = Math.floor(Date.now() / 1000);
+      const out: BackupInfo[] = [];
+      if (db.backup?.last_at && db.settings.backup_on === "1") {
+        out.push({ key: "mock-ce-mac", device_name: "Ce navigateur", mine: true, this_device: true, saved_at: db.backup.last_at, app_version: "0.1.0", size: db.backup.size, media_size: 186e6, counts: backupCounts(), versions: [], newer: false });
+      }
+      out.push({
+        key: "mock-imac",
+        device_name: "iMac du salon",
+        mine: false,
+        this_device: false,
+        saved_at: now - 2 * 86400 - 5 * 3600,
+        app_version: "0.1.0",
+        size: 3.2e6,
+        media_size: 412e6,
+        counts: OTHER_MAC,
+        versions: [3, 4, 6].map((n, i) => ({ day: dayAgo(n), saved_at: now - n * 86400, known: OTHER_MAC.known - 30 * (i + 1), lessons: OTHER_MAC.lessons - i })),
+        newer: false,
+      });
+      return out.sort((a, b) => b.saved_at - a.saved_at);
+    },
+    async backupRestore(key, _day, onEvent) {
+      onEvent({ type: "stage", stage: "download" });
+      await sleep(700);
+      onEvent({ type: "stage", stage: "media" });
+      for (let i = 1; i <= 12; i++) {
+        await sleep(110);
+        onEvent({ type: "progress", value: i / 12 });
+      }
+      onEvent({ type: "stage", stage: "apply" });
+      await sleep(400);
+      if (key !== "mock-imac") return { counts: backupCounts(), missing_media: 0 };
+      // la progression de l'autre Mac : quelques leçons et des mots, réglages de ce navigateur conservés
+      db.settings = { ...db.settings, onboarded: "1", langs: "it,en", lang: "it", backup_on: db.settings.backup_on || "1" };
+      const lessons: [LangCode, string, string][] = [
+        ["it", "Il faro", "Ogni mattina, Marta saliva le scale strette del vecchio faro. Dall'alto, il mare sembrava infinito e calmo."],
+        ["it", "La lettera", "Un giorno trovò una lettera nascosta tra due pietre. La carta era umida, ma le parole si leggevano ancora."],
+        ["en", "The lighthouse", STARTERS_MOCK],
+      ];
+      for (const [lang, title, text] of lessons) {
+        if (!db.lessons.some((l) => l.lang === lang && l.title === title)) await mock.lessonCreate({ lang, title, text, collection: "Storie" });
+      }
+      for (const [term, status, translation] of [["faro", 4, "phare"], ["mare", 4, "mer"], ["lettera", 2, "lettre"], ["nascosta", 1, "cachée"]] as const) {
+        db.terms[`it|${term}`] ??= { term, status, translation, note: "", lemma: "", context: "", updated_at: Date.now() / 1000 };
+      }
+      commit();
+      return { counts: OTHER_MAC, missing_media: 0 };
+    },
+    async backupListen(onStatus) {
+      backupListeners.add(onStatus);
+      return () => backupListeners.delete(onStatus);
     },
     mediaUrl(path) {
       return path;

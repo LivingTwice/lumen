@@ -50,6 +50,8 @@
   --w-ln2: rgba(214, 118, 10, 0.62);
   --w-ln3: rgba(214, 118, 10, 0.34);
   --w-phrase: rgba(59, 76, 202, 0.5);
+  /* surlignage de plusieurs mots (opaque : pas de rayures aux chevauchements) */
+  --w-sel: color-mix(in srgb, var(--accent) 26%, var(--bg));
 
   /* la lumière de Lumen */
   --light: #ffb45e;
@@ -96,6 +98,7 @@
   --w-ln2: rgba(245, 165, 70, 0.62);
   --w-ln3: rgba(245, 165, 70, 0.34);
   --w-phrase: rgba(154, 166, 255, 0.55);
+  --w-sel: color-mix(in srgb, var(--accent) 40%, var(--bg));
 
   --light: #ffc27a;
   --light-strong: #ffb45e;
@@ -225,7 +228,7 @@ p {
   background: var(--bg);
   position: relative;
   border-left: 1px solid var(--border);
-  transition: background-color 0.4s ease;
+  transition: background-color 0.4s ease, border-color 0.45s ease;
 }
 
 .drag {
@@ -259,14 +262,35 @@ p {
 
 /* ---------- barre latérale ---------- */
 
+/* enveloppe : sa largeur se replie à 0 dans une leçon, la barre glisse et s'efface */
+.sidebar-shell {
+  width: var(--sidebar-w);
+  flex-shrink: 0;
+  display: flex;
+  transition: width 0.45s var(--ease-out);
+}
+.sidebar-shell.clip {
+  overflow: hidden;
+}
+.app.side-hidden .sidebar-shell {
+  width: 0;
+}
+.app.side-hidden .main {
+  border-left-color: transparent;
+}
+
 .sidebar {
   width: var(--sidebar-w);
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
   background: var(--side);
-  transition: background-color 0.4s ease;
+  transition: background-color 0.4s ease, opacity 0.35s ease, transform 0.45s var(--ease-out);
   position: relative;
+}
+.app.side-hidden .sidebar {
+  opacity: 0;
+  transform: translateX(-28px);
 }
 
 :root.vibrant .sidebar {
@@ -326,6 +350,10 @@ p {
   flex-shrink: 0;
   position: relative;
   overflow: hidden;
+}
+.lang-badge.add {
+  background: var(--chip);
+  color: var(--muted);
 }
 .lang-badge::after {
   content: "";
@@ -503,6 +531,11 @@ p {
   box-shadow: 0 0 10px var(--light);
   animation: pulse 2s ease-in-out infinite;
   flex-shrink: 0;
+}
+.update-dot.warn {
+  background: var(--danger);
+  box-shadow: 0 0 10px color-mix(in srgb, var(--danger) 45%, transparent);
+  animation: none;
 }
 .ai-card {
   border: 1px solid var(--border);

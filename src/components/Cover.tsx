@@ -200,7 +200,20 @@ type CoverLesson = Pick<LessonSummary, "id" | "hue" | "kind" | "source" | "cover
  * Couverture d'une leçon : l'image choisie, sinon la miniature YouTube,
  * sinon l'œuvre générée (qui sert aussi de fond pendant le chargement).
  */
-export function Cover({ lesson, big = false, progress = 0, editable = false }: { lesson: CoverLesson; big?: boolean; progress?: number; editable?: boolean }) {
+export function Cover({
+  lesson,
+  big = false,
+  progress = 0,
+  editable = false,
+  bare = false,
+}: {
+  lesson: CoverLesson;
+  big?: boolean;
+  progress?: number;
+  editable?: boolean;
+  /** image seule, sans étiquette ni avancement (vignettes, mosaïques) */
+  bare?: boolean;
+}) {
   const yt = useMemo(() => youtubeId(lesson.source), [lesson.source]);
   const [stage, setStage] = useState(0);
   const [shown, setShown] = useState<string | null>(null);
@@ -228,17 +241,44 @@ export function Cover({ lesson, big = false, progress = 0, editable = false }: {
             onError={() => !custom && setStage((s) => s + 1)}
           />
         )}
-        <span className="cover-kind">
-          <Icon name={yt ? "youtube" : k.icon} size={14} />
-          {k.label}
-        </span>
-        {progress > 0.005 && progress < 0.995 && (
+        {!bare && (
+          <span className="cover-kind">
+            <Icon name={yt ? "youtube" : k.icon} size={14} />
+            {k.label}
+          </span>
+        )}
+        {!bare && progress > 0.005 && progress < 0.995 && (
           <span className="cover-progress" aria-hidden="true">
             <i style={{ width: `${progress * 100}%` }} />
           </span>
         )}
       </div>
       {editable && <CoverButton lessonId={lesson.id} custom={!!lesson.cover_path} />}
+    </div>
+  );
+}
+
+/**
+ * Couverture d'une playlist : la couverture de sa première leçon, ou une
+ * mosaïque des quatre premières ; vide, une œuvre générée pour elle.
+ */
+export function PlaylistCover({ lessons, seed, big = false }: { lessons: CoverLesson[]; seed: number; big?: boolean }) {
+  const tiles = lessons.length >= 4 ? lessons.slice(0, 4) : lessons.slice(0, 1);
+  return (
+    <div className={`cover-box pl-cover ${big ? "pl-big" : ""}`}>
+      <div className={`cover pl-mosaic n${tiles.length}`}>
+        {tiles.length === 0 ? (
+          <>
+            <CoverArt seed={seed * 7919 + 13} hue={(seed * 47 + 28) % 360} />
+            <span className="cover-grain" style={{ backgroundImage: `url(${grainTexture()})` }} />
+            <span className="pl-empty-icon">
+              <Icon name="playlist" size={big ? 34 : 24} stroke={1.6} />
+            </span>
+          </>
+        ) : (
+          tiles.map((l) => <Cover key={l.id} lesson={l} bare />)
+        )}
+      </div>
     </div>
   );
 }

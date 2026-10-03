@@ -7,6 +7,7 @@ import "./styles/app.css";
 import "./styles/views.css";
 import "./styles/reader.css";
 import "./styles/onboarding.css";
+import "./styles/chat.css";
 
 import React from "react";
 import ReactDOM from "react-dom/client";

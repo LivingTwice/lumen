@@ -1,6 +1,8 @@
 import type { SVGProps } from "react";
 
 const P: Record<string, string> = {
+  playlist: "M4 6.5h11 M4 11.5h11 M4 16.5h6.5 M15 14v6.6l5.2-3.3z",
+  grip: "M9 6.5h.01 M15 6.5h.01 M9 12h.01 M15 12h.01 M9 17.5h.01 M15 17.5h.01",
   library: "M4 5h4v14H4z M10 5h4v14h-4z M16.2 6.2l3.4-.9 2.6 12.8-3.4.9z",
   book: "M3 6c3-1.2 6-1.2 9 1 3-2.2 6-2.2 9-1v12c-3-1-6-1-9 1-3-2-6-2-9-1z M12 7v12",
   cards: "M4 8h16v11H4z M7 5h10",
@@ -29,6 +31,9 @@ const P: Record<string, string> = {
   file: "M7 3h7l5 5v13H7z M14 3v5h5",
   wave: "M3 12h2 M7 8v8 M11 5v14 M15 9v6 M19 7v10 M21 12h0",
   video: "M4 6h11v12H4z M15 10l5-3v10l-5-3z",
+  sidebar: "M6 5h12a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2z M9.5 5v14",
+  expand: "M4 9V4h5 M20 9V4h-5 M4 15v5h5 M20 15v5h-5",
+  shrink: "M9 4v5H4 M15 4v5h5 M9 20v-5H4 M15 20v-5h5",
   sparkle: "M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z M19 16l.8 2.2L22 19l-2.2.8L19 22l-.8-2.2L16 19l2.2-.8z",
   rewind: "M11 7l-6 5 6 5z M19 7l-6 5 6 5z",
   ffwd: "M13 7l6 5-6 5z M5 7l6 5-6 5z",
@@ -48,6 +53,15 @@ const P: Record<string, string> = {
   export: "M12 15V4 M7 9l5-5 5 5 M5 14v6h14v-6",
   external: "M14 4h6v6 M20 4l-9 9 M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5",
   image: "M4 7a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z M4 16l4.5-4.5 4 4 2.5-2.5L20 18 M15.5 9h.01",
+  chat: "M6 5h12a3 3 0 0 1 3 3v6.5a3 3 0 0 1-3 3h-6.2L7.5 21v-3.5H6a3 3 0 0 1-3-3V8a3 3 0 0 1 3-3z M8 10h8 M8 13.5h5",
+  send: "M12 19V5.5 M6.5 11l5.5-5.5 5.5 5.5",
+  stop: "M7.5 6h9a1.5 1.5 0 0 1 1.5 1.5v9a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 6 16.5v-9A1.5 1.5 0 0 1 7.5 6z",
+  bulb: "M9.5 18.5h5 M10.5 21.5h3 M12 2.5a6.5 6.5 0 0 0-3.9 11.7c.8.6 1.3 1.4 1.4 2.3h5c.1-.9.6-1.7 1.4-2.3A6.5 6.5 0 0 0 12 2.5z",
+  attach: "M20 11.4l-7.6 7.6a5 5 0 0 1-7.1-7.1l8.2-8.2a3.4 3.4 0 0 1 4.8 4.8l-8.2 8.2a1.7 1.7 0 0 1-2.4-2.4l7.4-7.4",
+  laptop: "M5.5 5.5h13a1 1 0 0 1 1 1V15h-15V6.5a1 1 0 0 1 1-1z M2.5 18.5h19 M3.5 15h17l1 3.5h-19z",
+  cloud: "M7.2 18.5h10.3a4 4 0 0 0 .5-7.97A6 6 0 0 0 6.4 9.2a4.7 4.7 0 0 0 .8 9.3z",
+  refresh: "M19.5 11a7.5 7.5 0 0 0-13.6-4.2 M5.5 3.5v3.6h3.6 M4.5 13a7.5 7.5 0 0 0 13.6 4.2 M18.5 20.5v-3.6h-3.6",
+  copy: "M9 9h9.5a1.5 1.5 0 0 1 1.5 1.5V20a1.5 1.5 0 0 1-1.5 1.5H9A1.5 1.5 0 0 1 7.5 20v-9.5A1.5 1.5 0 0 1 9 9z M16.5 9V5.5A1.5 1.5 0 0 0 15 4H5.5A1.5 1.5 0 0 0 4 5.5V15a1.5 1.5 0 0 0 1.5 1.5h2",
 };
 
 export type IconName = keyof typeof P;
@@ -58,7 +72,7 @@ export function Icon({
   stroke = 1.7,
   ...rest
 }: { name: IconName; size?: number; stroke?: number } & Omit<SVGProps<SVGSVGElement>, "stroke">) {
-  const filled = name === "play" || name === "pause";
+  const filled = name === "play" || name === "pause" || name === "stop";
   return (
     <svg
       className="icon"

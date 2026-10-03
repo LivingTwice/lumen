@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- affiché par macOS quand Lumen demande l'accès à iCloud Drive (ou à Dropbox, Google Drive…) pour la sauvegarde -->
+	<key>NSFileProviderDomainUsageDescription</key>
+	<string>Lumen sauvegarde votre progression (mots, leçons, réglages) dans votre iCloud Drive ou le dossier choisi, pour qu'elle ne se perde jamais.</string>
+</dict>
+</plist>

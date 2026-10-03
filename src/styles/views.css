@@ -340,6 +340,596 @@
 }
 
 /* ==========================================================================
+   Playlists
+   ========================================================================== */
+
+.pl-view {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ---------- couverture : une leçon, ou une mosaïque de quatre ---------- */
+
+.cover.pl-mosaic {
+  background: var(--bg-elev);
+}
+.pl-mosaic > .cover-box {
+  position: absolute;
+  inset: 0;
+}
+.pl-mosaic.n4 > .cover-box:nth-child(1) {
+  inset: 0 calc(50% + 1px) calc(50% + 1px) 0;
+}
+.pl-mosaic.n4 > .cover-box:nth-child(2) {
+  inset: 0 0 calc(50% + 1px) calc(50% + 1px);
+}
+.pl-mosaic.n4 > .cover-box:nth-child(3) {
+  inset: calc(50% + 1px) calc(50% + 1px) 0 0;
+}
+.pl-mosaic.n4 > .cover-box:nth-child(4) {
+  inset: calc(50% + 1px) 0 0 calc(50% + 1px);
+}
+.pl-mosaic .cover {
+  position: absolute;
+  inset: 0;
+  aspect-ratio: auto;
+  border-radius: 0;
+}
+.pl-mosaic .cover::after {
+  display: none;
+}
+/* playlist vide : un médaillon de verre au centre de l'œuvre */
+.pl-empty-icon {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  margin: auto;
+  width: 58px;
+  height: 58px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  color: #fff;
+  background: rgba(0, 0, 0, 0.26);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.22), 0 6px 24px rgba(0, 0, 0, 0.18);
+}
+.pl-big .pl-empty-icon {
+  width: 78px;
+  height: 78px;
+}
+.pl-big > .cover {
+  border-radius: 18px;
+  box-shadow: var(--shadow-m);
+}
+
+/* ---------- toutes les playlists ---------- */
+
+.pl-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+  gap: 30px 18px;
+  padding-top: 12px;
+}
+/* deux feuillets dépassent derrière la couverture, et s'écartent au survol */
+.pl-card > .pl-layer {
+  position: absolute;
+  z-index: -1;
+  left: 14px;
+  right: 14px;
+  top: -7px;
+  height: 24px;
+  border-radius: 12px 12px 0 0;
+  background: color-mix(in srgb, var(--text) 13%, var(--bg));
+  pointer-events: none;
+  transition: transform 0.4s var(--ease-out), background-color 0.3s ease;
+}
+.pl-card > .pl-layer.two {
+  left: 30px;
+  right: 30px;
+  top: -13px;
+  background: color-mix(in srgb, var(--text) 7%, var(--bg));
+}
+.pl-card:hover > .pl-layer.one {
+  transform: translateY(-2px);
+  background: color-mix(in srgb, var(--light-strong) 30%, var(--bg));
+}
+.pl-card:hover > .pl-layer.two {
+  transform: translateY(-4px);
+  background: color-mix(in srgb, var(--light-strong) 16%, var(--bg));
+}
+/* pas de plan à part : le bouton de lecture passe au-dessus de la zone qui ouvre la playlist */
+.pl-card > .pl-cover-wrap {
+  z-index: auto;
+}
+.pl-play {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  z-index: 3;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  border: 0;
+  display: grid;
+  place-items: center;
+  background: var(--text);
+  color: var(--bg);
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.28);
+  opacity: 0;
+  transform: translateY(6px) scale(0.9);
+  transition: opacity 0.22s ease, transform 0.35s var(--ease-spring), box-shadow 0.3s ease;
+}
+.pl-play .icon {
+  margin-left: 2px;
+}
+.pl-card:hover .pl-play,
+.pl-play:focus-visible {
+  opacity: 1;
+  transform: none;
+}
+.pl-play:hover {
+  box-shadow: 0 0 0 5px var(--light-veil), 0 0 26px var(--light-soft), 0 8px 22px rgba(0, 0, 0, 0.28);
+}
+.pl-play:active {
+  transform: scale(0.94);
+}
+.lesson-collection.pl-live::before {
+  content: "";
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-right: 7px;
+  border-radius: 50%;
+  vertical-align: 1px;
+  background: var(--light-strong);
+  box-shadow: 0 0 8px var(--light);
+  animation: pulse 1.8s ease-in-out infinite;
+}
+.pl-new {
+  min-height: 220px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  border-radius: var(--radius-l);
+  border: 1.5px dashed var(--border-strong);
+  background: transparent;
+  color: var(--muted);
+  font-size: 14px;
+  font-weight: 520;
+  transition: border-color 0.25s ease, background-color 0.25s ease, color 0.2s ease;
+}
+.pl-new-plus {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: var(--chip);
+  transition: background-color 0.25s ease, box-shadow 0.3s ease, transform 0.35s var(--ease-spring);
+}
+.pl-new:hover {
+  color: var(--text);
+  border-color: var(--light-strong);
+  background: var(--light-veil);
+}
+.pl-new:hover .pl-new-plus {
+  background: var(--light-soft);
+  box-shadow: 0 0 22px var(--light-soft);
+  transform: scale(1.06);
+}
+
+/* ---------- une playlist ---------- */
+
+.pl-back {
+  margin-left: -6px;
+  color: var(--muted);
+}
+.pl-back:hover {
+  color: var(--text);
+}
+/* halo des couvertures derrière l'en-tête */
+.pl-ambient {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 460px;
+  overflow: hidden;
+  pointer-events: none;
+  opacity: 0.24;
+  /* fondu aux deux bords : pas de ligne nette sous la barre du haut */
+  -webkit-mask-image: linear-gradient(180deg, transparent 0, #000 110px, #000 40%, transparent 100%);
+  mask-image: linear-gradient(180deg, transparent 0, #000 110px, #000 40%, transparent 100%);
+}
+:root[data-theme="dark"] .pl-ambient {
+  opacity: 0.22;
+}
+.pl-ambient .cover-box {
+  position: absolute;
+  inset: -80px -8% 0;
+}
+.pl-ambient .cover {
+  position: absolute;
+  inset: 0;
+  aspect-ratio: auto;
+  border-radius: 0;
+  filter: blur(72px) saturate(1.4);
+}
+.pl-view .view-inner {
+  position: relative;
+}
+.pl-hero {
+  display: grid;
+  grid-template-columns: 340px minmax(0, 1fr);
+  gap: 34px;
+  align-items: end;
+  padding: 22px 0 36px;
+}
+.pl-hero-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+  padding-bottom: 2px;
+}
+.pl-title,
+.pl-title-input {
+  font-size: 46px;
+  line-height: 1.06;
+  letter-spacing: -0.015em;
+}
+.pl-title {
+  overflow-wrap: anywhere;
+  cursor: text;
+}
+.pl-title-input {
+  width: 100%;
+  padding: 0 0 2px;
+  border: 0;
+  border-bottom: 2px solid var(--light-strong);
+  outline: none;
+  background: transparent;
+  color: var(--text);
+}
+.pl-meta {
+  color: var(--muted);
+  font-size: 14.5px;
+}
+.pl-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+}
+.pl-more {
+  width: 46px;
+  height: 46px;
+  border-radius: 13px;
+}
+.pl-resume {
+  font-size: 13px;
+}
+@media (max-width: 1180px) {
+  .pl-hero {
+    grid-template-columns: 250px minmax(0, 1fr);
+    gap: 26px;
+  }
+  .pl-title,
+  .pl-title-input {
+    font-size: 36px;
+  }
+}
+.pl-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  padding: 46px 20px;
+  border-radius: var(--radius-l);
+  border: 1.5px dashed var(--border-strong);
+  color: var(--muted);
+}
+
+/* ---------- la liste des leçons ---------- */
+
+.pl-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.pl-row {
+  position: relative;
+  display: grid;
+  grid-template-columns: 24px 26px 112px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 14px;
+  padding: 10px 12px 10px 4px;
+  border-radius: 14px;
+  background: transparent;
+  transition: background-color 0.2s ease, box-shadow 0.25s ease;
+}
+.pl-row:hover {
+  background: var(--chip);
+}
+.pl-row.current {
+  background: var(--light-veil);
+}
+.pl-row.current::before {
+  content: "";
+  position: absolute;
+  left: -2px;
+  top: 16px;
+  bottom: 16px;
+  width: 3px;
+  border-radius: 3px;
+  background: linear-gradient(var(--light), var(--light-strong));
+  box-shadow: 0 0 10px var(--light);
+}
+.pl-row.dragging {
+  z-index: 5;
+  background: var(--bg-elev);
+  box-shadow: var(--shadow-l), 0 0 0 1px var(--border);
+}
+.pl-grip {
+  position: relative;
+  z-index: 2;
+  width: 24px;
+  height: 36px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--faint);
+  display: grid;
+  place-items: center;
+  cursor: grab;
+  touch-action: none;
+  opacity: 0;
+  transition: opacity 0.2s ease, color 0.2s ease;
+}
+.pl-row:hover .pl-grip,
+.pl-row.dragging .pl-grip,
+.pl-grip:focus-visible {
+  opacity: 1;
+}
+.pl-grip:hover {
+  color: var(--text);
+}
+.pl-row.dragging .pl-grip {
+  cursor: grabbing;
+}
+.pl-index {
+  display: grid;
+  place-items: center;
+  font-size: 13px;
+  color: var(--muted);
+}
+.pl-row-hit {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  border: 0;
+  border-radius: inherit;
+  background: transparent;
+}
+.pl-thumb {
+  position: relative;
+}
+/* vignettes : seul le cadre est arrondi, pas les tuiles d'une mosaïque */
+.pl-thumb > .cover-box > .cover,
+.pick-thumb > .cover-box > .cover,
+.up-thumb > .cover-box > .cover {
+  border-radius: 9px;
+}
+.pl-thumb-play {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  margin: auto;
+  width: 32px;
+  height: 32px;
+  border: 0;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  color: #fff;
+  background: rgba(0, 0, 0, 0.42);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.2);
+  opacity: 0;
+  transform: scale(0.85);
+  transition: opacity 0.2s ease, transform 0.3s var(--ease-spring), box-shadow 0.25s ease;
+}
+.pl-thumb-play .icon {
+  margin-left: 2px;
+}
+.pl-row:hover .pl-thumb-play,
+.pl-thumb-play:focus-visible {
+  opacity: 1;
+  transform: none;
+}
+.pl-thumb-play:hover {
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.35), 0 0 16px var(--light-soft);
+}
+.pl-row-body {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+.pl-row-body strong {
+  font-family: var(--font-display);
+  font-size: 18px;
+  font-weight: 500;
+  line-height: 1.2;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.pl-row-body span {
+  font-size: 12.5px;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.pl-row-end {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.pl-row-end .done-pill {
+  margin-left: 0;
+  font-size: 12px;
+}
+.pl-row-progress {
+  width: 60px;
+  height: 4px;
+  border-radius: 4px;
+  overflow: hidden;
+  background: var(--chip-hover);
+}
+.pl-row-progress i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--light-strong), var(--light));
+}
+.pl-remove {
+  opacity: 0;
+  transition: opacity 0.2s ease, background-color 0.18s ease, color 0.18s ease;
+}
+.pl-row:hover .pl-remove,
+.pl-remove:focus-visible {
+  opacity: 1;
+}
+
+/* ---------- choisir des leçons, choisir une playlist ---------- */
+
+.pick-tools {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.pick-tools .search {
+  flex: 1;
+  width: auto;
+  min-width: 0;
+}
+.pick-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: min(52vh, 520px);
+  overflow: auto;
+  margin: 0 -10px;
+  padding: 2px 0;
+}
+.pick-row {
+  display: grid;
+  grid-template-columns: 88px minmax(0, 1fr) 30px;
+  align-items: center;
+  gap: 14px;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+  text-align: left;
+  transition: background-color 0.18s ease;
+}
+.pick-row:hover {
+  background: var(--chip);
+}
+.pick-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.pick-body strong {
+  font-size: 14px;
+  font-weight: 560;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.pick-body span {
+  font-size: 12px;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.pick-check {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: var(--chip);
+  color: var(--muted);
+  transition: background-color 0.2s ease, color 0.2s ease, transform 0.35s var(--ease-spring), box-shadow 0.3s ease;
+}
+.pick-row:hover .pick-check {
+  background: var(--chip-hover);
+  color: var(--text);
+}
+.pick-row.on .pick-check {
+  background: var(--text);
+  color: var(--bg);
+  transform: scale(1.05);
+  box-shadow: 0 0 0 4px var(--light-veil), 0 0 16px var(--light-soft);
+}
+.pick-count {
+  margin-right: auto;
+  font-size: 13px;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.pick-none {
+  padding: 34px 0;
+  text-align: center;
+}
+.atp-lesson {
+  margin: -6px 0 12px;
+  font-size: 14px;
+}
+.atp-list {
+  max-height: min(40vh, 340px);
+}
+.atp-list .pick-row {
+  grid-template-columns: 72px minmax(0, 1fr) 30px;
+}
+.atp-new {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.atp-list + .atp-new {
+  margin-top: 12px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+.atp-new .btn {
+  height: 42px;
+}
+
+/* ==========================================================================
    Import
    ========================================================================== */
 
@@ -936,3 +1526,156 @@
   color: var(--muted);
 }
 
+
+/* ---------- sauvegarde ---------- */
+
+/* balise : une petite lanterne, éteinte, allumée, qui respire pendant la copie */
+.backup-beacon {
+  position: relative;
+  width: 34px;
+  height: 34px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: var(--chip);
+  transition: background-color 0.5s ease;
+}
+.backup-beacon i {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--faint);
+  transition: background 0.5s ease, box-shadow 0.6s ease;
+}
+.backup-beacon.on,
+.backup-beacon.busy {
+  background: var(--light-veil);
+}
+.backup-beacon.on i,
+.backup-beacon.busy i {
+  background: radial-gradient(circle at 38% 34%, #fff7e6, var(--light) 55%, var(--light-strong));
+  box-shadow: 0 0 10px var(--light), 0 0 24px var(--light-soft);
+}
+.backup-beacon.busy::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 1.5px solid var(--light-strong);
+  opacity: 0;
+  animation: beacon-ring 1.6s ease-out infinite;
+}
+@keyframes beacon-ring {
+  0% {
+    transform: scale(0.4);
+    opacity: 0.9;
+  }
+  100% {
+    transform: scale(1.12);
+    opacity: 0;
+  }
+}
+.backup-beacon.warn {
+  background: color-mix(in srgb, var(--danger) 10%, transparent);
+}
+.backup-beacon.warn i {
+  background: var(--danger);
+  box-shadow: 0 0 10px color-mix(in srgb, var(--danger) 45%, transparent);
+}
+.set-row .grow span.backup-warn {
+  color: var(--danger);
+}
+.backup-foot {
+  background: var(--bg-sunk);
+}
+.backup-note {
+  flex: 1;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+.backup-list {
+  margin-top: 12px;
+}
+.backup-device {
+  width: 34px;
+  height: 34px;
+  flex-shrink: 0;
+  border-radius: 10px;
+  display: grid;
+  place-items: center;
+  background: var(--chip);
+  color: var(--muted);
+}
+.backup-device.here {
+  background: var(--light-veil);
+  color: var(--light-strong);
+}
+.backup-item .grow strong {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.backup-item .chip {
+  height: 20px;
+  padding: 0 8px;
+  font-size: 11px;
+}
+.backup-item .select {
+  min-width: 0;
+  width: 190px;
+}
+.backup-item .bar {
+  margin-top: 8px;
+  height: 5px;
+}
+.icon-btn.spin svg {
+  animation: spin 0.9s linear infinite;
+}
+
+/* ---------- réglages : ajouter une langue ---------- */
+
+.lang-add {
+  margin-top: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.lang-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.lang-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 34px;
+  padding: 0 12px 0 5px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--bg-elev);
+  color: var(--text);
+  font-size: 13px;
+  cursor: pointer;
+  transition: border-color 0.2s ease, box-shadow 0.3s ease, transform 0.2s ease;
+}
+.lang-chip .lang-badge {
+  width: 24px;
+  height: 24px;
+  border-radius: 999px;
+  font-size: 9.5px;
+}
+.lang-chip svg {
+  color: var(--muted);
+}
+.lang-chip:hover {
+  border-color: var(--border-strong);
+  box-shadow: 0 0 18px var(--light-soft);
+  transform: translateY(-1px);
+}
+.lang-chip:active {
+  transform: scale(0.97);
+}

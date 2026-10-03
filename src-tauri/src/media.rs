@@ -1,6 +1,7 @@
 //! Import audio et vidéo : copie dans la bibliothèque, transcription locale
 //! par le processus `lumen-whisper`, construction du texte et des horodatages.
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 
@@ -51,17 +52,22 @@ pub fn store_media(data_dir: &Path, src: &Path) -> Result<PathBuf> {
     Ok(dst)
 }
 
+/// Transcrit avec Whisper (processus `lumen-whisper`). `pcm_out` : y enregistre
+/// aussi le son décodé (mono, 16 kHz, f32), pour Qwen3-ASR.
 pub async fn transcribe(
     model: &Path,
     media: &Path,
     lang: &str,
+    pcm_out: Option<&Path>,
     mut on_event: impl FnMut(ImportEvent),
 ) -> Result<Vec<WWord>> {
     let bin = sidecar_path()?;
-    let mut child = Command::new(bin)
-        .arg(model)
-        .arg(media)
-        .arg(lang)
+    let mut cmd = Command::new(bin);
+    cmd.arg(model).arg(media).arg(lang);
+    if let Some(p) = pcm_out {
+        cmd.arg("--pcm").arg(p);
+    }
+    let mut child = cmd
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .kill_on_drop(true)
@@ -123,6 +129,218 @@ pub fn build_transcript(words: &[WWord]) -> (String, String) {
         prev_end = w.t1;
     }
     (text, serde_json::to_string(&timings).unwrap_or_else(|_| "[]".into()))
+}
+
+/// Texte et horodatages d'une leçon à partir d'un son. Whisper repère chaque
+/// mot dans le temps (et décode le son) ; si Qwen3-ASR est fourni (`fine` :
+/// modèle et partie audio), il écrit le texte, plus juste, sur lequel le
+/// minutage de Whisper est recalé. Le texte est ensuite aéré comme sur LingQ.
+pub async fn lesson_transcript(
+    engine: &crate::ai::Engine,
+    whisper: &Path,
+    fine: Option<(PathBuf, PathBuf)>,
+    media: &Path,
+    lang: &str,
+    mut on_event: impl FnMut(ImportEvent),
+) -> Result<(String, String)> {
+    let pcm = fine.as_ref().map(|_| std::env::temp_dir().join(format!("lumen-{}.pcm", new_stem())));
+    let heard = transcribe(whisper, media, lang, pcm.as_deref(), |e| {
+        // avec Qwen3-ASR, Whisper ne fait plus que repérer les mots dans le temps
+        let e = match e {
+            ImportEvent::Stage { stage } if stage == "transcribe" && fine.is_some() => ImportEvent::Stage { stage: "timing".into() },
+            e => e,
+        };
+        on_event(e);
+    })
+    .await;
+    let words = match heard {
+        Ok(w) => w,
+        Err(e) => {
+            if let Some(p) = &pcm {
+                let _ = std::fs::remove_file(p);
+            }
+            return Err(e);
+        }
+    };
+    let (mut text, mut timings) = build_transcript(&words);
+    if let (Some((model, mmproj)), Some(pcm)) = (fine, pcm) {
+        on_event(ImportEvent::Stage { stage: "text".into() });
+        let written = read_pcm(&pcm).and_then(|samples| {
+            tokio::task::block_in_place(|| {
+                crate::asr::transcribe(engine, &model, &mmproj, &samples, lang, &std::sync::atomic::AtomicBool::new(false), |p| {
+                    on_event(ImportEvent::Progress { value: p });
+                })
+            })
+        });
+        let _ = std::fs::remove_file(&pcm);
+        match written {
+            Ok(t) if !t.trim().is_empty() => {
+                let (t_timings, found) = align_timings(&t, lang, &words);
+                // garde-fou : un texte qui ne ressemble pas à ce qu'a entendu Whisper est écarté
+                if found >= 0.5 {
+                    text = t;
+                    timings = t_timings;
+                } else {
+                    eprintln!("Qwen3-ASR écarté : {:.0} % des mots retrouvés", found * 100.0);
+                }
+            }
+            Ok(_) => {}
+            // Whisper seul plutôt qu'un échec : la leçon se crée quand même
+            Err(e) => eprintln!("Qwen3-ASR indisponible : {e}"),
+        }
+    }
+    Ok(airy(&text, lang, &timings))
+}
+
+/// Son décodé par `lumen-whisper --pcm` (mono, 16 kHz, f32 petit-boutiste).
+pub fn read_pcm(path: &Path) -> Result<Vec<f32>> {
+    let bytes = std::fs::read(path)?;
+    Ok(bytes.chunks_exact(4).map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]])).collect())
+}
+
+// ---------- mise en page aérée, comme LingQ ----------
+
+/// Une phrase d'au plus deux mots (« Sì. ») rejoint la suivante.
+const PARA_MIN_WORDS: usize = 3;
+/// Au-delà, une phrase (parole spontanée peu ponctuée) est coupée en morceaux.
+const PARA_MAX_WORDS: usize = 55;
+/// Taille minimale d'un morceau de phrase coupée.
+const PARA_MIN_PART: usize = 6;
+
+/// Met une phrase par paragraphe, comme LingQ : le texte respire. Les phrases
+/// d'un ou deux mots rejoignent la suivante ; les très longues sont coupées à
+/// leur plus longue pause (à défaut après une virgule). Les horodatages
+/// [[début, fin, t0, t1], …] suivent le texte (positions UTF-16).
+pub fn airy(text: &str, lang: &str, timings: &str) -> (String, String) {
+    let times: Vec<[f64; 4]> = serde_json::from_str(timings).unwrap_or_default();
+    let words: Vec<text::Token> = text::tokenize(text, lang).into_iter().filter(|t| t.w).collect();
+    let n = words.len();
+    if n < 2 {
+        return (text.trim().to_string(), timings.to_string());
+    }
+    // position UTF-16 → position en octets
+    let mut byte_at: Vec<usize> = Vec::with_capacity(text.len() + 1);
+    for (i, c) in text.char_indices() {
+        byte_at.extend(std::iter::repeat_n(i, c.len_utf16()));
+    }
+    byte_at.push(text.len());
+    let byte = |p: usize| byte_at[p.min(byte_at.len() - 1)];
+    let when: HashMap<usize, (f64, f64)> = times.iter().map(|t| (t[0] as usize, (t[2], t[3]))).collect();
+    let wt: Vec<Option<(f64, f64)>> = words.iter().map(|w| when.get(&w.s).copied()).collect();
+    // ce qui sépare le mot k du suivant : espaces et ponctuation
+    let gap = |k: usize| &text[byte(words[k].e)..byte(words[k + 1].s)];
+    let ends_sentence = |g: &str| g.contains(['.', '!', '?', '…', '。', '！', '？']);
+
+    // 1. phrases (un saut de paragraphe existant compte aussi)
+    let mut sentences: Vec<(usize, usize)> = Vec::new();
+    let mut a = 0;
+    for k in 0..n - 1 {
+        let g = gap(k);
+        if ends_sentence(g) || g.contains('\n') {
+            sentences.push((a, k));
+            a = k + 1;
+        }
+    }
+    sentences.push((a, n - 1));
+    // 2. les phrases trop courtes rejoignent la suivante (la dernière, la précédente)
+    let mut merged: Vec<(usize, usize)> = Vec::new();
+    let mut carry: Option<usize> = None;
+    for (a, b) in sentences {
+        let a = carry.take().unwrap_or(a);
+        if b + 1 - a < PARA_MIN_WORDS {
+            carry = Some(a);
+        } else {
+            merged.push((a, b));
+        }
+    }
+    if let Some(a) = carry {
+        match merged.last_mut() {
+            Some(last) => last.1 = n - 1,
+            None => merged.push((a, n - 1)),
+        }
+    }
+    // 3. les phrases trop longues sont coupées
+    let score = |k: usize| {
+        let pause = match (wt[k], wt[k + 1]) {
+            (Some(x), Some(y)) => (y.0 - x.1).max(0.0),
+            _ => 0.0,
+        };
+        let comma = if gap(k).contains([',', ';', ':', '–', '—']) { 0.25 } else { 0.0 };
+        pause + comma
+    };
+    let mut paras: Vec<(usize, usize)> = Vec::new();
+    let mut todo: Vec<(usize, usize)> = merged.into_iter().rev().collect();
+    while let Some((a, b)) = todo.pop() {
+        if b + 1 - a <= PARA_MAX_WORDS {
+            paras.push((a, b));
+            continue;
+        }
+        // la meilleure coupure ; à égalité, la plus proche du milieu
+        let mid = (a + b) as f64 / 2.0;
+        let k = (a + PARA_MIN_PART - 1..=b - PARA_MIN_PART)
+            .max_by(|&x, &y| (score(x), -(x as f64 - mid).abs()).partial_cmp(&(score(y), -(y as f64 - mid).abs())).unwrap_or(std::cmp::Ordering::Equal))
+            .unwrap_or((a + b) / 2);
+        todo.push((k + 1, b));
+        todo.push((a, k));
+    }
+    let breaks: std::collections::HashSet<usize> = paras.iter().map(|p| p.1).filter(|&b| b + 1 < n).collect();
+
+    // 4. le texte, recomposé, et la nouvelle place de chaque mot
+    let mut out = Utf16Text::default();
+    out.push(text[..byte(words[0].s)].trim_start());
+    let mut place: HashMap<usize, (usize, usize)> = HashMap::new();
+    for k in 0..n {
+        let start = out.len16;
+        out.push(&text[byte(words[k].s)..byte(words[k].e)]);
+        place.insert(words[k].s, (start, out.len16));
+        if k + 1 == n {
+            break;
+        }
+        let g = gap(k);
+        if breaks.contains(&k) {
+            // ponctuation collée au mot, saut de paragraphe, puis ce qui ouvre la phrase suivante
+            match g.find(char::is_whitespace) {
+                Some(i) => {
+                    out.push(&g[..i]);
+                    out.push("\n\n");
+                    out.push(g[i..].trim_start());
+                }
+                None => {
+                    out.push(g);
+                    out.push("\n\n");
+                }
+            }
+        } else if g.contains('\n') {
+            // ancien saut de paragraphe, devenu inutile : une simple espace
+            let joined = g.split_whitespace().collect::<Vec<_>>().join(" ");
+            out.push(&joined);
+            if g.ends_with(char::is_whitespace) {
+                out.push(" ");
+            }
+        } else {
+            out.push(g);
+        }
+    }
+    out.push(text[byte(words[n - 1].e)..].trim_end());
+    let moved: Vec<[f64; 4]> = times
+        .iter()
+        .filter_map(|t| place.get(&(t[0] as usize)).map(|&(s, e)| [s as f64, e as f64, t[2], t[3]]))
+        .collect();
+    (out.text, serde_json::to_string(&moved).unwrap_or_else(|_| "[]".into()))
+}
+
+/// Texte en construction, avec sa longueur en unités UTF-16 (celles de l'interface).
+#[derive(Default)]
+struct Utf16Text {
+    text: String,
+    len16: usize,
+}
+
+impl Utf16Text {
+    fn push(&mut self, s: &str) {
+        self.text.push_str(s);
+        self.len16 += s.encode_utf16().count();
+    }
 }
 
 // ---------- recalage sur un texte existant ----------
@@ -492,6 +710,130 @@ mod tests {
         for x in t.iter().take(24) {
             println!("{:>7.2} s  {}", x[2], String::from_utf16_lossy(&u16[x[0] as usize..x[1] as usize]));
         }
+    }
+
+    /// Chaque horodatage retombe sur le même mot après la mise en page.
+    fn same_words(before: &str, bt: &str, after: &str, at: &str) {
+        let (b, a): (Vec<[f64; 4]>, Vec<[f64; 4]>) = (serde_json::from_str(bt).unwrap(), serde_json::from_str(at).unwrap());
+        assert_eq!(b.len(), a.len());
+        let (b16, a16): (Vec<u16>, Vec<u16>) = (before.encode_utf16().collect(), after.encode_utf16().collect());
+        for (x, y) in b.iter().zip(&a) {
+            assert_eq!(String::from_utf16_lossy(&b16[x[0] as usize..x[1] as usize]), String::from_utf16_lossy(&a16[y[0] as usize..y[1] as usize]));
+            assert_eq!((x[2], x[3]), (y[2], y[3]));
+        }
+    }
+
+    /// Horodatages d'un texte : un mot toutes les 0,3 s, plus les pauses données (après le mot k).
+    fn timed(text: &str, lang: &str, pauses: &[(usize, f64)]) -> String {
+        let mut t = 0.0;
+        let out: Vec<[f64; 4]> = text::tokenize(text, lang)
+            .into_iter()
+            .filter(|w| w.w)
+            .enumerate()
+            .map(|(k, w)| {
+                let x = [w.s as f64, w.e as f64, t, t + 0.25];
+                t += 0.3 + pauses.iter().find(|p| p.0 == k).map(|p| p.1).unwrap_or(0.0);
+                x
+            })
+            .collect();
+        serde_json::to_string(&out).unwrap()
+    }
+
+    #[test]
+    fn airy_like_lingq() {
+        let text = "Andrea ha una nuova fidanzata. La sua fidanzata si chiama «Sara»! Sì. Andrea vuole prepararle la cena, poi va al negozio.\n\nFine.";
+        let tm = timed(text, "it", &[]);
+        let (out, ot) = airy(text, "it", &tm);
+        assert_eq!(out, "Andrea ha una nuova fidanzata.\n\nLa sua fidanzata si chiama «Sara»!\n\nSì. Andrea vuole prepararle la cena, poi va al negozio. Fine.");
+        same_words(text, &tm, &out, &ot);
+        // déjà aéré : rien ne bouge
+        let (again, _) = airy(&out, "it", &ot);
+        assert_eq!(again, out);
+    }
+
+    #[test]
+    fn airy_cuts_long_spoken_runs_at_pauses() {
+        // 90 mots sans ponctuation, une vraie pause après le 50e
+        let text = (0..90).map(|i| format!("parola{i}")).collect::<Vec<_>>().join(" ");
+        let tm = timed(&text, "it", &[(49, 0.9)]);
+        let (out, ot) = airy(&text, "it", &tm);
+        let paras: Vec<&str> = out.split("\n\n").collect();
+        assert!(paras.iter().all(|p| p.split_whitespace().count() <= PARA_MAX_WORDS), "{paras:?}");
+        assert!(paras.iter().all(|p| p.split_whitespace().count() >= PARA_MIN_PART));
+        assert!(paras.iter().any(|p| p.ends_with("parola49")), "{paras:?}");
+        same_words(&text, &tm, &out, &ot);
+    }
+
+    #[test]
+    fn airy_without_spaces_and_untimed_words() {
+        let text = "猫が好きです。犬も好きです。鳥はとても好きです。";
+        let tm = timed(text, "ja", &[]);
+        let (out, ot) = airy(text, "ja", &tm);
+        assert_eq!(out, "猫が好きです。\n\n犬も好きです。\n\n鳥はとても好きです。");
+        same_words(text, &tm, &out, &ot);
+        // horodatages incomplets (début et fin non retrouvés) : la mise en page se fait quand même
+        let text = "Prima frase qui. Seconda frase qui. Terza frase qui.";
+        let all: Vec<[f64; 4]> = serde_json::from_str(&timed(text, "it", &[])).unwrap();
+        let some = serde_json::to_string(&all[2..7]).unwrap();
+        let (out, ot) = airy(text, "it", &some);
+        assert_eq!(out, "Prima frase qui.\n\nSeconda frase qui.\n\nTerza frase qui.");
+        same_words(text, &some, &out, &ot);
+    }
+
+    /// Mise en page réelle : LUMEN_TEST_TEXT=texte.txt LUMEN_TEST_WORDS=mots.json LUMEN_TEST_LANG=it
+    /// cargo test --lib airy_live -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn airy_live() {
+        let (Ok(t), Ok(w)) = (std::env::var("LUMEN_TEST_TEXT"), std::env::var("LUMEN_TEST_WORDS")) else { return };
+        let lang = std::env::var("LUMEN_TEST_LANG").unwrap_or_else(|_| "en".into());
+        let text = std::fs::read_to_string(t).unwrap();
+        let words: Vec<WWord> = serde_json::from_str(&std::fs::read_to_string(w).unwrap()).unwrap();
+        let (tm, found) = align_timings(&text, &lang, &words);
+        let (out, ot) = airy(&text, &lang, &tm);
+        same_words(&text, &tm, &out, &ot);
+        let sizes: Vec<usize> = out.split("\n\n").map(|p| p.split_whitespace().count()).collect();
+        println!("{:.0} % retrouvés · {} paragraphes · {} à {} mots, {:.1} en moyenne", found * 100.0, sizes.len(), sizes.iter().min().unwrap(), sizes.iter().max().unwrap(), sizes.iter().sum::<usize>() as f64 / sizes.len() as f64);
+        println!("{}", out.split("\n\n").take(40).collect::<Vec<_>>().join("\n\n"));
+        if let Ok(path) = std::env::var("LUMEN_AIRY_OUT") {
+            std::fs::write(path, &out).unwrap();
+        }
+    }
+
+    /// Import réel de bout en bout (Whisper puis Qwen3-ASR, recalage, mise en page) :
+    /// LUMEN_ASR_MODEL=ggml-….bin LUMEN_ASR_DIR=dossier de Qwen3-ASR LUMEN_TEST_AUDIO=son.mp3
+    /// LUMEN_TEST_LANG=it [LUMEN_AIRY_OUT=texte.txt] cargo test --release --lib transcript_live -- --ignored --nocapture
+    /// (copier d'abord binaries/lumen-whisper-aarch64-apple-darwin en target/release/deps/lumen-whisper)
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore]
+    async fn transcript_live() {
+        let (Ok(whisper), Ok(audio)) = (std::env::var("LUMEN_ASR_MODEL"), std::env::var("LUMEN_TEST_AUDIO")) else { return };
+        let lang = std::env::var("LUMEN_TEST_LANG").unwrap_or_else(|_| "it".into());
+        let fine = std::env::var("LUMEN_ASR_DIR").ok().map(|d| {
+            let files: Vec<PathBuf> = std::fs::read_dir(d).unwrap().filter_map(|e| e.ok()).map(|e| e.path()).collect();
+            let pick = |mm: bool| files.iter().find(|p| {
+                let n = p.file_name().unwrap().to_string_lossy();
+                n.ends_with(".gguf") && n.starts_with("mmproj") == mm
+            }).unwrap().clone();
+            (pick(false), pick(true))
+        });
+        let engine = crate::ai::Engine::new();
+        let t = std::time::Instant::now();
+        let mut stages = Vec::new();
+        let (text, timings) = lesson_transcript(&engine, Path::new(&whisper), fine, Path::new(&audio), &lang, |e| {
+            if let ImportEvent::Stage { stage } = e {
+                stages.push(stage);
+            }
+        })
+        .await
+        .unwrap();
+        let tm: Vec<[f64; 4]> = serde_json::from_str(&timings).unwrap();
+        let paras = text.split("\n\n").count();
+        println!("{:.0} s · étapes {stages:?} · {} mots minutés · {paras} paragraphes\n{}", t.elapsed().as_secs_f64(), tm.len(), text.split("\n\n").take(12).collect::<Vec<_>>().join("\n\n"));
+        if let Ok(out) = std::env::var("LUMEN_AIRY_OUT") {
+            std::fs::write(out, &text).unwrap();
+        }
+        assert!(paras > 3 && !tm.is_empty());
     }
 
     #[test]

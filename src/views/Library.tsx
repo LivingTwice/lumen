@@ -1,5 +1,6 @@
 import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useMemo, useState } from "react";
+import { AddToPlaylist } from "../components/AddToPlaylist";
 import { Cover } from "../components/Cover";
 import { Icon } from "../components/Icon";
 import { Menu, Orb, Segmented, Sheet, useGlow } from "../components/ui";
@@ -29,7 +30,7 @@ export function progressOf(l: LessonSummary): number {
   return l.page / pagesOf(l.word_count);
 }
 
-function LessonCard({ l, index, onDelete, onRename }: { l: LessonSummary; index: number; onDelete(): void; onRename(): void }) {
+function LessonCard({ l, index, onDelete, onRename, onPlaylist }: { l: LessonSummary; index: number; onDelete(): void; onRename(): void; onPlaylist(): void }) {
   const openLesson = useApp((s) => s.openLesson);
   const glow = useGlow<HTMLDivElement>();
   const [menu, setMenu] = useState(false);
@@ -78,6 +79,9 @@ function LessonCard({ l, index, onDelete, onRename }: { l: LessonSummary; index:
             </button>
           }
         >
+          <button className="menu-item" onClick={() => (setMenu(false), onPlaylist())}>
+            <Icon name="playlist" size={16} /> Ajouter à une playlist…
+          </button>
           <button className="menu-item" onClick={() => (setMenu(false), onRename())}>
             <Icon name="edit" size={16} /> Renommer
           </button>
@@ -142,6 +146,7 @@ export function Library() {
     bump();
   };
 
+  const [adding, setAdding] = useState<LessonSummary | null>(null);
   const [renaming, setRenaming] = useState<LessonSummary | null>(null);
   const [newTitle, setNewTitle] = useState("");
   const rename = (l: LessonSummary) => {
@@ -248,7 +253,7 @@ export function Library() {
           <motion.div className="lesson-grid" layout>
             <AnimatePresence>
               {shown.map((l, i) => (
-                <LessonCard key={l.id} l={l} index={i} onDelete={() => remove(l)} onRename={() => rename(l)} />
+                <LessonCard key={l.id} l={l} index={i} onDelete={() => remove(l)} onRename={() => rename(l)} onPlaylist={() => setAdding(l)} />
               ))}
             </AnimatePresence>
           </motion.div>
@@ -269,6 +274,7 @@ export function Library() {
       >
         <input className="input" autoFocus value={newTitle} onChange={(e) => setNewTitle(e.target.value)} onKeyDown={(e) => e.key === "Enter" && saveRename()} aria-label="Titre" />
       </Sheet>
+      <AddToPlaylist lesson={adding} all={lessons ?? []} onClose={() => setAdding(null)} />
     </>
   );
 }

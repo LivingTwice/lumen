@@ -3,7 +3,9 @@
 //! Lancé par Lumen comme processus séparé (whisper.cpp et llama.cpp embarquent
 //! chacun leur propre copie de ggml, qu'on ne peut pas lier dans le même binaire).
 //!
-//! Usage : lumen-whisper <modèle.bin> <fichier audio/vidéo> <code langue>
+//! Usage : lumen-whisper <modèle.bin> <fichier audio/vidéo> <code langue> [--pcm <sortie.f32>]
+//! `--pcm` : enregistre aussi le son décodé (mono, 16 kHz, f32 petit-boutiste),
+//! que Lumen confie ensuite à Qwen3-ASR sans avoir à décoder le fichier.
 //! Sortie (stdout, une ligne JSON par événement) :
 //!   {"type":"stage","stage":"decode"}
 //!   {"type":"progress","value":42}
@@ -319,6 +321,7 @@ fn run() -> Result<()> {
         return Err(anyhow!("usage : lumen-whisper <modèle> <média> <langue>"));
     }
     let (model, media, lang) = (&args[1], Path::new(&args[2]), args[3].clone());
+    let pcm_out = args.iter().position(|a| a == "--pcm").and_then(|i| args.get(i + 1));
 
     emit(serde_json::json!({"type":"stage","stage":"decode"}));
     let (raw, rate) = decode(media)?;
@@ -328,6 +331,10 @@ fn run() -> Result<()> {
     let audio = resample(&raw, rate);
     drop(raw);
     let duration = audio.len() as f64 / TARGET_RATE as f64;
+    if let Some(out) = pcm_out {
+        let bytes: Vec<u8> = audio.iter().flat_map(|x| x.to_le_bytes()).collect();
+        std::fs::write(out, bytes).with_context(|| format!("impossible d'écrire {out}"))?;
+    }
 
     emit(serde_json::json!({"type":"stage","stage":"model","duration":duration}));
     let mut cparams = WhisperContextParameters::default();

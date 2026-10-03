@@ -1,7 +1,7 @@
 //! Base de données locale (SQLite) : leçons, mots, activité, réglages, cache.
 
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 use rusqlite::{params, Connection, OptionalExtension};
@@ -13,6 +13,11 @@ pub const STATUS_KNOWN: i64 = 4;
 pub const STATUS_IGNORED: i64 = 5;
 /// Minutage des mots au nouveau calage précis (0 : ancien Whisper ou LingQ, approximatif).
 pub const TIMING_PRECISE: i64 = 2;
+
+/// Fichier de la base dans le dossier de données.
+pub fn path(data_dir: &Path) -> PathBuf {
+    data_dir.join("lumen.db")
+}
 
 pub fn open(path: &Path) -> Result<Connection> {
     let conn = Connection::open(path)?;
@@ -78,6 +83,49 @@ pub fn open(path: &Path) -> Result<Connection> {
     add_column(&conn, "lessons", "cover_path", "TEXT")?;
     // qualité du minutage des mots (voir TIMING_PRECISE)
     add_column(&conn, "lessons", "timing_v", "INTEGER NOT NULL DEFAULT 0")?;
+    // playlists : leçons d'une langue dans l'ordre choisi (une leçon supprimée en sort d'elle-même)
+    conn.execute_batch(
+        r#"
+        CREATE TABLE IF NOT EXISTS playlists(
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            lang TEXT NOT NULL,
+            name TEXT NOT NULL,
+            current_id INTEGER,
+            created_at INTEGER NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS playlist_items(
+            playlist_id INTEGER NOT NULL REFERENCES playlists(id) ON DELETE CASCADE,
+            lesson_id INTEGER NOT NULL REFERENCES lessons(id) ON DELETE CASCADE,
+            position INTEGER NOT NULL,
+            PRIMARY KEY(playlist_id, lesson_id)
+        );
+        CREATE INDEX IF NOT EXISTS playlist_items_lesson ON playlist_items(lesson_id);
+        "#,
+    )?;
+    // chat : conversations (une leçon peut y être jointe) et leurs messages
+    conn.execute_batch(
+        r#"
+        CREATE TABLE IF NOT EXISTS chats(
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            lang TEXT NOT NULL,
+            title TEXT NOT NULL DEFAULT '',
+            lesson_id INTEGER REFERENCES lessons(id) ON DELETE SET NULL,
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS chats_lang ON chats(lang, updated_at);
+        CREATE TABLE IF NOT EXISTS chat_messages(
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            chat_id INTEGER NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
+            role TEXT NOT NULL,
+            content TEXT NOT NULL,
+            thought TEXT NOT NULL DEFAULT '',
+            thought_secs REAL NOT NULL DEFAULT 0,
+            created_at INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS chat_messages_chat ON chat_messages(chat_id, id);
+        "#,
+    )?;
     Ok(conn)
 }
 
@@ -371,6 +419,17 @@ pub fn lesson_media(c: &Connection, id: i64) -> Result<(String, String, Option<S
     Ok(c.query_row("SELECT lang, text, media_path FROM lessons WHERE id=?1", [id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?)
 }
 
+/// Audio créé par la voix naturelle : la leçon devient une leçon audio,
+/// écoutée depuis le début. Renvoie l'ancien audio créé, à supprimer du disque.
+pub fn lesson_set_voice(c: &Connection, id: i64, media: &str, timings: &str, version: i64, duration: f64) -> Result<Option<String>> {
+    let old: Option<String> = c.query_row("SELECT media_path FROM lessons WHERE id=?1", [id], |r| r.get(0)).optional()?.flatten();
+    c.execute(
+        "UPDATE lessons SET media_path=?1, timings=?2, timing_v=?3, duration=?4, position=0 WHERE id=?5",
+        params![media, timings, version, duration, id],
+    )?;
+    Ok(old.filter(|p| p != media && p.contains(".voice.")))
+}
+
 pub fn lesson_set_timings(c: &Connection, id: i64, timings: &str, version: i64) -> Result<()> {
     c.execute("UPDATE lessons SET timings=?1, timing_v=?2 WHERE id=?3", params![timings, version, id])?;
     Ok(())
@@ -391,6 +450,230 @@ pub fn lesson_by_ext(c: &Connection, ext_id: &str) -> Result<Option<i64>> {
 pub fn lesson_set_ext(c: &Connection, id: i64, ext_id: &str, completed: bool) -> Result<()> {
     c.execute("UPDATE lessons SET ext_id=?1, completed=?2 WHERE id=?3", params![ext_id, completed as i64, id])?;
     Ok(())
+}
+
+// ---------- playlists ----------
+
+#[derive(Serialize, Clone, Debug, PartialEq)]
+pub struct Playlist {
+    pub id: i64,
+    pub lang: String,
+    pub name: String,
+    /// leçons, dans l'ordre de lecture
+    pub lessons: Vec<i64>,
+    /// leçon où la lecture de la playlist en est (aucune : elle repart du début)
+    pub current: Option<i64>,
+    pub created_at: i64,
+}
+
+#[derive(Deserialize, Debug, Default)]
+pub struct PlaylistPatch {
+    pub name: Option<String>,
+    pub lessons: Option<Vec<i64>>,
+    /// 0 : la playlist repart du début
+    pub current: Option<i64>,
+}
+
+/// Nom propre, jamais vide, de longueur raisonnable.
+fn playlist_name(name: &str) -> String {
+    let n: String = name.split_whitespace().collect::<Vec<_>>().join(" ").chars().take(120).collect();
+    if n.is_empty() { "Nouvelle playlist".into() } else { n }
+}
+
+pub fn playlists_list(c: &Connection, lang: &str) -> Result<Vec<Playlist>> {
+    let mut st = c.prepare("SELECT id,lang,name,current_id,created_at FROM playlists WHERE lang=?1 ORDER BY created_at DESC, id DESC")?;
+    let mut out = st
+        .query_map([lang], |r| {
+            Ok(Playlist { id: r.get(0)?, lang: r.get(1)?, name: r.get(2)?, lessons: Vec::new(), current: r.get(3)?, created_at: r.get(4)? })
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    let mut items = c.prepare_cached("SELECT lesson_id FROM playlist_items WHERE playlist_id=?1 ORDER BY position")?;
+    for p in &mut out {
+        p.lessons = items.query_map([p.id], |r| r.get(0))?.collect::<rusqlite::Result<Vec<i64>>>()?;
+        // la leçon en cours a pu quitter la playlist entre-temps
+        p.current = p.current.filter(|id| p.lessons.contains(id));
+    }
+    Ok(out)
+}
+
+/// Remplace les leçons d'une playlist (ajout, retrait et nouvel ordre d'un coup).
+/// Les doublons et les leçons d'une autre langue sont écartés.
+fn playlist_fill(tx: &rusqlite::Transaction, id: i64, lessons: &[i64]) -> Result<()> {
+    tx.execute("DELETE FROM playlist_items WHERE playlist_id=?1", [id])?;
+    let mut ins = tx.prepare_cached(
+        "INSERT INTO playlist_items(playlist_id,lesson_id,position)
+         SELECT ?1, id, ?3 FROM lessons WHERE id=?2 AND lang=(SELECT lang FROM playlists WHERE id=?1)",
+    )?;
+    let mut seen = std::collections::HashSet::new();
+    let mut pos = 0i64;
+    for &l in lessons {
+        if seen.insert(l) && ins.execute(params![id, l, pos])? > 0 {
+            pos += 1;
+        }
+    }
+    Ok(())
+}
+
+pub fn playlist_create(c: &mut Connection, lang: &str, name: &str, lessons: &[i64]) -> Result<i64> {
+    let tx = c.transaction()?;
+    tx.execute("INSERT INTO playlists(lang,name,created_at) VALUES(?1,?2,?3)", params![lang, playlist_name(name), now()])?;
+    let id = tx.last_insert_rowid();
+    playlist_fill(&tx, id, lessons)?;
+    tx.commit()?;
+    Ok(id)
+}
+
+pub fn playlist_update(c: &mut Connection, id: i64, p: &PlaylistPatch) -> Result<()> {
+    let tx = c.transaction()?;
+    if let Some(n) = &p.name {
+        tx.execute("UPDATE playlists SET name=?1 WHERE id=?2", params![playlist_name(n), id])?;
+    }
+    if let Some(l) = &p.lessons {
+        playlist_fill(&tx, id, l)?;
+    }
+    if let Some(cur) = p.current {
+        tx.execute("UPDATE playlists SET current_id=?1 WHERE id=?2", params![(cur > 0).then_some(cur), id])?;
+    }
+    tx.commit()?;
+    Ok(())
+}
+
+pub fn playlist_delete(c: &Connection, id: i64) -> Result<()> {
+    c.execute("DELETE FROM playlists WHERE id=?1", [id])?;
+    Ok(())
+}
+
+// ---------- chat ----------
+
+#[derive(Serialize, Clone, Debug, PartialEq)]
+pub struct ChatSummary {
+    pub id: i64,
+    pub lang: String,
+    /// vide tant que la première question n'est pas posée
+    pub title: String,
+    pub lesson_id: Option<i64>,
+    pub lesson_title: Option<String>,
+    pub updated_at: i64,
+    pub count: i64,
+    /// début du dernier message
+    pub preview: String,
+}
+
+#[derive(Serialize, Clone, Debug, PartialEq)]
+pub struct ChatMessage {
+    pub id: i64,
+    /// "user" ou "assistant"
+    pub role: String,
+    pub content: String,
+    /// réflexion du modèle avant sa réponse (vide sans réflexion)
+    pub thought: String,
+    pub thought_secs: f64,
+    pub created_at: i64,
+}
+
+#[derive(Deserialize, Debug, Default)]
+pub struct ChatPatch {
+    pub title: Option<String>,
+    /// leçon jointe ; 0 la retire
+    pub lesson: Option<i64>,
+}
+
+const CHAT_SUMMARY: &str = "SELECT c.id, c.lang, c.title, c.lesson_id, l.title, c.updated_at,
+        (SELECT COUNT(*) FROM chat_messages m WHERE m.chat_id=c.id),
+        COALESCE((SELECT substr(m.content,1,160) FROM chat_messages m WHERE m.chat_id=c.id ORDER BY m.id DESC LIMIT 1),'')
+     FROM chats c LEFT JOIN lessons l ON l.id=c.lesson_id";
+
+fn row_chat(r: &rusqlite::Row) -> rusqlite::Result<ChatSummary> {
+    let preview: String = r.get(7)?;
+    Ok(ChatSummary {
+        id: r.get(0)?,
+        lang: r.get(1)?,
+        title: r.get(2)?,
+        lesson_id: r.get(3)?,
+        lesson_title: r.get(4)?,
+        updated_at: r.get(5)?,
+        count: r.get(6)?,
+        preview: preview.split_whitespace().collect::<Vec<_>>().join(" ").replace("**", ""),
+    })
+}
+
+pub fn chats_list(c: &Connection, lang: &str) -> Result<Vec<ChatSummary>> {
+    let mut st = c.prepare(&format!("{CHAT_SUMMARY} WHERE c.lang=?1 ORDER BY c.updated_at DESC, c.id DESC"))?;
+    let out = st.query_map([lang], row_chat)?.collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(out)
+}
+
+pub fn chat_get(c: &Connection, id: i64) -> Result<ChatSummary> {
+    Ok(c.query_row(&format!("{CHAT_SUMMARY} WHERE c.id=?1"), [id], row_chat)?)
+}
+
+pub fn chat_messages(c: &Connection, id: i64) -> Result<Vec<ChatMessage>> {
+    let mut st = c.prepare("SELECT id,role,content,thought,thought_secs,created_at FROM chat_messages WHERE chat_id=?1 ORDER BY id")?;
+    let out = st
+        .query_map([id], |r| {
+            Ok(ChatMessage { id: r.get(0)?, role: r.get(1)?, content: r.get(2)?, thought: r.get(3)?, thought_secs: r.get(4)?, created_at: r.get(5)? })
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(out)
+}
+
+/// Nouvelle conversation (une leçon d'une autre langue n'y est pas jointe).
+pub fn chat_create(c: &Connection, lang: &str, lesson: Option<i64>) -> Result<i64> {
+    let lesson = match lesson {
+        Some(id) => c.query_row("SELECT id FROM lessons WHERE id=?1 AND lang=?2", params![id, lang], |r| r.get::<_, i64>(0)).optional()?,
+        None => None,
+    };
+    let t = now();
+    c.execute("INSERT INTO chats(lang,title,lesson_id,created_at,updated_at) VALUES(?1,'',?2,?3,?3)", params![lang, lesson, t])?;
+    Ok(c.last_insert_rowid())
+}
+
+pub fn chat_update(c: &Connection, id: i64, p: &ChatPatch) -> Result<()> {
+    if let Some(t) = &p.title {
+        let t: String = t.split_whitespace().collect::<Vec<_>>().join(" ").chars().take(120).collect();
+        c.execute("UPDATE chats SET title=?1 WHERE id=?2", params![t, id])?;
+    }
+    if let Some(l) = p.lesson {
+        c.execute(
+            "UPDATE chats SET lesson_id=(SELECT id FROM lessons WHERE id=?1 AND lang=chats.lang) WHERE id=?2",
+            params![l, id],
+        )?;
+    }
+    Ok(())
+}
+
+pub fn chat_delete(c: &Connection, id: i64) -> Result<()> {
+    c.execute("DELETE FROM chats WHERE id=?1", [id])?;
+    Ok(())
+}
+
+/// Enregistre une question et sa réponse d'un seul coup ; la première question
+/// donne son titre à la conversation.
+pub fn chat_append(c: &mut Connection, id: i64, question: &str, answer: &str, thought: &str, thought_secs: f64, title: &str) -> Result<(ChatMessage, ChatMessage)> {
+    let tx = c.transaction()?;
+    let t = now();
+    let push = |role: &str, content: &str, thought: &str, secs: f64| -> Result<ChatMessage> {
+        tx.execute(
+            "INSERT INTO chat_messages(chat_id,role,content,thought,thought_secs,created_at) VALUES(?1,?2,?3,?4,?5,?6)",
+            params![id, role, content, thought, secs, t],
+        )?;
+        Ok(ChatMessage { id: tx.last_insert_rowid(), role: role.into(), content: content.into(), thought: thought.into(), thought_secs: secs, created_at: t })
+    };
+    let q = push("user", question, "", 0.0)?;
+    let a = push("assistant", answer, thought, thought_secs)?;
+    tx.execute("UPDATE chats SET updated_at=?1, title=CASE WHEN title='' THEN ?2 ELSE title END WHERE id=?3", params![t, title, id])?;
+    tx.commit()?;
+    Ok((q, a))
+}
+
+/// Titre et texte d'une leçon, sans la marquer comme ouverte.
+pub fn lesson_brief(c: &Connection, id: i64) -> Result<Option<(String, String)>> {
+    Ok(c.query_row("SELECT title, text FROM lessons WHERE id=?1", [id], |r| Ok((r.get(0)?, r.get(1)?))).optional()?)
+}
+
+/// Mots connus (sans les expressions) : le chat s'adapte au niveau de l'apprenant.
+pub fn known_words(c: &Connection, lang: &str) -> Result<i64> {
+    Ok(c.query_row("SELECT COUNT(*) FROM terms WHERE lang=?1 AND status=4 AND instr(term,' ')=0", [lang], |r| r.get(0))?)
 }
 
 // ---------- termes (mots et expressions) ----------
@@ -460,7 +743,7 @@ fn bump(c: &Connection, lang: &str, col: &str, n: i64) -> Result<()> {
 
 /// Met à jour (ou crée) un terme. Statut 0 = supprimer (redevient « nouveau »).
 pub fn term_set(c: &Connection, u: &TermUpdate) -> Result<()> {
-    let term = text::normalize(&u.term);
+    let term = text::normalize_for(&u.term, &u.lang);
     let prev: Option<i64> = c
         .query_row("SELECT status FROM terms WHERE lang=?1 AND term=?2", params![u.lang, term], |r| r.get(0))
         .optional()?;
@@ -507,7 +790,7 @@ pub fn terms_mark_known(c: &mut Connection, lang: &str, keys: &[String], words_r
         )?;
         let mut seen = std::collections::HashSet::new();
         for k in keys {
-            let k = text::normalize(k);
+            let k = text::normalize_for(k, lang);
             if k.is_empty() || !seen.insert(k.clone()) {
                 continue;
             }
@@ -555,7 +838,7 @@ pub fn terms_import(c: &mut Connection, lang: &str, items: &[ImportedTerm]) -> R
             "UPDATE terms SET status=?3, translation=?4, note=?5, context=?6, updated_at=?7 WHERE lang=?1 AND term=?2",
         )?;
         for it in items {
-            let term = text::normalize(&it.term);
+            let term = text::normalize_for(&it.term, lang);
             if term.is_empty() || term.chars().count() > 120 || !(1..=5).contains(&it.status) {
                 continue;
             }
@@ -764,6 +1047,89 @@ mod tests {
         let s = &lessons_list(&c, "en").unwrap()[0];
         assert_eq!((s.position, s.duration, s.cover_path.as_deref()), (754.3, 1510.0, Some("/m/b.cover.jpg")));
         assert!(lesson_delete(&c, 1).unwrap().contains(&"/m/b.cover.jpg".to_string()));
+        drop(c);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn playlists_keep_order_and_follow_lessons() {
+        let path = std::env::temp_dir().join(format!("lumen-db-playlists-{}.db", std::process::id()));
+        let _ = std::fs::remove_file(&path);
+        let mut c = open(&path).unwrap();
+        let mk = |c: &Connection, lang: &str, title: &str| {
+            lesson_create(c, &NewLesson {
+                lang: lang.into(), title: title.into(), collection: String::new(), kind: "text".into(),
+                source: String::new(), text: "Hello there.".into(), media_path: None, timings: None, video_path: None,
+            }).unwrap()
+        };
+        let (a, b, d) = (mk(&c, "en", "A"), mk(&c, "en", "B"), mk(&c, "en", "D"));
+        let other = mk(&c, "it", "Altra lingua");
+        // doublons et leçon d'une autre langue écartés, nom vide remplacé
+        let id = playlist_create(&mut c, "en", "   ", &[b, a, b, other]).unwrap();
+        let p = &playlists_list(&c, "en").unwrap()[0];
+        assert_eq!((p.name.as_str(), p.lessons.clone(), p.current), ("Nouvelle playlist", vec![b, a], None));
+        playlist_update(&mut c, id, &PlaylistPatch { name: Some("  Le  matin ".into()), lessons: Some(vec![a, d, b]), current: Some(d) }).unwrap();
+        let p = &playlists_list(&c, "en").unwrap()[0];
+        assert_eq!((p.name.as_str(), p.lessons.clone(), p.current), ("Le matin", vec![a, d, b], Some(d)));
+        // une leçon supprimée quitte la playlist, et n'y est plus « en cours »
+        lesson_delete(&c, d).unwrap();
+        let p = &playlists_list(&c, "en").unwrap()[0];
+        assert_eq!((p.lessons.clone(), p.current), (vec![a, b], None));
+        assert!(playlists_list(&c, "it").unwrap().is_empty());
+        playlist_update(&mut c, id, &PlaylistPatch { current: Some(0), ..Default::default() }).unwrap();
+        playlist_delete(&c, id).unwrap();
+        assert!(playlists_list(&c, "en").unwrap().is_empty());
+        let left: i64 = c.query_row("SELECT COUNT(*) FROM playlist_items", [], |r| r.get(0)).unwrap();
+        assert_eq!(left, 0);
+        drop(c);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn chats_keep_messages_and_follow_lessons() {
+        let path = std::env::temp_dir().join(format!("lumen-db-chats-{}.db", std::process::id()));
+        let _ = std::fs::remove_file(&path);
+        let mut c = open(&path).unwrap();
+        let mk = |c: &Connection, lang: &str, title: &str| {
+            lesson_create(c, &NewLesson {
+                lang: lang.into(), title: title.into(), collection: String::new(), kind: "text".into(),
+                source: String::new(), text: "Ciao a tutti.".into(), media_path: None, timings: None, video_path: None,
+            }).unwrap()
+        };
+        let it = mk(&c, "it", "Il faro");
+        let en = mk(&c, "en", "The lighthouse");
+        // une leçon d'une autre langue n'est pas jointe
+        let other = chat_create(&c, "it", Some(en)).unwrap();
+        assert_eq!(chat_get(&c, other).unwrap().lesson_id, None);
+        let id = chat_create(&c, "it", Some(it)).unwrap();
+        let s = chat_get(&c, id).unwrap();
+        assert_eq!((s.title.as_str(), s.lesson_title.as_deref(), s.count), ("", Some("Il faro"), 0));
+        // la première question donne le titre, les suivantes ne le changent pas
+        let (q, a) = chat_append(&mut c, id, "Che vuol dire faro ?", "**Faro** : phare.", "Il cherche le sens.", 2.5, "Che vuol dire faro ?").unwrap();
+        assert_eq!((q.role.as_str(), a.role.as_str(), a.thought_secs), ("user", "assistant", 2.5));
+        chat_append(&mut c, id, "Et mare ?", "La mer.", "", 0.0, "Et mare ?").unwrap();
+        let s = chat_get(&c, id).unwrap();
+        assert_eq!((s.title.as_str(), s.count, s.preview.as_str()), ("Che vuol dire faro ?", 4, "La mer."));
+        let m = chat_messages(&c, id).unwrap();
+        assert_eq!(m.iter().map(|x| x.content.as_str()).collect::<Vec<_>>(), vec!["Che vuol dire faro ?", "**Faro** : phare.", "Et mare ?", "La mer."]);
+        assert_eq!(m[1].thought, "Il cherche le sens.");
+        assert_eq!(chats_list(&c, "it").unwrap().len(), 2);
+        assert!(chats_list(&c, "en").unwrap().is_empty());
+        // renommer, retirer puis rejoindre la leçon
+        chat_update(&c, id, &ChatPatch { title: Some("  Le   phare ".into()), lesson: Some(0) }).unwrap();
+        let s = chat_get(&c, id).unwrap();
+        assert_eq!((s.title.as_str(), s.lesson_id), ("Le phare", None));
+        chat_update(&c, id, &ChatPatch { lesson: Some(it), ..Default::default() }).unwrap();
+        assert_eq!(chat_get(&c, id).unwrap().lesson_id, Some(it));
+        // leçon supprimée : la conversation reste, sans leçon
+        lesson_delete(&c, it).unwrap();
+        let s = chat_get(&c, id).unwrap();
+        assert_eq!((s.lesson_id, s.count), (None, 4));
+        // conversation supprimée : ses messages aussi
+        chat_delete(&c, id).unwrap();
+        let left: i64 = c.query_row("SELECT COUNT(*) FROM chat_messages", [], |r| r.get(0)).unwrap();
+        assert_eq!(left, 0);
+        assert_eq!(known_words(&c, "it").unwrap(), 0);
         drop(c);
         let _ = std::fs::remove_file(path);
     }

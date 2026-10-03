@@ -401,6 +401,143 @@
   align-items: center;
 }
 
+/* ---------- retrouver une progression ---------- */
+
+.ob-welcome-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+.ob-restore-link {
+  margin-top: 16px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 14px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--ob-muted);
+  font-size: 14px;
+  transition: color 0.2s ease, background-color 0.25s ease;
+}
+.ob-restore-link:hover {
+  color: var(--ob-text);
+  background: var(--ob-glass);
+}
+.ob-grid.backups {
+  grid-template-columns: repeat(auto-fit, minmax(250px, 300px));
+  justify-content: center;
+}
+.ob-card.backup {
+  gap: 6px;
+}
+.ob-card.backup .pname {
+  margin-top: 4px;
+}
+.ob-card.backup .pdesc {
+  min-height: 0;
+}
+.ob-device {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  max-width: calc(100% - 30px);
+  font-size: 13px;
+  font-weight: 560;
+  color: var(--ob-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ob-search,
+.ob-empty {
+  margin-top: 44px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 15px;
+  color: var(--ob-muted);
+}
+.ob-restoring {
+  margin-top: 40px;
+  width: min(420px, 100%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+}
+.ob-restoring strong {
+  font-size: 16px;
+  font-weight: 520;
+}
+.ob-progress {
+  width: 100%;
+  height: 6px;
+  border-radius: 6px;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--ob-text) 10%, transparent);
+}
+.ob-progress i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--b1), var(--ob-accent));
+  box-shadow: 0 0 14px var(--ob-accent);
+  transition: width 0.45s var(--ease-out);
+}
+.ob-error {
+  margin-top: 18px;
+  max-width: 560px;
+  font-size: 14px;
+  color: var(--danger);
+}
+/* « Sauvegarder ma progression » : une ligne de verre au-dessus du bouton final */
+.ob-backup {
+  margin-top: 26px;
+  width: min(520px, 100%);
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 18px;
+  border-radius: 18px;
+  border: 1px solid var(--ob-border);
+  background: var(--ob-glass);
+  -webkit-backdrop-filter: blur(22px) saturate(140%);
+  backdrop-filter: blur(22px) saturate(140%);
+  box-shadow: var(--ob-shadow), inset 0 0 0 1px var(--ob-edge);
+  text-align: left;
+  cursor: pointer;
+}
+.ob-backup > svg {
+  flex-shrink: 0;
+  color: var(--ob-accent);
+}
+.ob-backup > span {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.ob-backup strong {
+  font-size: 14.5px;
+  font-weight: 560;
+}
+.ob-backup small {
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--ob-muted);
+}
+/* l'aube n'a pas de bleu : l'interrupteur prend la lumière de l'astre */
+.ob-backup .switch {
+  background: color-mix(in srgb, var(--ob-text) 14%, transparent);
+}
+.ob-backup .switch.on {
+  background: var(--ob-accent);
+  box-shadow: 0 0 14px color-mix(in srgb, var(--ob-accent) 55%, transparent);
+}
+
 /* ---------- cartes de verre ---------- */
 
 .ob-grid {
@@ -414,6 +551,56 @@
 }
 .ob-grid.profiles {
   grid-template-columns: repeat(3, 1fr);
+}
+/* 31 langues : les six avec dictionnaire en grand, les autres en cartes compactes,
+   dans une zone qui défile et s'estompe en haut et en bas */
+.ob-langs-scroll {
+  width: min(940px, 100%);
+  margin-top: 22px;
+  /* la place qui reste sous le titre, en gardant les boutons au-dessus des points d'étape */
+  max-height: clamp(220px, calc(100vh - 480px), 520px);
+  overflow-y: auto;
+  padding: 4px 12px 22px;
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 16px, #000 calc(100% - 30px), transparent);
+  mask-image: linear-gradient(to bottom, transparent 0, #000 16px, #000 calc(100% - 30px), transparent);
+  scrollbar-width: thin;
+}
+.ob-langs-scroll .ob-grid {
+  width: 100%;
+  margin-top: 0;
+}
+.ob-group {
+  margin: 16px 4px 10px;
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  text-align: left;
+  color: var(--ob-muted);
+}
+.ob-grid.langs.compact {
+  grid-template-columns: repeat(5, 1fr);
+  gap: 10px;
+}
+.ob-grid.compact .ob-card {
+  padding: 12px 14px;
+  border-radius: 16px;
+}
+.ob-grid.compact .ob-card .hello {
+  font-size: 19px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+.ob-grid.compact .ob-card .meta {
+  font-size: 12px;
+}
+.ob-grid.compact .ob-card .tick {
+  top: 10px;
+  right: 10px;
+  width: 20px;
+  height: 20px;
 }
 .ob-card {
   position: relative;

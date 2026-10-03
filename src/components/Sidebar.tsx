@@ -1,17 +1,21 @@
 import { motion } from "motion/react";
 import { useEffect, useState } from "react";
 import { api } from "../lib/api";
+import { useChat } from "../lib/chat";
 import { LANGS, langInfo } from "../lib/langs";
 import { useApp, type View } from "../lib/store";
 import type { LangCode, LessonSummary } from "../lib/types";
 import { Icon, type IconName } from "./Icon";
 import { CountUp, Menu, Orb } from "./ui";
+import { BackupCard } from "./BackupCard";
 import { LingqCard } from "./LingqCard";
 import { UpdateCard } from "./UpdateCard";
 
 const NAV: { view: View; label: string; icon: IconName }[] = [
   { view: "library", label: "Bibliothèque", icon: "library" },
+  { view: "playlists", label: "Playlists", icon: "playlist" },
   { view: "reader", label: "Lecture en cours", icon: "book" },
+  { view: "chat", label: "Chat", icon: "chat" },
   { view: "vocab", label: "Vocabulaire", icon: "cards" },
   { view: "progress", label: "Progrès", icon: "chart" },
 ];
@@ -21,6 +25,7 @@ export function Sidebar() {
   const go = useApp((s) => s.go);
   const lessonId = useApp((s) => s.lessonId);
   const openLesson = useApp((s) => s.openLesson);
+  const openPlaylist = useApp((s) => s.openPlaylist);
   const openImport = useApp((s) => s.openImport);
   const known = useApp((s) => s.knownCount);
   const models = useApp((s) => s.models);
@@ -31,6 +36,8 @@ export function Sidebar() {
   const langs = useApp((s) => s.langs)();
   const setSetting = useApp((s) => s.setSetting);
   const refreshKnown = useApp((s) => s.refreshKnown);
+  // une réponse du chat s'écrit pendant qu'on est ailleurs : la lueur le signale
+  const chatBusy = useChat((s) => !!s.pending);
   const [menu, setMenu] = useState(false);
   const [recent, setRecent] = useState<LessonSummary[]>([]);
 
@@ -44,7 +51,9 @@ export function Sidebar() {
   const li = langInfo(lang);
   const llm = models.find((m) => m.kind === "llm" && m.installed && m.id === settings.llm_model) ?? models.find((m) => m.kind === "llm" && m.installed);
   const asr = models.find((m) => m.kind === "asr" && m.installed && m.id === settings.asr_model) ?? models.find((m) => m.kind === "asr" && m.installed);
+  const asrText = models.find((m) => m.kind === "asrtext" && m.installed);
   const busy = Object.keys(downloads).length > 0;
+  const voice = models.find((m) => m.kind === "tts");
 
   const switchLang = async (code: LangCode) => {
     setMenu(false);
@@ -81,7 +90,8 @@ export function Sidebar() {
             </button>
           }
         >
-          {LANGS.map((l) => (
+          {/* seulement les langues étudiées : les autres s'ajoutent dans les Réglages */}
+          {LANGS.filter((l) => langs.includes(l.code) || l.code === lang).map((l) => (
             <button key={l.code} className="menu-item" role="menuitem" onClick={() => switchLang(l.code)}>
               <span className="lang-badge" style={{ background: l.color, width: 24, height: 24, fontSize: 10, borderRadius: 7 }}>
                 {l.badge}
@@ -92,6 +102,21 @@ export function Sidebar() {
               {l.code === lang && <Icon name="check" size={16} />}
             </button>
           ))}
+          <div className="menu-sep" />
+          <button
+            className="menu-item"
+            role="menuitem"
+            onClick={() => {
+              setMenu(false);
+              go("settings");
+              window.setTimeout(() => document.getElementById("set-langs")?.scrollIntoView({ behavior: "smooth", block: "start" }), 350);
+            }}
+          >
+            <span className="lang-badge add" style={{ width: 24, height: 24, borderRadius: 7 }}>
+              <Icon name="plus" size={13} stroke={2.2} />
+            </span>
+            <span style={{ flex: 1 }}>Ajouter une langue…</span>
+          </button>
         </Menu>
       </div>
 
@@ -103,7 +128,7 @@ export function Sidebar() {
             <button
               key={n.view}
               className={`nav-item ${active ? "active" : ""}`}
-              onClick={() => (n.view === "reader" && lessonId ? openLesson(lessonId) : go(n.view))}
+              onClick={() => (n.view === "reader" && lessonId ? openLesson(lessonId) : n.view === "playlists" ? openPlaylist(null) : go(n.view))}
               disabled={disabled}
               style={disabled ? { opacity: 0.45, cursor: "default" } : undefined}
               aria-current={active ? "page" : undefined}
@@ -111,6 +136,7 @@ export function Sidebar() {
               {active && <motion.span layoutId="nav-pill" className="nav-pill" transition={{ type: "spring", stiffness: 500, damping: 40 }} />}
               <Icon name={n.icon} />
               <span>{n.label}</span>
+              {n.view === "chat" && chatBusy && view !== "chat" && <span className="nav-live" aria-label="Réponse en cours" />}
             </button>
           );
         })}
@@ -144,6 +170,7 @@ export function Sidebar() {
       <div className="side-bottom">
         <UpdateCard />
         <LingqCard />
+        <BackupCard />
         <button className="ai-card" style={{ textAlign: "left", cursor: "pointer" }} onClick={() => go("settings")}>
           <span className="eyebrow">IA locale</span>
           <span className="ai-row">
@@ -152,7 +179,11 @@ export function Sidebar() {
           </span>
           <span className="ai-row">
             <span className={`dot ${asr ? "ok" : ""}`} />
-            {asr ? `${asr.name.replace("Large v3 ", "")} · prêt` : "Transcription : à installer"}
+            {asr ? (asrText ? "Qwen3-ASR et Whisper · prêts" : `${asr.name.replace("Large v3 ", "")} · prêt`) : "Transcription : à installer"}
+          </span>
+          <span className="ai-row">
+            <span className={`dot ${voice?.installed ? "ok" : voice && downloads[voice.id] ? "busy" : ""}`} />
+            {voice?.installed ? "Voix naturelle · prête" : voice && downloads[voice.id] ? "Voix : téléchargement…" : "Voix naturelle : à installer"}
           </span>
           <span className="ai-row">
             <span className="dot ok" />

@@ -2,11 +2,12 @@ import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRe
 import { createPortal } from "react-dom";
 import { Icon } from "../../components/Icon";
 import { Segmented } from "../../components/ui";
-import { api, errorText, isNoModel } from "../../lib/api";
+import { api, errorText, isNoModel, isTauri } from "../../lib/api";
+import { confirmAsk } from "../../lib/dialogs";
 import { formatDuration, useApp } from "../../lib/store";
 import type { PageRange } from "../../lib/tokenize";
 import { loadVoices, speak, ttsAvailable, voicesFor, type SpeakHandle } from "../../lib/tts";
-import type { Lesson, Token } from "../../lib/types";
+import type { Lesson, Token, VoicedLesson } from "../../lib/types";
 
 export interface PlayerHandle {
   toggle(): void;
@@ -36,6 +37,80 @@ interface Props {
   onState?(s: PlaybackState): void;
   /** nouveaux horodatages après un recalage de la lanterne */
   onResynced?(timings: string): void;
+  /** audio créé par la voix naturelle pour une leçon de texte */
+  onVoiced?(v: VoicedLesson): void;
+  /** la lecture démarre d'elle-même à l'ouverture (playlist qui s'enchaîne) */
+  autoplay?: boolean;
+  /** la leçon a été écoutée jusqu'au bout */
+  onFinished?(): void;
+}
+
+/** Identifiant du modèle de voix naturelle (Réglages › Voix). */
+const VOICE_MODEL = "supertonic-3";
+
+/**
+ * « Créer l'audio » : la voix naturelle lit toute la leçon, la lanterne suit.
+ * Sans voix installée, le premier clic lance son téléchargement.
+ */
+function MakeAudio({ lesson, again, onVoiced }: { lesson: Lesson; again?: boolean; onVoiced?(v: VoicedLesson): void }) {
+  const ready = useApp((s) => s.models.some((m) => m.kind === "tts" && m.installed));
+  const dl = useApp((s) => s.downloads[VOICE_MODEL]);
+  const [busy, setBusy] = useState<{ stage: string; pct: number } | null>(null);
+  const toast = useApp((s) => s.toast);
+
+  const start = async () => {
+    if (!isTauri) {
+      toast("La voix naturelle fonctionne dans l'application Mac.", "error");
+      return;
+    }
+    if (!ready) {
+      toast("La voix naturelle se télécharge (149 Mo). Vous pourrez ensuite créer l'audio d'un clic.", "light");
+      void useApp.getState().download(VOICE_MODEL);
+      return;
+    }
+    if (again && !(await confirmAsk("Recréer l'audio de cette leçon avec la voix choisie dans les Réglages ?", "Recréer l'audio", "Recréer"))) return;
+    setBusy({ stage: "voice", pct: 0 });
+    try {
+      const v = await api().lessonVoice(lesson.id, (e) =>
+        setBusy((b) => (e.type === "stage" ? { stage: e.stage, pct: b?.pct ?? 0 } : { stage: b?.stage ?? "voice", pct: e.value })),
+      );
+      onVoiced?.(v);
+      useApp.getState().bumpLibrary();
+      toast("L'audio est prêt : la lanterne suit la voix", "light");
+    } catch (e) {
+      const msg = errorText(e);
+      if (msg !== "annulé") toast(msg, "error");
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  if (busy) {
+    return (
+      <span className="player-voice busy num" role="status">
+        <span className="dot busy" /> {busy.stage === "align" ? "Calage de la lanterne" : "Création de l'audio"} {Math.round(busy.pct)} %
+        <button className="icon-btn" onClick={() => void api().lessonVoiceCancel(lesson.id)} aria-label="Annuler la création de l'audio" title="Annuler">
+          <Icon name="close" size={12} />
+        </button>
+      </span>
+    );
+  }
+  if (dl && !dl.error) {
+    return (
+      <span className="player-voice busy num" role="status">
+        <span className="dot busy" /> Voix naturelle {Math.round((dl.received / Math.max(1, dl.total)) * 100)} %
+      </span>
+    );
+  }
+  return again ? (
+    <button className="icon-btn player-voice" onClick={start} aria-label="Recréer l'audio" title="Recréer l'audio avec la voix choisie dans les Réglages">
+      <Icon name="wave" size={16} />
+    </button>
+  ) : (
+    <button className="btn sm soft player-voice" onClick={start} title="La voix naturelle lit toute la leçon, calculée sur votre Mac ; la lanterne suit chaque mot">
+      <Icon name="wave" size={14} /> <span className="voice-label">Créer l'audio</span>
+    </button>
+  );
 }
 
 /**
@@ -59,7 +134,7 @@ export function lastLE(n: number, get: (i: number) => number, x: number): number
   return ans;
 }
 
-export const Player = forwardRef<PlayerHandle, Props>(function Player({ lesson, tokens, pages, page, onPage, onCursor, videoHost, onState, onResynced }, ref) {
+export const Player = forwardRef<PlayerHandle, Props>(function Player({ lesson, tokens, pages, page, onPage, onCursor, videoHost, onState, onResynced, onVoiced, autoplay, onFinished }, ref) {
   const settings = useApp((s) => s.settings);
   const setSetting = useApp((s) => s.setSetting);
   const hasMedia = !!lesson.media_path;
@@ -82,6 +157,10 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player({ lesson, 
   const pageRef = useRef(page);
   pageRef.current = page;
   const listenSecs = useRef(0);
+  // lu une seule fois, à l'ouverture de la leçon
+  const autoplayRef = useRef(!!autoplay);
+  const finishedRef = useRef(onFinished);
+  finishedRef.current = onFinished;
 
   // ---------- mémoire de la position, à la seconde près ----------
   // La seconde atteinte est écrite au plus une fois par seconde pendant
@@ -279,7 +358,10 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player({ lesson, 
             }, 650);
           } else {
             setPlaying(false);
-            if (completed) setCursor(-1);
+            if (completed) {
+              setCursor(-1);
+              finishedRef.current?.();
+            }
           }
         },
       });
@@ -288,6 +370,7 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player({ lesson, 
   );
 
   // ---------- commandes ----------
+  const toggleRef = useRef<() => void>(() => {});
   const seekTo = useCallback(
     (t: number) => {
       const m = master();
@@ -315,7 +398,8 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player({ lesson, 
   const playMedia = () => {
     const m = master();
     if (!m) return;
-    void m.play();
+    // refus possible (lecture sans geste de l'utilisateur) : le lecteur reste simplement en pause
+    void m.play().catch(() => {});
     if (dual) void videoRef.current?.play().catch(() => {});
   };
   const pauseMedia = () => {
@@ -350,6 +434,22 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player({ lesson, 
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hasMedia, playing, pages, timing, seekToToken, speakFrom, lesson.lang, single, dual]);
+
+  toggleRef.current = toggle;
+
+  // leçon de texte dans une playlist : la voix du système démarre d'elle-même
+  useEffect(() => {
+    if (!autoplayRef.current || hasMedia || !ttsAvailable()) return;
+    let alive = true;
+    void loadVoices().then(() => {
+      if (!alive || !autoplayRef.current) return;
+      autoplayRef.current = false;
+      toggleRef.current();
+    });
+    return () => {
+      alive = false;
+    };
+  }, [hasMedia]);
 
   useImperativeHandle(
     ref,
@@ -428,6 +528,7 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player({ lesson, 
     onEnded: () => {
       setPlaying(false);
       remember(0, true);
+      finishedRef.current?.();
     },
     onLoadedMetadata: (e: React.SyntheticEvent<HTMLMediaElement>) => {
       const el = e.currentTarget;
@@ -448,6 +549,10 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player({ lesson, 
           const k = lastLE(timing.raw.length, (j) => timing.raw[j][2], p + 0.04);
           if (k >= 0) setCursor(timing.tokIdx[k]);
         }
+      }
+      if (autoplayRef.current) {
+        autoplayRef.current = false;
+        playMedia();
       }
     },
     onTimeUpdate: (e: React.SyntheticEvent<HTMLMediaElement>) => !playing && setTime(e.currentTarget.currentTime),
@@ -521,6 +626,7 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player({ lesson, 
               <span className="dot busy" /> Calage {Math.round(resync)} %
             </span>
           ))}
+        {(!hasMedia || lesson.media_path?.includes(".voice.")) && <MakeAudio lesson={lesson} again={hasMedia} onVoiced={onVoiced} />}
         {!hasMedia && <span className="player-label">{voiceName ? `Voix : ${voiceName}` : ttsAvailable() ? "Voix du système" : "Synthèse vocale indisponible"}</span>}
       </div>
     </>
