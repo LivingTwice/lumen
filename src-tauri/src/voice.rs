@@ -61,7 +61,7 @@ pub async fn ensure_engine(data_dir: &Path, cancel: Arc<AtomicBool>, mut on_prog
         return Ok(());
     }
     if !cfg!(all(target_os = "macos", target_arch = "aarch64")) {
-        return Err(anyhow!("La voix naturelle n'est disponible que sur Mac pour l'instant."));
+        return Err(anyhow!(crate::i18n::t("La voix naturelle n'est disponible que sur Mac pour l'instant.", "The natural voice is only available on Mac for now.")));
     }
     let tools = crate::tools::tools_dir(data_dir);
     tokio::fs::create_dir_all(&tools).await?;
@@ -86,7 +86,7 @@ pub async fn ensure_engine(data_dir: &Path, cancel: Arc<AtomicBool>, mut on_prog
     let _ = tokio::fs::remove_file(&part).await;
     if !out.status.success() || !engine_ready(data_dir) {
         remove_engine(data_dir);
-        return Err(anyhow!("le moteur de voix n'a pas pu être installé, réessayez"));
+        return Err(anyhow!(crate::i18n::t("le moteur de voix n'a pas pu être installé, réessayez", "the voice engine couldn't be installed, try again")));
     }
     Ok(())
 }
@@ -125,10 +125,10 @@ async fn run_engine(data_dir: &Path, m: &ModelInfo, lang: &str, text: &str, voic
         .kill_on_drop(true);
     let res = tokio::time::timeout(Duration::from_secs(120), cmd.output())
         .await
-        .map_err(|_| anyhow!("la voix a mis trop de temps à répondre"))??;
+        .map_err(|_| anyhow!(crate::i18n::t("la voix a mis trop de temps à répondre", "the voice took too long to answer")))??;
     if !res.status.success() || !out.exists() {
         let _ = tokio::fs::remove_file(out).await;
-        return Err(anyhow!("La voix n'a pas pu prononcer ce texte."));
+        return Err(anyhow!(crate::i18n::t("La voix n'a pas pu prononcer ce texte.", "The voice couldn't pronounce this text.")));
     }
     Ok(())
 }
@@ -136,7 +136,7 @@ async fn run_engine(data_dir: &Path, m: &ModelInfo, lang: &str, text: &str, voic
 /// Prononce `text` et renvoie le chemin du fichier WAV (déjà en cache, ou créé).
 pub async fn say(data_dir: &Path, m: &ModelInfo, lang: &str, text: &str, voice: &str) -> Result<PathBuf> {
     if !LANGS.contains(&lang) {
-        return Err(anyhow!("Cette langue n'a pas encore de voix naturelle."));
+        return Err(anyhow!(crate::i18n::t("Cette langue n'a pas encore de voix naturelle.", "This language has no natural voice yet.")));
     }
     let dest = cached_path(data_dir, m, lang, text, voice);
     if dest.exists() {
@@ -317,11 +317,11 @@ pub async fn lesson_audio(
     use futures_util::StreamExt;
     use std::sync::atomic::Ordering;
     if !LANGS.contains(&lang) {
-        return Err(anyhow!("Cette langue n'a pas encore de voix naturelle."));
+        return Err(anyhow!(crate::i18n::t("Cette langue n'a pas encore de voix naturelle.", "This language has no natural voice yet.")));
     }
     let chunks = chunks_of(text, lang);
     if chunks.is_empty() {
-        return Err(anyhow!("Cette leçon n'a pas de texte à lire."));
+        return Err(anyhow!(crate::i18n::t("Cette leçon n'a pas de texte à lire.", "This lesson has no text to read.")));
     }
     let media = crate::media::media_dir(data_dir);
     let work = media.join(format!(".voice-{}", crate::media::new_stem()));
@@ -342,7 +342,7 @@ pub async fn lesson_audio(
                 run_engine(&dir, m, &lang, &spoken, &voice, 2, &out).await?;
                 let wav = tokio::fs::read(&out).await?;
                 let _ = tokio::fs::remove_file(&out).await;
-                read_pcm(&wav).ok_or_else(|| anyhow!("son illisible"))
+                read_pcm(&wav).ok_or_else(|| anyhow!(crate::i18n::t("son illisible", "unreadable sound")))
             }
         })
         .collect();

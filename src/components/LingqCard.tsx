@@ -1,6 +1,7 @@
 import { AnimatePresence, motion } from "motion/react";
 import { stageText, useLingq } from "../lib/lingq";
 import { useApp } from "../lib/store";
+import { t } from "../lib/i18n";
 
 /** Avancement de l'import LingQ dans la barre latérale, hors des Réglages. */
 export function LingqCard() {
@@ -22,7 +23,7 @@ export function LingqCard() {
         >
           <div className="update-head">
             <span className="update-dot" />
-            <strong>Import LingQ</strong>
+            <strong>{t("Import LingQ", "LingQ import")}</strong>
           </div>
           <span className="muted" style={{ fontSize: 11.5 }}>
             {stageText(stage)}

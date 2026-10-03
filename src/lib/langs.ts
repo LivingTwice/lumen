@@ -1,8 +1,10 @@
+import { t } from "./i18n";
 import type { LangCode } from "./types";
 
 export interface LangInfo {
   code: LangCode;
-  name: string; // en français
+  /** nom dans la langue de l'interface */
+  name: string;
   native: string;
   badge: string;
   color: string;
@@ -17,49 +19,76 @@ export interface LangInfo {
  * Langues proposées : toutes celles de la voix naturelle (Supertonic 3).
  * Les six premières ont en plus un dictionnaire hors ligne.
  */
-export const LANGS: LangInfo[] = [
-  { code: "en", name: "Anglais", native: "English", badge: "EN", color: "#3b5bdb", tts: ["en-GB", "en-US", "en"], hello: "Hello" },
-  { code: "it", name: "Italien", native: "Italiano", badge: "IT", color: "#2f9e6e", tts: ["it-IT", "it"], hello: "Ciao" },
-  { code: "de", name: "Allemand", native: "Deutsch", badge: "DE", color: "#c4512d", tts: ["de-DE", "de"], hello: "Hallo" },
-  { code: "pt", name: "Portugais", native: "Português", badge: "PT", color: "#1c8f8a", tts: ["pt-PT", "pt-BR", "pt"], hello: "Olá" },
-  { code: "ru", name: "Russe", native: "Русский", badge: "RU", color: "#7048c8", tts: ["ru-RU", "ru"], hello: "Привет" },
-  { code: "es", name: "Espagnol", native: "Español", badge: "ES", color: "#d9822b", tts: ["es-ES", "es-MX", "es"], hello: "Hola" },
-  { code: "fr", name: "Français", native: "Français", badge: "FR", color: "#5b5fc7", tts: ["fr-FR", "fr"], hello: "Bonjour" },
-  { code: "nl", name: "Néerlandais", native: "Nederlands", badge: "NL", color: "#e8590c", tts: ["nl-NL", "nl-BE", "nl"], hello: "Hoi" },
-  { code: "sv", name: "Suédois", native: "Svenska", badge: "SV", color: "#1971c2", tts: ["sv-SE", "sv"], hello: "Hej" },
-  { code: "da", name: "Danois", native: "Dansk", badge: "DA", color: "#c92a2a", tts: ["da-DK", "da"], hello: "Goddag" },
-  { code: "fi", name: "Finnois", native: "Suomi", badge: "FI", color: "#0c8599", tts: ["fi-FI", "fi"], hello: "Hei" },
-  { code: "et", name: "Estonien", native: "Eesti", badge: "ET", color: "#4c6ef5", tts: ["et-EE", "et"], hello: "Tere" },
-  { code: "lv", name: "Letton", native: "Latviešu", badge: "LV", color: "#a61e4d", tts: ["lv-LV", "lv"], hello: "Sveiki" },
-  { code: "lt", name: "Lituanien", native: "Lietuvių", badge: "LT", color: "#a07c00", tts: ["lt-LT", "lt"], hello: "Labas" },
-  { code: "pl", name: "Polonais", native: "Polski", badge: "PL", color: "#d6336c", tts: ["pl-PL", "pl"], hello: "Cześć" },
-  { code: "cs", name: "Tchèque", native: "Čeština", badge: "CS", color: "#364fc7", tts: ["cs-CZ", "cs"], hello: "Ahoj" },
-  { code: "sk", name: "Slovaque", native: "Slovenčina", badge: "SK", color: "#4263eb", tts: ["sk-SK", "sk"], hello: "Dobrý deň" },
-  { code: "sl", name: "Slovène", native: "Slovenščina", badge: "SL", color: "#2f9e44", tts: ["sl-SI", "sl"], hello: "Živjo" },
-  { code: "hr", name: "Croate", native: "Hrvatski", badge: "HR", color: "#e03131", tts: ["hr-HR", "hr"], hello: "Bok" },
-  { code: "hu", name: "Hongrois", native: "Magyar", badge: "HU", color: "#2b8a3e", tts: ["hu-HU", "hu"], hello: "Szia" },
-  { code: "ro", name: "Roumain", native: "Română", badge: "RO", color: "#f08c00", tts: ["ro-RO", "ro"], hello: "Salut" },
-  { code: "bg", name: "Bulgare", native: "Български", badge: "BG", color: "#0b7285", tts: ["bg-BG", "bg"], hello: "Здравей" },
-  { code: "uk", name: "Ukrainien", native: "Українська", badge: "UK", color: "#1864ab", tts: ["uk-UA", "uk"], hello: "Привіт" },
-  { code: "el", name: "Grec", native: "Ελληνικά", badge: "EL", color: "#1c7ed6", tts: ["el-GR", "el"], hello: "Γεια σου" },
-  { code: "tr", name: "Turc", native: "Türkçe", badge: "TR", color: "#c2255c", tts: ["tr-TR", "tr"], hello: "Merhaba" },
-  { code: "ar", name: "Arabe", native: "العربية", badge: "AR", color: "#087f5b", tts: ["ar-SA", "ar-EG", "ar"], hello: "مرحبا", rtl: true },
-  { code: "hi", name: "Hindi", native: "हिन्दी", badge: "HI", color: "#e67700", tts: ["hi-IN", "hi"], hello: "नमस्ते" },
-  { code: "id", name: "Indonésien", native: "Bahasa Indonesia", badge: "ID", color: "#d9480f", tts: ["id-ID", "id"], hello: "Halo" },
-  { code: "vi", name: "Vietnamien", native: "Tiếng Việt", badge: "VI", color: "#c0392b", tts: ["vi-VN", "vi"], hello: "Xin chào" },
-  { code: "ko", name: "Coréen", native: "한국어", badge: "KO", color: "#5f3dc4", tts: ["ko-KR", "ko"], hello: "안녕하세요" },
-  { code: "ja", name: "Japonais", native: "日本語", badge: "JA", color: "#e64980", tts: ["ja-JP", "ja"], hello: "こんにちは" },
+const RAW: (Omit<LangInfo, "name"> & { fr: string; en: string })[] = [
+  { code: "en", fr: "Anglais", en: "English", native: "English", badge: "EN", color: "#3b5bdb", tts: ["en-GB", "en-US", "en"], hello: "Hello" },
+  { code: "it", fr: "Italien", en: "Italian", native: "Italiano", badge: "IT", color: "#2f9e6e", tts: ["it-IT", "it"], hello: "Ciao" },
+  { code: "de", fr: "Allemand", en: "German", native: "Deutsch", badge: "DE", color: "#c4512d", tts: ["de-DE", "de"], hello: "Hallo" },
+  { code: "pt", fr: "Portugais", en: "Portuguese", native: "Português", badge: "PT", color: "#1c8f8a", tts: ["pt-PT", "pt-BR", "pt"], hello: "Olá" },
+  { code: "ru", fr: "Russe", en: "Russian", native: "Русский", badge: "RU", color: "#7048c8", tts: ["ru-RU", "ru"], hello: "Привет" },
+  { code: "es", fr: "Espagnol", en: "Spanish", native: "Español", badge: "ES", color: "#d9822b", tts: ["es-ES", "es-MX", "es"], hello: "Hola" },
+  { code: "fr", fr: "Français", en: "French", native: "Français", badge: "FR", color: "#5b5fc7", tts: ["fr-FR", "fr"], hello: "Bonjour" },
+  { code: "nl", fr: "Néerlandais", en: "Dutch", native: "Nederlands", badge: "NL", color: "#e8590c", tts: ["nl-NL", "nl-BE", "nl"], hello: "Hoi" },
+  { code: "sv", fr: "Suédois", en: "Swedish", native: "Svenska", badge: "SV", color: "#1971c2", tts: ["sv-SE", "sv"], hello: "Hej" },
+  { code: "da", fr: "Danois", en: "Danish", native: "Dansk", badge: "DA", color: "#c92a2a", tts: ["da-DK", "da"], hello: "Goddag" },
+  { code: "fi", fr: "Finnois", en: "Finnish", native: "Suomi", badge: "FI", color: "#0c8599", tts: ["fi-FI", "fi"], hello: "Hei" },
+  { code: "et", fr: "Estonien", en: "Estonian", native: "Eesti", badge: "ET", color: "#4c6ef5", tts: ["et-EE", "et"], hello: "Tere" },
+  { code: "lv", fr: "Letton", en: "Latvian", native: "Latviešu", badge: "LV", color: "#a61e4d", tts: ["lv-LV", "lv"], hello: "Sveiki" },
+  { code: "lt", fr: "Lituanien", en: "Lithuanian", native: "Lietuvių", badge: "LT", color: "#a07c00", tts: ["lt-LT", "lt"], hello: "Labas" },
+  { code: "pl", fr: "Polonais", en: "Polish", native: "Polski", badge: "PL", color: "#d6336c", tts: ["pl-PL", "pl"], hello: "Cześć" },
+  { code: "cs", fr: "Tchèque", en: "Czech", native: "Čeština", badge: "CS", color: "#364fc7", tts: ["cs-CZ", "cs"], hello: "Ahoj" },
+  { code: "sk", fr: "Slovaque", en: "Slovak", native: "Slovenčina", badge: "SK", color: "#4263eb", tts: ["sk-SK", "sk"], hello: "Dobrý deň" },
+  { code: "sl", fr: "Slovène", en: "Slovenian", native: "Slovenščina", badge: "SL", color: "#2f9e44", tts: ["sl-SI", "sl"], hello: "Živjo" },
+  { code: "hr", fr: "Croate", en: "Croatian", native: "Hrvatski", badge: "HR", color: "#e03131", tts: ["hr-HR", "hr"], hello: "Bok" },
+  { code: "hu", fr: "Hongrois", en: "Hungarian", native: "Magyar", badge: "HU", color: "#2b8a3e", tts: ["hu-HU", "hu"], hello: "Szia" },
+  { code: "ro", fr: "Roumain", en: "Romanian", native: "Română", badge: "RO", color: "#f08c00", tts: ["ro-RO", "ro"], hello: "Salut" },
+  { code: "bg", fr: "Bulgare", en: "Bulgarian", native: "Български", badge: "BG", color: "#0b7285", tts: ["bg-BG", "bg"], hello: "Здравей" },
+  { code: "uk", fr: "Ukrainien", en: "Ukrainian", native: "Українська", badge: "UK", color: "#1864ab", tts: ["uk-UA", "uk"], hello: "Привіт" },
+  { code: "el", fr: "Grec", en: "Greek", native: "Ελληνικά", badge: "EL", color: "#1c7ed6", tts: ["el-GR", "el"], hello: "Γεια σου" },
+  { code: "tr", fr: "Turc", en: "Turkish", native: "Türkçe", badge: "TR", color: "#c2255c", tts: ["tr-TR", "tr"], hello: "Merhaba" },
+  { code: "ar", fr: "Arabe", en: "Arabic", native: "العربية", badge: "AR", color: "#087f5b", tts: ["ar-SA", "ar-EG", "ar"], hello: "مرحبا", rtl: true },
+  { code: "hi", fr: "Hindi", en: "Hindi", native: "हिन्दी", badge: "HI", color: "#e67700", tts: ["hi-IN", "hi"], hello: "नमस्ते" },
+  { code: "id", fr: "Indonésien", en: "Indonesian", native: "Bahasa Indonesia", badge: "ID", color: "#d9480f", tts: ["id-ID", "id"], hello: "Halo" },
+  { code: "vi", fr: "Vietnamien", en: "Vietnamese", native: "Tiếng Việt", badge: "VI", color: "#c0392b", tts: ["vi-VN", "vi"], hello: "Xin chào" },
+  { code: "ko", fr: "Coréen", en: "Korean", native: "한국어", badge: "KO", color: "#5f3dc4", tts: ["ko-KR", "ko"], hello: "안녕하세요" },
+  { code: "ja", fr: "Japonais", en: "Japanese", native: "日本語", badge: "JA", color: "#e64980", tts: ["ja-JP", "ja"], hello: "こんにちは" },
 ];
 
-/** Les six langues avec un dictionnaire hors ligne (les autres : IA seulement). */
-export const CORE_LANGS: LangCode[] = ["en", "it", "de", "pt", "ru", "es"];
+export const LANGS: LangInfo[] = RAW.map((l) => ({
+  ...l,
+  get name() {
+    return t(l.fr, l.en);
+  },
+}));
+
+/** Les six langues avec un dictionnaire hors ligne dans la langue de l'interface
+ *  (définitions anglaises : pas d'anglais, le français en plus). Les autres : IA seulement. */
+export function coreLangs(): LangCode[] {
+  return t("en it de pt ru es", "it de pt ru es fr").split(" ") as LangCode[];
+}
+
+/** « italien » ou « Italian », au milieu d'une phrase. */
+export function langLower(code: string): string {
+  const n = langInfo(code).name;
+  return t(n.toLowerCase(), n);
+}
+
+/** « en italien » ou « in Italian ». */
+export function inLang(code: string): string {
+  return t(`en ${langLower(code)}`, `in ${langInfo(code).name}`);
+}
+
+/** Collection des leçons d'accueil (reconnue aussi par la sauvegarde, en Rust). */
+export function starterCollection(): string {
+  return t("Pour commencer", "Getting started");
+}
 
 export function langInfo(code: string): LangInfo {
   return LANGS.find((l) => l.code === code) ?? LANGS[0];
 }
 
-/** « l'italien », « le russe », « le hongrois » (h aspiré). */
+/** « l'italien », « le russe », « le hongrois » (h aspiré) ; « Italian » en anglais. */
 export function theLang(code: string): string {
+  if (t("fr", "en") === "en") return langInfo(code).name;
   const n = langInfo(code).name.toLowerCase();
   return /^[aeiouéèêh]/.test(n) && !n.startsWith("hongrois") ? `l'${n}` : `le ${n}`;
 }
@@ -379,20 +408,20 @@ Tối hôm đó, cô viết một lá thư hồi âm và để lại ở đúng 
 };
 
 export const LEVELS = [
-  { id: "A1", label: "A1", hint: "Débutant" },
-  { id: "A2", label: "A2", hint: "Élémentaire" },
-  { id: "B1", label: "B1", hint: "Intermédiaire" },
-  { id: "B2", label: "B2", hint: "Avancé" },
+  { id: "A1", label: "A1", get hint() { return t("Débutant", "Beginner"); } },
+  { id: "A2", label: "A2", get hint() { return t("Élémentaire", "Elementary"); } },
+  { id: "B1", label: "B1", get hint() { return t("Intermédiaire", "Intermediate"); } },
+  { id: "B2", label: "B2", get hint() { return t("Avancé", "Upper intermediate"); } },
 ];
 
 /** Paliers de vocabulaire (mots connus), inspirés des repères usuels. */
 export const MILESTONES = [
-  { words: 500, label: "Premiers pas" },
-  { words: 1500, label: "Survie" },
-  { words: 3000, label: "Conversation simple" },
-  { words: 6000, label: "Lecture courante" },
-  { words: 10000, label: "Aisance" },
-  { words: 16000, label: "Lecture littéraire" },
-  { words: 25000, label: "Maîtrise" },
-  { words: 40000, label: "Quasi natif" },
+  { words: 500, get label() { return t("Premiers pas", "First steps"); } },
+  { words: 1500, get label() { return t("Survie", "Survival"); } },
+  { words: 3000, get label() { return t("Conversation simple", "Simple conversation"); } },
+  { words: 6000, get label() { return t("Lecture courante", "Everyday reading"); } },
+  { words: 10000, get label() { return t("Aisance", "Fluency"); } },
+  { words: 16000, get label() { return t("Lecture littéraire", "Literary reading"); } },
+  { words: 25000, get label() { return t("Maîtrise", "Mastery"); } },
+  { words: 40000, get label() { return t("Quasi natif", "Near native"); } },
 ];

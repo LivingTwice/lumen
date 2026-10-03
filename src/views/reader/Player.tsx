@@ -4,6 +4,7 @@ import { Icon } from "../../components/Icon";
 import { Segmented } from "../../components/ui";
 import { api, errorText, isNoModel, isTauri } from "../../lib/api";
 import { confirmAsk } from "../../lib/dialogs";
+import { t } from "../../lib/i18n";
 import { formatDuration, useApp } from "../../lib/store";
 import type { PageRange } from "../../lib/tokenize";
 import { loadVoices, speak, ttsAvailable, voicesFor, type SpeakHandle } from "../../lib/tts";
@@ -60,15 +61,23 @@ function MakeAudio({ lesson, again, onVoiced }: { lesson: Lesson; again?: boolea
 
   const start = async () => {
     if (!isTauri) {
-      toast("La voix naturelle fonctionne dans l'application Mac.", "error");
+      toast(t("La voix naturelle fonctionne dans l'application Mac.", "The natural voice works in the Mac app."), "error");
       return;
     }
     if (!ready) {
-      toast("La voix naturelle se télécharge (149 Mo). Vous pourrez ensuite créer l'audio d'un clic.", "light");
+      toast(t("La voix naturelle se télécharge (149 Mo). Vous pourrez ensuite créer l'audio d'un clic.", "The natural voice is downloading (149 MB). Then you can create the audio in one click."), "light");
       void useApp.getState().download(VOICE_MODEL);
       return;
     }
-    if (again && !(await confirmAsk("Recréer l'audio de cette leçon avec la voix choisie dans les Réglages ?", "Recréer l'audio", "Recréer"))) return;
+    if (
+      again &&
+      !(await confirmAsk(
+        t("Recréer l'audio de cette leçon avec la voix choisie dans les Réglages ?", "Recreate the audio for this lesson with the voice chosen in Settings?"),
+        t("Recréer l'audio", "Recreate the audio"),
+        t("Recréer", "Recreate"),
+      ))
+    )
+      return;
     setBusy({ stage: "voice", pct: 0 });
     try {
       const v = await api().lessonVoice(lesson.id, (e) =>
@@ -76,7 +85,7 @@ function MakeAudio({ lesson, again, onVoiced }: { lesson: Lesson; again?: boolea
       );
       onVoiced?.(v);
       useApp.getState().bumpLibrary();
-      toast("L'audio est prêt : la lanterne suit la voix", "light");
+      toast(t("L'audio est prêt : la lanterne suit la voix", "The audio is ready: the lantern follows the voice"), "light");
     } catch (e) {
       const msg = errorText(e);
       if (msg !== "annulé") toast(msg, "error");
@@ -88,8 +97,14 @@ function MakeAudio({ lesson, again, onVoiced }: { lesson: Lesson; again?: boolea
   if (busy) {
     return (
       <span className="player-voice busy num" role="status">
-        <span className="dot busy" /> {busy.stage === "align" ? "Calage de la lanterne" : "Création de l'audio"} {Math.round(busy.pct)} %
-        <button className="icon-btn" onClick={() => void api().lessonVoiceCancel(lesson.id)} aria-label="Annuler la création de l'audio" title="Annuler">
+        <span className="dot busy" /> {busy.stage === "align" ? t("Calage de la lanterne", "Aligning the lantern") : t("Création de l'audio", "Creating the audio")}{" "}
+        {t(`${Math.round(busy.pct)} %`, `${Math.round(busy.pct)}%`)}
+        <button
+          className="icon-btn"
+          onClick={() => void api().lessonVoiceCancel(lesson.id)}
+          aria-label={t("Annuler la création de l'audio", "Cancel creating the audio")}
+          title={t("Annuler", "Cancel")}
+        >
           <Icon name="close" size={12} />
         </button>
       </span>
@@ -98,17 +113,26 @@ function MakeAudio({ lesson, again, onVoiced }: { lesson: Lesson; again?: boolea
   if (dl && !dl.error) {
     return (
       <span className="player-voice busy num" role="status">
-        <span className="dot busy" /> Voix naturelle {Math.round((dl.received / Math.max(1, dl.total)) * 100)} %
+        <span className="dot busy" /> {t("Voix naturelle", "Natural voice")} {t(`${Math.round((dl.received / Math.max(1, dl.total)) * 100)} %`, `${Math.round((dl.received / Math.max(1, dl.total)) * 100)}%`)}
       </span>
     );
   }
   return again ? (
-    <button className="icon-btn player-voice" onClick={start} aria-label="Recréer l'audio" title="Recréer l'audio avec la voix choisie dans les Réglages">
+    <button
+      className="icon-btn player-voice"
+      onClick={start}
+      aria-label={t("Recréer l'audio", "Recreate the audio")}
+      title={t("Recréer l'audio avec la voix choisie dans les Réglages", "Recreate the audio with the voice chosen in Settings")}
+    >
       <Icon name="wave" size={16} />
     </button>
   ) : (
-    <button className="btn sm soft player-voice" onClick={start} title="La voix naturelle lit toute la leçon, calculée sur votre Mac ; la lanterne suit chaque mot">
-      <Icon name="wave" size={14} /> <span className="voice-label">Créer l'audio</span>
+    <button
+      className="btn sm soft player-voice"
+      onClick={start}
+      title={t("La voix naturelle lit toute la leçon, calculée sur votre Mac ; la lanterne suit chaque mot", "The natural voice reads the whole lesson, computed on your Mac; the lantern follows every word")}
+    >
+      <Icon name="wave" size={14} /> <span className="voice-label">{t("Créer l'audio", "Create audio")}</span>
     </button>
   );
 }
@@ -195,9 +219,9 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player({ lesson, 
   const recaler = async () => {
     setResync(0);
     try {
-      const t = await api().lessonResync(lesson.id, (e) => e.type === "progress" && setResync(e.value));
-      onResynced?.(t);
-      useApp.getState().toast("La lanterne suit maintenant la voix, mot à mot", "light");
+      const timings = await api().lessonResync(lesson.id, (e) => e.type === "progress" && setResync(e.value));
+      onResynced?.(timings);
+      useApp.getState().toast(t("La lanterne suit maintenant la voix, mot à mot", "The lantern now follows the voice, word by word"), "light");
     } catch (e) {
       useApp.getState().toast(errorText(e), "error");
       if (isNoModel(e)) useApp.getState().go("settings");
@@ -421,7 +445,15 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player({ lesson, 
     }
     if (!ttsAvailable()) return;
     if (!playing && voicesFor(lesson.lang).length === 0) {
-      useApp.getState().toast("Aucune voix n'est installée pour cette langue. Ajoutez-en une dans Réglages Système › Accessibilité › Contenu énoncé.", "error");
+      useApp
+        .getState()
+        .toast(
+          t(
+            "Aucune voix n'est installée pour cette langue. Ajoutez-en une dans Réglages Système › Accessibilité › Contenu énoncé.",
+            "No voice is installed for this language. Add one in System Settings › Accessibility › Spoken Content.",
+          ),
+          "error",
+        );
       return;
     }
     if (playing) {
@@ -577,21 +609,21 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player({ lesson, 
       {hasMedia && !single && <audio ref={audioRef} src={api().mediaUrl(lesson.media_path!)} preload="auto" {...masterEvents} />}
       {video && videoHost ? createPortal(video, videoHost) : video && <div style={{ display: "none" }}>{video}</div>}
       <div className={`player ${canResync ? "has-resync" : ""}`}>
-        <button className={`play-btn ${playing ? "playing" : ""}`} onClick={toggle} aria-label={playing ? "Pause" : "Lecture"} disabled={!hasMedia && !ttsAvailable()}>
+        <button className={`play-btn ${playing ? "playing" : ""}`} onClick={toggle} aria-label={playing ? t("Pause", "Pause") : t("Lecture", "Play")} disabled={!hasMedia && !ttsAvailable()}>
           <Icon name={playing ? "pause" : "play"} size={18} />
         </button>
         {hasMedia && (
           <>
-            <button className="icon-btn player-skip" onClick={() => skip(-5)} aria-label="Reculer de 5 secondes">
+            <button className="icon-btn player-skip" onClick={() => skip(-5)} aria-label={t("Reculer de 5 secondes", "Back 5 seconds")}>
               <Icon name="back5" size={18} />
             </button>
-            <button className="icon-btn player-skip" onClick={() => skip(5)} aria-label="Avancer de 5 secondes">
+            <button className="icon-btn player-skip" onClick={() => skip(5)} aria-label={t("Avancer de 5 secondes", "Forward 5 seconds")}>
               <Icon name="fwd5" size={18} />
             </button>
             <span className="time">{formatDuration(time)}</span>
           </>
         )}
-        <div className="timeline" onClick={onTimeline} role="slider" aria-label="Position" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(progress * 100)}>
+        <div className="timeline" onClick={onTimeline} role="slider" aria-label={t("Position", "Position")} aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(progress * 100)}>
           <div className="track">
             <div className="fill" style={{ width: `${progress * 100}%` }} />
             <div className="knob" style={{ left: `${progress * 100}%` }} />
@@ -601,33 +633,35 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player({ lesson, 
         <div className="rate-full">
           <Segmented
             id={`rate-${hasMedia ? "m" : "t"}`}
-            label="Vitesse"
+            label={t("Vitesse", "Speed")}
             value={rates.includes(String(rate)) ? String(rate) : rates[2]}
             onChange={(v) => setSetting(rateKey, v)}
-            options={rates.map((r) => ({ value: r, label: `${r.replace(".", ",")}×` }))}
+            options={rates.map((r) => ({ value: r, label: `${t(r.replace(".", ","), r)}×` }))}
           />
         </div>
         {/* fenêtre étroite : un seul bouton qui passe à la vitesse suivante */}
         <button
           className="btn sm soft rate-compact num"
           onClick={() => setSetting(rateKey, rates[(rates.indexOf(String(rate)) + 1) % rates.length])}
-          aria-label="Vitesse de lecture"
-          title="Vitesse de lecture"
+          aria-label={t("Vitesse de lecture", "Playback speed")}
+          title={t("Vitesse de lecture", "Playback speed")}
         >
-          {String(rate).replace(".", ",")}×
+          {t(String(rate).replace(".", ","), String(rate))}×
         </button>
         {canResync &&
           (resync === null ? (
-            <button className="btn sm soft player-resync" onClick={recaler} aria-label="Recaler la lanterne" title="Réécoute l'audio pour caler la lanterne sur chaque mot. Le texte ne change pas.">
-              <Icon name="sparkle" size={14} /> <span className="resync-label">Recaler la lanterne</span>
+            <button className="btn sm soft player-resync" onClick={recaler} aria-label={t("Recaler la lanterne", "Realign the lantern")}
+              title={t("Réécoute l'audio pour caler la lanterne sur chaque mot. Le texte ne change pas.", "Listens to the audio again to align the lantern on every word. The text doesn't change.")}
+            >
+              <Icon name="sparkle" size={14} /> <span className="resync-label">{t("Recaler la lanterne", "Realign the lantern")}</span>
             </button>
           ) : (
             <span className="player-resync busy num" role="status">
-              <span className="dot busy" /> Calage {Math.round(resync)} %
+              <span className="dot busy" /> {t(`Calage ${Math.round(resync)} %`, `Aligning ${Math.round(resync)}%`)}
             </span>
           ))}
         {(!hasMedia || lesson.media_path?.includes(".voice.")) && <MakeAudio lesson={lesson} again={hasMedia} onVoiced={onVoiced} />}
-        {!hasMedia && <span className="player-label">{voiceName ? `Voix : ${voiceName}` : ttsAvailable() ? "Voix du système" : "Synthèse vocale indisponible"}</span>}
+        {!hasMedia && <span className="player-label">{voiceName ? t(`Voix : ${voiceName}`, `Voice: ${voiceName}`) : ttsAvailable() ? t("Voix du système", "System voice") : t("Synthèse vocale indisponible", "Speech synthesis unavailable")}</span>}
       </div>
     </>
   );

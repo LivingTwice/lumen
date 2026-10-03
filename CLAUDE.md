@@ -2,8 +2,8 @@
 
 Lumen est une application Mac pour apprendre les langues en lisant et en écoutant, dans l'esprit de LingQ. Toute l'intelligence tourne **en local** : traduction en contexte et chat par Qwen3.5 (llama.cpp, Metal), transcription par Qwen3-ASR (llama.cpp) et Whisper (whisper.cpp, Metal), dictionnaires hors ligne. Mac d'abord (Apple Silicon), Windows et web ensuite.
 
-- **Interface** : entièrement en français.
-- **Langues étudiées** : les 31 langues de la voix naturelle Supertonic 3 (`text::LANGS` et `LANGS` dans `langs.ts`). Les six premières (`en it de pt ru es`, `CORE_LANGS`) ont en plus un dictionnaire hors ligne ; les autres (`fr nl sv da fi et lv lt pl cs sk sl hr hu ro bg uk el tr ar hi id vi ko ja`) ont la traduction par l'IA et la voix naturelle. L'arabe s'affiche de droite à gauche (`rtl` dans `LangInfo`). Le japonais est découpé caractère par caractère (UAX 29, sans dictionnaire de segmentation).
+- **Interface** : en français et en anglais, au choix (accueil et Réglages, réglage `ui_lang`). La langue de l'interface est aussi celle des traductions de l'IA, du chat et des dictionnaires.
+- **Langues étudiées** : les 31 langues de la voix naturelle Supertonic 3 (`text::LANGS` et `LANGS` dans `langs.ts`). Six d'entre elles ont en plus un dictionnaire hors ligne dans la langue de l'interface (`coreLangs()`) : `en it de pt ru es` en français, `it de pt ru es fr` en anglais ; les autres ont la traduction par l'IA et la voix naturelle. L'arabe s'affiche de droite à gauche (`rtl` dans `LangInfo`). Le japonais est découpé caractère par caractère (UAX 29, sans dictionnaire de segmentation).
 - **Priorité absolue** : la beauté du design et des animations. Le nom « Lumen » guide l'identité visuelle : lumière, aube, halo, lanterne.
 - **Propriétaire** : Ulysse (compte GitHub `LivingTwice`). Il n'est pas développeur de métier : expliquer simplement, en français, sans jargon inutile.
 - **Copie de référence du code** : `~/Documents/Lumen` sur le Mac d'Ulysse. C'est là qu'on modifie, compile et publie.
@@ -78,13 +78,20 @@ Lumen est une application Mac pour apprendre les langues en lisant et en écouta
 - **Restaurer** (Réglages › Sauvegarde, ou « J'ai déjà utilisé Lumen : retrouver ma progression » à l'accueil) : la plus récente ou la version d'un jour précédent. Base décompressée et remise à niveau (`db::open`), chemins des médias ramenés vers ce Mac (fichiers rapatriés de `Médias/`, absents mis à `NULL`), réglages propres au Mac conservés (`KEEP_ON_RESTORE`), copie de sécurité `lumen.avant-restauration.db`, puis remplacement de la base ouverte par l'API de sauvegarde de SQLite (`Connection::restore`). L'interface relit tout (`reloadProgress`).
 - **Interface** : section Réglages › Sauvegarde (balise lumineuse, audio, vidéos, emplacement, « Sauvegarder maintenant », sauvegardes trouvées) ; carte de la barre latérale qui propose la sauvegarde tant qu'elle n'est pas choisie (`backup_on` vide ; « Plus tard » : une semaine, `backup_snooze`) et signale un échec ; interrupteur à la dernière étape de l'accueil. Événement `backup` émis après chaque sauvegarde.
 
+### Langue de l'interface
+
+- **Français ou anglais** (réglage `ui_lang`) : choisi par un sélecteur en haut à droite de l'accueil, et dans Réglages › Langue de l'interface. Au premier lancement, celle du Mac (français si le Mac est en français, anglais sinon) ; une installation déjà accueillie sans ce réglage reste en français. Le choix est gardé à la restauration d'une sauvegarde (`KEEP_ON_RESTORE`).
+- **Elle décide aussi** de la langue des traductions (sens en contexte, phrases, sous-titres traduits), du chat (consignes `CHAT_SYSTEM` ou `CHAT_SYSTEM_EN`) et des dictionnaires. Les traductions anglaises ont leurs propres clés de cache (`w3en`, `s1en`) : celles en français restent valables.
+- **Dictionnaires à définitions anglaises** (Wiktionnaire anglais via kaikki.org, `tools/build_dicts.py --en`) pour `it es de pt ru fr` : 9 à 16 Mo chacun, 74 Mo en tout, **téléchargés à la demande** (ouverture d'une leçon, recherche d'un mot, passage à l'anglais) depuis la version `dictionaries-en-1` de `lumen-releases`, puis décompressés dans `dicts/<lang>-en-v1.db`. Ils ne sont pas dans le paquet (l'app ne grossit pas, ni ses mises à jour) ni dans git (`src-tauri/resources/dicts-en/` est ignoré). Pendant le téléchargement, le panneau du mot l'indique (`pending`).
+- **Textes que macOS affiche lui-même** (demande d'accès à iCloud Drive) : `src-tauri/locales/{en,fr}.lproj/InfoPlist.strings`, choisis selon la langue du Mac.
+
 ### Le reste
 
 - **Bibliothèque** : leçons par langue et collection, pourcentage de mots connus, mots nouveaux, avancement (bande de lumière au bas de la couverture, à la seconde près pour l'audio et la vidéo).
 - **Couvertures** (`components/Cover.tsx`) : image choisie par l'utilisateur (petit bouton au survol, réduite à 1 280 px en JPEG puis copiée dans `media/`, colonne `cover_path`), sinon miniature YouTube (`maxresdefault` puis `hqdefault`), sinon œuvre SVG générée et reproductible (aube, halo, aurore ou prisme, graine = identifiant, couleurs = teinte) avec grain photographique.
 - **Vocabulaire** : recherche, filtres (tous, en apprentissage, connus, ignorés, expressions), changement de statut, export CSV compatible Anki.
 - **Progrès** : mots connus, paliers, mots lus par jour, temps d'écoute (30 jours).
-- **Réglages** : thème (suit le Mac par défaut), typographie de lecture, voix, modèles IA (téléchargement avec reprise, suppression), vidéos en ligne (navigateur pour les cookies, état des composants), sauvegarde, import LingQ, mises à jour, « Revoir l'accueil ».
+- **Réglages** : langue de l'interface, thème (suit le Mac par défaut), typographie de lecture, voix, modèles IA (téléchargement avec reprise, suppression), vidéos en ligne (navigateur pour les cookies, état des composants), sauvegarde, import LingQ, mises à jour, « Revoir l'accueil ».
 - **Accueil** (`Onboarding`) : aube animée (ciel en parallaxe, astre qui se lève à l'horizon, poussières de lumière, révélation lettre par lettre). Clair = aube, sombre = nuit chaude. **Jamais de fond bleu.** Étapes : bienvenue, langues, profil IA, prêt (avec l'interrupteur de sauvegarde), puis éclosion lumineuse vers la première leçon. Depuis la bienvenue, « retrouver ma progression » : sauvegardes trouvées, restauration, profil IA (les modèles ne voyagent pas), « Bon retour ».
 - **Mises à jour automatiques** : vérification 8 s après le démarrage puis toutes les 6 h, carte discrète dans la barre latérale, installation en un clic puis redémarrage.
 
@@ -111,7 +118,8 @@ Interface React (src/)                     Rust (src-tauri/src/)
 - **IA** : prompts ChatML avec un bloc `<think></think>` vide (désactive le raisonnement de Qwen3.5), exemples few-shot, indices du dictionnaire. Les requêtes sont **interruptibles** par un compteur d'époque (une nouvelle sélection annule la précédente). Les réponses mot sont mises en cache (table `tcache`, clé versionnée `w3`). `Engine::run` (paramètres `Gen`) sert aussi le chat : réflexion permise avec son budget, réflexion et réponse transmises à part (`Piece`), `Priority::Stoppable` (arrêtée par son drapeau, jamais par un clic sur un mot). Échantillonnage `Exact` (glouton) pour les traductions, `Natural` pour le chat (température, top-p, pénalité « DRY » contre les boucles des petits modèles). Une génération à la fois (`run_lock`) : pendant une réponse du chat, la traduction d'un mot attend son tour.
 - **Médias** : copiés dans `$APPDATA/media/`, servis à la WebView par le protocole `asset` (portée limitée à `$APPDATA/media/**`).
 - **LingQ** : API non documentée, lue avec prudence (champs optionnels, reprises sur 429 et 5xx). v2 pour `known-words` et `ignored-words`, v3 pour `cards`, `collections/my`, `search?shelf=my_lessons`, `collections/{id}/lessons` et `lessons/{id}` (`tokenizedText`, `audioUrl`). La clé n'est envoyée qu'à `www.lingq.com`. Lire une leçon par l'API la fait remonter dans l'étagère « Continuer » de LingQ.
-- **Dictionnaires** : Wiktionnaire français via kaikki.org, compilés en SQLite, livrés compressés dans `src-tauri/resources/dicts/*.db.gz`, décompressés au premier usage.
+- **Dictionnaires** : Wiktionnaire français via kaikki.org, compilés en SQLite, livrés compressés dans `src-tauri/resources/dicts/*.db.gz`, décompressés au premier usage. En anglais : Wiktionnaire anglais, même schéma (table des formes `WITHOUT ROWID`), téléchargé à la demande (voir « Langue de l'interface »).
+- **Traduction de l'interface** : chaque texte visible est écrit dans les deux langues, côte à côte, `t("Terminer la page", "Finish page")` (`src/lib/i18n.ts`), avec `count(n, "leçon", "leçons", "lesson", "lessons")` pour les nombres. Changer de langue remonte toute l'interface (clé `ui_lang` sur la racine de `App`). Côté Rust, `i18n::t(fr, en)` et `tr!(fr, en, args)` (`src-tauri/src/i18n.rs`), langue mise à jour par `settings_set("ui_lang")` et au démarrage ; les consignes de l'IA reçoivent la langue explicitement (`native`), pour rester testables.
 - **Données utilisateur** : `~/Library/Application Support/app.lumen.reader/` (`lumen.db`, `models/`, `media/` dont `media/voice/`, `tools/` dont le moteur de voix, dictionnaires décompressés, `device-id`, `lumen.avant-restauration.db` après une restauration).
 - **Pourquoi un dossier iCloud Drive pour la sauvegarde** : CloudKit exige un compte développeur Apple payant et une signature Developer ID (Lumen est signé ad hoc) ; un serveur (Supabase, Firebase) coûterait, ferait de Lumen le gardien des données de ses utilisateurs et casserait le « tout en local ». Un simple dossier marche aussi avec Dropbox, Google Drive ou OneDrive, et sur Windows plus tard. Les chemins des médias sont absolus dans la base : la restauration les réécrit.
 - **Pourquoi un outil téléchargé pour la voix** : l'app est signée avec le « hardened runtime », qui refuse de charger une bibliothèque téléchargée ; un exécutable séparé (comme yt-dlp) n'a pas ce problème, et l'app ne grossit pas.
@@ -133,6 +141,7 @@ src/
     ui.tsx                Composants partagés (Orb, Segmented, Switch, Sheet, Menu, Toasts, CountUp, useGlow)
     Icon.tsx              Icônes SVG maison
   lib/
+    i18n.ts               Langue de l'interface : t(fr, en), count, dates et nombres (locale)
     api.ts                Interface Api + implémentation Tauri (invoke, Channel, convertFileSrc)
     mock.ts               Backend simulé pour le navigateur (doit rester aligné sur api.ts)
     store.ts              État global zustand : réglages (DEFAULTS), vue, leçon, imports, toasts, modèles
@@ -179,16 +188,18 @@ src/
 
 src-tauri/
   tauri.conf.json         Fenêtre, bundle (DMG, ressources, sidecar), updater (clé publique, URL)
-  Info.plist              Ajouts fusionnés à l'Info.plist de l'app (texte de la demande d'accès à iCloud Drive)
+  Info.plist              Ajouts fusionnés à l'Info.plist de l'app (langues, texte de la demande d'accès à iCloud Drive)
+  locales/                Textes de l'Info.plist traduits (en.lproj, fr.lproj), copiés dans le paquet
   Cargo.toml              Workspace (app + lumen-whisper), dépendances, profil release (LTO thin)
   capabilities/default.json  Permissions accordées à la WebView
   src/
     lib.rs                Plugins, setup (dossier de données, DB, dictionnaires), liste des commandes
+    i18n.rs               Langue de l'interface côté natif : t(fr, en), tr!(fr, en, …)
     commands.rs           Toutes les commandes #[tauri::command]
     db.rs                 Schéma, migrations, requêtes (leçons, mots, activité, cache)
     ai.rs                 Moteur llama.cpp (réflexion bornée, arrêt), prompts (mots, phrases, chat), analyse des réponses
     asr.rs                Qwen3-ASR : texte des transcriptions (entrée audio de llama.cpp, découpe dans les silences)
-    dict.rs               Recherche dans les dictionnaires
+    dict.rs               Dictionnaires dans la langue de l'interface (français livrés, anglais téléchargés), recherche
     text.rs               Découpage UAX 29, élisions, normalisation, offsets UTF-16
     media.rs              Transcription (sidecar), horodatages, yt-dlp
     tools.rs              yt-dlp et QuickJS gérés (installation, mise à jour hebdomadaire)
@@ -198,14 +209,15 @@ src-tauri/
     backup.rs             Sauvegarde (iCloud Drive ou dossier choisi), historique, ménage, restauration, état d'envoi iCloud
     state.rs              AppState partagé
   lumen-whisper/          Sidecar de transcription
-  resources/dicts/        Dictionnaires compressés (≈ 66 Mo)
+  resources/dicts/        Dictionnaires compressés, définitions en français (≈ 66 Mo)
+  resources/dicts-en/     Dictionnaires à définitions anglaises, construits sur place (ignorés par git, publiés à part)
   dmg/background.png      Fond du DMG (source : design/dmg-background.html)
 
 scripts/
   mac-env.sh              Vérifie et installe les outils, prépare la clé de signature
   release.mjs             bump (numéro de version partout) et manifest (latest.json)
   build-sidecar.mjs       Compile lumen-whisper sous le nom attendu par Tauri
-tools/build_dicts.py      Reconstruction des dictionnaires depuis kaikki.org
+tools/build_dicts.py      Reconstruction des dictionnaires depuis kaikki.org (--en : Wiktionnaire anglais)
 design/                   Icône (SVG, PNG 1024), fond du DMG
 Compiler Lumen.command    Double-clic : compile, installe dans /Applications, crée le DMG
 Publier une version.command  Double-clic : version, compilation signée, publication GitHub
@@ -240,7 +252,8 @@ cd src-tauri && cargo check        # compilation Rust
 cd src-tauri && cargo test --lib   # tests unitaires
 ```
 
-- Test réel de l'IA : `LUMEN_TEST_MODEL=/chemin/Qwen3.5-2B-Q4_K_M.gguf cargo test --release --lib live -- --ignored --nocapture` (dont `chat_live` : chat sans puis avec réflexion bornée, entraînement, arrêt en cours de route).
+- Test réel de l'IA : `LUMEN_TEST_MODEL=/chemin/Qwen3.5-2B-Q4_K_M.gguf cargo test --release --lib live -- --ignored --nocapture` (dont `chat_live` : chat sans puis avec réflexion bornée, entraînement, arrêt en cours de route ; `english_live` : mots, phrase et chat pour un apprenant anglophone, avec les repères du dictionnaire anglais s'il est construit).
+- Dictionnaires anglais : `python3 tools/build_dicts.py --en <dossier des .jsonl de kaikki.org> src-tauri/resources/dicts-en` ; téléchargement réel comme dans l'app (version `dictionaries-en-1`, ou un serveur local avec `LUMEN_DICT_BASE=http://127.0.0.1:8765`) : `cargo test --lib dict_download_live -- --ignored --nocapture`.
 - Test réel de LingQ (base jetable, rien n'est écrit dans Lumen) : `LUMEN_LINGQ_KEY=… cargo test --lib lingq_live -- --ignored --nocapture`.
 - Test réel de la voix (télécharge le moteur dans un dossier jetable) : `LUMEN_VOICE_MODEL=/chemin/sherpa-onnx-supertonic-3-tts-int8-2026-05-11 cargo test --lib voice_live -- --ignored --nocapture` ; téléchargement complet comme dans l'app : `cargo test --lib voice_download_live -- --ignored --nocapture` ; audio d'une leçon (+ recalage si `LUMEN_ASR_MODEL` est donné ; copier d'abord `binaries/lumen-whisper-aarch64-apple-darwin` en `target/debug/deps/lumen-whisper`) : `cargo test --lib lesson_audio_live -- --ignored --nocapture`.
 - Test réel du recalage : `LUMEN_TEST_TEXT=texte.txt LUMEN_TEST_WORDS=mots.json LUMEN_TEST_LANG=it cargo test --lib realign_live -- --ignored --nocapture` (mots : sortie `done` de `lumen-whisper`) ; même chose pour la mise en page aérée : `airy_live` (`LUMEN_AIRY_OUT` pour enregistrer le texte).
@@ -252,7 +265,10 @@ cd src-tauri && cargo test --lib   # tests unitaires
 
 ### Langue et ton
 
-- **Tout texte visible est en français**, avec la typographie française : espace avant `:` `?` `!`, guillemets « », points de suspension `…`.
+- **Tout texte visible existe en français et en anglais** : `t("…", "…")` dans l'interface, `t`/`tr!` dans le natif. Jamais de texte visible écrit dans une seule langue ; dans `mock.ts` aussi. Le français suit la typographie française (espace avant `:` `?` `!`, guillemets « », `…`), l'anglais la typographie anglaise (pas d'espace avant `:`, guillemets “ ”). Un pourcentage : `t(`${n} %`, `${n}%`)`.
+- Attention à l'ombre : une variable locale nommée `t` (minuterie, jeton) cache la fonction `t()` ; la nommer autrement.
+- Un texte calculé une fois au chargement d'un module resterait dans l'ancienne langue : passer par une fonction ou un accesseur (`get label() { return t(…) }`).
+- Les marqueurs internes échangés avec le natif (`annulé`, `interrompu`, `NO_MODEL:`, `NO_VOICE:`) ne se traduisent pas.
 - **Pas de tiret cadratin** (U+2014) dans les textes de l'interface ni dans les messages.
 - Commentaires de code en français, courts, qui expliquent le pourquoi.
 - Messages d'erreur compréhensibles par un non-développeur.

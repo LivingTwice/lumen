@@ -2,6 +2,7 @@
 // navigateur (développement et tests visuels). Dans l'application, tout passe
 // par le backend Rust.
 import type { Api, TermUpdate } from "./api";
+import { t } from "./i18n";
 import { tokenize, normalize } from "./tokenize";
 import type {
   BackupCounts,
@@ -61,15 +62,16 @@ const chatStops = new Map<number, boolean>();
 const STARTERS_MOCK =
   "Every morning, Martha climbed the narrow stairs of the old lighthouse. From the top, the sea looked endless and calm.\n\nOne day, she found a letter hidden between two stones. The paper was damp, but the words could still be read.";
 
-const MOCK_DICT: Record<string, [string, string, string]> = {
-  lighthouse: ["Nom commun", "ˈlaɪt.haʊs", "Phare"],
-  stairs: ["Nom commun", "stɛəz", "Escalier"],
-  narrow: ["Adjectif", "ˈnæɹ.əʊ", "Étroit"],
-  endless: ["Adjectif", "ˈɛnd.ləs", "Sans fin, infini"],
-  letter: ["Nom commun", "ˈlɛt.ə", "Lettre"],
-  damp: ["Adjectif", "dæmp", "Humide"],
-  faro: ["Nom commun", "ˈfa.ɾo", "Phare"],
-  carta: ["Nom commun", "ˈkaɾ.ta", "Lettre"],
+// nature et sens en français, puis en anglais (interface en anglais)
+const MOCK_DICT: Record<string, [string, string, string, string, string]> = {
+  lighthouse: ["Nom commun", "ˈlaɪt.haʊs", "Phare", "Noun", "A tower with a bright light that guides ships"],
+  stairs: ["Nom commun", "stɛəz", "Escalier", "Noun", "A flight of steps"],
+  narrow: ["Adjectif", "ˈnæɹ.əʊ", "Étroit", "Adjective", "Of little width"],
+  endless: ["Adjectif", "ˈɛnd.ləs", "Sans fin, infini", "Adjective", "Having no end, infinite"],
+  letter: ["Nom commun", "ˈlɛt.ə", "Lettre", "Noun", "A written message"],
+  damp: ["Adjectif", "dæmp", "Humide", "Adjective", "Slightly wet"],
+  faro: ["Nom commun", "ˈfa.ɾo", "Phare", "Noun", "Lighthouse"],
+  carta: ["Nom commun", "ˈkaɾ.ta", "Lettre", "Noun", "Letter"],
 };
 
 export function createMockApi(): Api {
@@ -98,13 +100,13 @@ export function createMockApi(): Api {
   };
 
   const models: Omit<ModelRow, "installed" | "active" | "downloading" | "partial">[] = [
-    { id: "qwen3.5-0.8b", kind: "llm", name: "Qwen3.5 0.8B", detail: "Très rapide, pour les Mac avec 8 Go de mémoire", size: 533e6, url: "", file: "", ram_gb: 8 },
-    { id: "qwen3.5-2b", kind: "llm", name: "Qwen3.5 2B", detail: "L'équilibre idéal entre qualité et vitesse", size: 1281e6, url: "", file: "", ram_gb: 8 },
-    { id: "qwen3.5-4b", kind: "llm", name: "Qwen3.5 4B", detail: "Les traductions les plus fines, à partir de 16 Go", size: 2741e6, url: "", file: "", ram_gb: 16 },
-    { id: "qwen3-asr-1.7b", kind: "asrtext", name: "Qwen3-ASR 1.7B", detail: "Texte des transcriptions plus juste que Whisper, sans phrase sautée, dans 23 langues ; Whisper garde le minutage des mots", size: 2520744288, url: "", file: "", ram_gb: 16 },
-    { id: "whisper-small", kind: "asr", name: "Whisper Small", detail: "Transcription légère et rapide", size: 190e6, url: "", file: "", ram_gb: 8 },
-    { id: "whisper-turbo", kind: "asr", name: "Whisper Large v3 Turbo", detail: "Transcription et minutage des mots, très précis, 99 langues", size: 574e6, url: "", file: "", ram_gb: 8 },
-    { id: "supertonic-3", kind: "tts", name: "Supertonic 3", detail: "Voix naturelle pour les mots, les expressions et l'audio des leçons, dans les 31 langues", size: 149e6, url: "", file: "", ram_gb: 8 },
+    { id: "qwen3.5-0.8b", kind: "llm", name: "Qwen3.5 0.8B", get detail() { return t("Très rapide, pour les Mac avec 8 Go de mémoire", "Very fast, for Macs with 8 GB of memory"); }, size: 533e6, url: "", file: "", ram_gb: 8 },
+    { id: "qwen3.5-2b", kind: "llm", name: "Qwen3.5 2B", get detail() { return t("L'équilibre idéal entre qualité et vitesse", "The ideal balance between quality and speed"); }, size: 1281e6, url: "", file: "", ram_gb: 8 },
+    { id: "qwen3.5-4b", kind: "llm", name: "Qwen3.5 4B", get detail() { return t("Les traductions les plus fines, à partir de 16 Go", "The finest translations, 16 GB of memory or more"); }, size: 2741e6, url: "", file: "", ram_gb: 16 },
+    { id: "qwen3-asr-1.7b", kind: "asrtext", name: "Qwen3-ASR 1.7B", get detail() { return t("Texte des transcriptions plus juste que Whisper, sans phrase sautée, dans 23 langues ; Whisper garde le minutage des mots", "More accurate transcripts than Whisper, with no skipped sentences, in 23 languages; Whisper still times the words"); }, size: 2520744288, url: "", file: "", ram_gb: 16 },
+    { id: "whisper-small", kind: "asr", name: "Whisper Small", get detail() { return t("Transcription légère et rapide", "Light and fast transcription"); }, size: 190e6, url: "", file: "", ram_gb: 8 },
+    { id: "whisper-turbo", kind: "asr", name: "Whisper Large v3 Turbo", get detail() { return t("Transcription et minutage des mots, très précis, 99 langues", "Transcription and word timing, very precise, 99 languages"); }, size: 574e6, url: "", file: "", ram_gb: 8 },
+    { id: "supertonic-3", kind: "tts", name: "Supertonic 3", get detail() { return t("Voix naturelle pour les mots, les expressions et l'audio des leçons, dans les 31 langues", "Natural voice for words, phrases and lesson audio, in all 31 languages"); }, size: 149e6, url: "", file: "", ram_gb: 8 },
   ];
 
   const summary = (l: Lesson): LessonSummary => {
@@ -186,7 +188,14 @@ export function createMockApi(): Api {
 
   const mock: Api = {
     async appInfo() {
-      return { version: "0.1.0 (aperçu navigateur)", data_dir: "(navigateur)", platform: "web", ytdlp: false, transcriber: false, dict_langs: ["en", "es", "it", "de", "pt", "ru"] };
+      return {
+        version: t("0.1.0 (aperçu navigateur)", "0.1.0 (browser preview)"),
+        data_dir: t("(navigateur)", "(browser)"),
+        platform: "web",
+        ytdlp: false,
+        transcriber: false,
+        dict_langs: t("en es it de pt ru", "it es de pt ru fr").split(" "),
+      };
     },
     async settingsGet() {
       return { ...db.settings };
@@ -203,7 +212,7 @@ export function createMockApi(): Api {
     },
     async lessonOpen(id) {
       const l = db.lessons.find((x) => x.id === id);
-      if (!l) throw "Leçon introuvable";
+      if (!l) throw t("Leçon introuvable", "Lesson not found");
       (l as Lesson & { opened_at?: number }).opened_at = Date.now() / 1000;
       commit();
       const tokens = tokenize(l.text, l.lang);
@@ -264,14 +273,14 @@ export function createMockApi(): Api {
     },
     async playlistCreate(lang, name, lessons) {
       const id = Math.max(0, ...playlists().map((p) => p.id)) + 1;
-      playlists().push({ id, lang, name: name.trim().replace(/\s+/g, " ").slice(0, 120) || "Nouvelle playlist", lessons: fill(lang, lessons), current: null, created_at: Date.now() / 1000 });
+      playlists().push({ id, lang, name: name.trim().replace(/\s+/g, " ").slice(0, 120) || t("Nouvelle playlist", "New playlist"), lessons: fill(lang, lessons), current: null, created_at: Date.now() / 1000 });
       commit();
       return id;
     },
     async playlistUpdate(id, patch) {
       const p = playlists().find((x) => x.id === id);
       if (!p) return;
-      if (patch.name !== undefined) p.name = patch.name.trim().replace(/\s+/g, " ").slice(0, 120) || "Nouvelle playlist";
+      if (patch.name !== undefined) p.name = patch.name.trim().replace(/\s+/g, " ").slice(0, 120) || t("Nouvelle playlist", "New playlist");
       if (patch.lessons) p.lessons = fill(p.lang, patch.lessons);
       if (patch.current !== undefined) p.current = patch.current > 0 ? patch.current : null;
       commit();
@@ -282,7 +291,7 @@ export function createMockApi(): Api {
     },
     async lessonSetCover(id, data) {
       const l = db.lessons.find((x) => x.id === id);
-      if (!l) throw "Leçon introuvable";
+      if (!l) throw t("Leçon introuvable", "Lesson not found");
       // dans le navigateur, l'image est gardée telle quelle (adresse data:)
       let url: string | null = null;
       if (data) {
@@ -375,20 +384,20 @@ export function createMockApi(): Api {
       await sleep(30);
       const d = MOCK_DICT[normalize(word)];
       if (!d) return { entries: [] };
-      return { entries: [{ word: normalize(word), pos: d[0], ipa: d[1], glosses: [d[2]] }] };
+      return { entries: [{ word: normalize(word), pos: t(d[0], d[3]), ipa: d[1], glosses: [t(d[2], d[4])] }] };
     },
     async aiWord(_lang, word, _sentence, onPiece) {
-      if (!db.installed.some((m) => m.startsWith("qwen"))) throw "NO_MODEL:Aucun modèle de traduction n'est installé. Ouvrez Réglages › IA locale.";
+      if (!db.installed.some((m) => m.startsWith("qwen"))) throw t("NO_MODEL:Aucun modèle de traduction n'est installé. Ouvrez Réglages › IA locale.", "NO_MODEL:No translation model is installed. Open Settings › Local AI.");
       await sleep(250);
       const d = MOCK_DICT[normalize(word)];
-      const tr = d ? d[2].toLowerCase() : `« ${word} » (aperçu)`;
-      const note = normalize(word).endsWith("ed") ? "Prétérit, action terminée dans le passé." : "";
-      await fakeStream(`Sens : ${tr}\nNote : ${note || "-"}`, onPiece);
+      const tr = d ? t(d[2], d[4]).toLowerCase() : t(`« ${word} » (aperçu)`, `“${word}” (preview)`);
+      const note = normalize(word).endsWith("ed") ? t("Prétérit, action terminée dans le passé.", "Past tense, a finished action.") : "";
+      await fakeStream(t(`Sens : ${tr}\nNote : ${note || "-"}`, `Meaning: ${tr}\nNote: ${note || "-"}`), onPiece);
       return { translation: tr, note, cached: false };
     },
     async aiSentence(_lang, sentence, onPiece) {
       await sleep(200);
-      return fakeStream(`[Traduction simulée] ${sentence}`, onPiece);
+      return fakeStream(t(`[Traduction simulée] ${sentence}`, `[Simulated translation] ${sentence}`), onPiece);
     },
     async aiSimplify(_lang, text, _level, onPiece) {
       await sleep(400);
@@ -406,7 +415,7 @@ export function createMockApi(): Api {
     },
     async chatOpen(id) {
       const c = chats().find((x) => x.id === id);
-      if (!c) throw "Cette conversation n'existe plus.";
+      if (!c) throw t("Cette conversation n'existe plus.", "This conversation no longer exists.");
       return { chat: chatSummary(c), messages: c.messages };
     },
     async chatCreate(lang, lesson) {
@@ -420,7 +429,7 @@ export function createMockApi(): Api {
     },
     async chatUpdate(id, patch) {
       const c = chats().find((x) => x.id === id);
-      if (!c) throw "Cette conversation n'existe plus.";
+      if (!c) throw t("Cette conversation n'existe plus.", "This conversation no longer exists.");
       if (patch.title !== undefined) c.title = patch.title.trim().replace(/\s+/g, " ").slice(0, 120);
       if (patch.lesson !== undefined) c.lesson_id = db.lessons.some((l) => l.id === patch.lesson && l.lang === c.lang) ? patch.lesson : null;
       commit();
@@ -431,9 +440,9 @@ export function createMockApi(): Api {
       commit();
     },
     async chatSend(id, text, options, onEvent) {
-      if (!db.installed.some((m) => m.startsWith("qwen"))) throw "NO_MODEL:Aucun modèle de traduction n'est installé. Ouvrez Réglages › IA locale.";
+      if (!db.installed.some((m) => m.startsWith("qwen"))) throw t("NO_MODEL:Aucun modèle de traduction n'est installé. Ouvrez Réglages › IA locale.", "NO_MODEL:No translation model is installed. Open Settings › Local AI.");
       const c = chats().find((x) => x.id === id);
-      if (!c) throw "Cette conversation n'existe plus.";
+      if (!c) throw t("Cette conversation n'existe plus.", "This conversation no longer exists.");
       chatStops.set(id, false);
       const lesson = db.lessons.find((l) => l.id === c.lesson_id);
       const stream = async (full: string, type: "thought" | "answer", pace: number) => {
@@ -460,7 +469,10 @@ export function createMockApi(): Api {
         thoughtSecs = (Date.now() - t0) / 1000;
       }
       const answer = await stream(
-        `Voici ce que l'on peut dire${lesson ? ` à partir de « ${lesson.title} »` : ""} :\n\n- **Sens** : réponse simulée à « ${text.slice(0, 80)} ».\n- **Grammaire** : dans l'application, Qwen répond ici, calculé sur votre Mac.\n\n| Personne | Forme |\n| --- | --- |\n| io | salivo |\n| tu | salivi |\n\n*Exemple* : *Marta saliva le scale.* (Marta montait l'escalier.)`,
+        t(
+          `Voici ce que l'on peut dire${lesson ? ` à partir de « ${lesson.title} »` : ""} :\n\n- **Sens** : réponse simulée à « ${text.slice(0, 80)} ».\n- **Grammaire** : dans l'application, Qwen répond ici, calculé sur votre Mac.\n\n| Personne | Forme |\n| --- | --- |\n| io | salivo |\n| tu | salivi |\n\n*Exemple* : *Marta saliva le scale.* (Marta montait l'escalier.)`,
+          `Here is what we can say${lesson ? ` based on “${lesson.title}”` : ""}:\n\n- **Meaning**: simulated answer to “${text.slice(0, 80)}”.\n- **Grammar**: in the app, Qwen answers here, computed on your Mac.\n\n| Person | Form |\n| --- | --- |\n| io | salivo |\n| tu | salivi |\n\n*Example*: *Marta saliva le scale.* (Marta was climbing the stairs.)`,
+        ),
         "answer",
         34,
       );
@@ -505,31 +517,31 @@ export function createMockApi(): Api {
         await sleep(120);
         onEvent({ type: "progress", value: i * 10 });
       }
-      throw "NO_VOICE: la voix naturelle fonctionne dans l'application Mac";
+      throw t("NO_VOICE: la voix naturelle fonctionne dans l'application Mac", "NO_VOICE: the natural voice works in the Mac app");
     },
     async lessonVoiceCancel() {},
     async ttsSay() {
       // l'aperçu navigateur n'a pas le moteur : la voix du système prend le relais
-      throw "NO_VOICE: la voix naturelle fonctionne dans l'application Mac";
+      throw t("NO_VOICE: la voix naturelle fonctionne dans l'application Mac", "NO_VOICE: the natural voice works in the Mac app");
     },
     async fetchUrl() {
-      throw "L'import de pages web fonctionne dans l'application Mac.";
+      throw t("L'import de pages web fonctionne dans l'application Mac.", "Importing web pages works in the Mac app.");
     },
     async readFile() {
-      throw "La lecture de fichiers fonctionne dans l'application Mac.";
+      throw t("La lecture de fichiers fonctionne dans l'application Mac.", "Reading files works in the Mac app.");
     },
     async importMedia() {
-      throw "La transcription fonctionne dans l'application Mac.";
+      throw t("La transcription fonctionne dans l'application Mac.", "Transcription works in the Mac app.");
     },
     async importYoutube() {
-      throw "L'import YouTube fonctionne dans l'application Mac.";
+      throw t("L'import YouTube fonctionne dans l'application Mac.", "YouTube import works in the Mac app.");
     },
     async lessonFetchVideo() {
-      throw "Le téléchargement de vidéos fonctionne dans l'application Mac.";
+      throw t("Le téléchargement de vidéos fonctionne dans l'application Mac.", "Downloading videos works in the Mac app.");
     },
     async lessonResync(id, onEvent) {
       const l = db.lessons.find((x) => x.id === id);
-      if (!l?.media_path) throw "Cette leçon n'a pas d'audio à recaler.";
+      if (!l?.media_path) throw t("Cette leçon n'a pas d'audio à recaler.", "This lesson has no audio to realign.");
       onEvent({ type: "stage", stage: "transcribe" });
       for (let i = 1; i <= 20; i++) {
         await sleep(90);
@@ -541,7 +553,7 @@ export function createMockApi(): Api {
     },
     async lingqScan(key) {
       await sleep(900);
-      if (key.trim().length < 10) throw "LingQ refuse cette clé API. Vérifiez-la sur lingq.com puis collez-la à nouveau.";
+      if (key.trim().length < 10) throw t("LingQ refuse cette clé API. Vérifiez-la sur lingq.com puis collez-la à nouveau.", "LingQ refuses this API key. Check it on lingq.com, then paste it again.");
       return [
         { lang: "en", known_words: 4210, lingqs: 812, courses: [{ id: 1, title: "Mini Stories", lessons: 60 }, { id: 2, title: "Mes imports", lessons: 14 }], lessons: 74 },
         { lang: "it", known_words: 930, lingqs: 205, courses: [{ id: 3, title: "Italiano per principianti", lessons: 24 }], lessons: 24 },

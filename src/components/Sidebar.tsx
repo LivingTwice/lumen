@@ -10,14 +10,15 @@ import { CountUp, Menu, Orb } from "./ui";
 import { BackupCard } from "./BackupCard";
 import { LingqCard } from "./LingqCard";
 import { UpdateCard } from "./UpdateCard";
+import { t } from "../lib/i18n";
 
-const NAV: { view: View; label: string; icon: IconName }[] = [
-  { view: "library", label: "Bibliothèque", icon: "library" },
+const nav = (): { view: View; label: string; icon: IconName }[] => [
+  { view: "library", label: t("Bibliothèque", "Library"), icon: "library" },
   { view: "playlists", label: "Playlists", icon: "playlist" },
-  { view: "reader", label: "Lecture en cours", icon: "book" },
+  { view: "reader", label: t("Lecture en cours", "Now reading"), icon: "book" },
   { view: "chat", label: "Chat", icon: "chat" },
-  { view: "vocab", label: "Vocabulaire", icon: "cards" },
-  { view: "progress", label: "Progrès", icon: "chart" },
+  { view: "vocab", label: t("Vocabulaire", "Vocabulary"), icon: "cards" },
+  { view: "progress", label: t("Progrès", "Progress"), icon: "chart" },
 ];
 
 export function Sidebar() {
@@ -83,7 +84,7 @@ export function Sidebar() {
               <span className="lang-meta">
                 <strong>{li.name}</strong>
                 <span>
-                  <CountUp value={known} /> mots connus
+                  <CountUp value={known} /> {t("mots connus", "known words")}
                 </span>
               </span>
               <Icon name="chevron" size={16} />
@@ -115,13 +116,13 @@ export function Sidebar() {
             <span className="lang-badge add" style={{ width: 24, height: 24, borderRadius: 7 }}>
               <Icon name="plus" size={13} stroke={2.2} />
             </span>
-            <span style={{ flex: 1 }}>Ajouter une langue…</span>
+            <span style={{ flex: 1 }}>{t("Ajouter une langue…", "Add a language…")}</span>
           </button>
         </Menu>
       </div>
 
       <nav className="nav">
-        {NAV.map((n) => {
+        {nav().map((n) => {
           const disabled = n.view === "reader" && !lessonId;
           const active = view === n.view;
           return (
@@ -136,27 +137,27 @@ export function Sidebar() {
               {active && <motion.span layoutId="nav-pill" className="nav-pill" transition={{ type: "spring", stiffness: 500, damping: 40 }} />}
               <Icon name={n.icon} />
               <span>{n.label}</span>
-              {n.view === "chat" && chatBusy && view !== "chat" && <span className="nav-live" aria-label="Réponse en cours" />}
+              {n.view === "chat" && chatBusy && view !== "chat" && <span className="nav-live" aria-label={t("Réponse en cours", "Answer in progress")} />}
             </button>
           );
         })}
         <button className={`nav-item ${view === "settings" ? "active" : ""}`} onClick={() => go("settings")} aria-current={view === "settings" ? "page" : undefined}>
           {view === "settings" && <motion.span layoutId="nav-pill" className="nav-pill" transition={{ type: "spring", stiffness: 500, damping: 40 }} />}
           <Icon name="settings" />
-          <span>Réglages</span>
+          <span>{t("Réglages", "Settings")}</span>
         </button>
       </nav>
 
       <div style={{ padding: "16px 12px 0" }}>
         <button className="btn primary glow" style={{ width: "100%" }} onClick={() => openImport()}>
           <Icon name="plus" size={16} stroke={2} />
-          Importer
+          {t("Importer", "Import")}
         </button>
       </div>
 
       {recent.length > 0 && (
         <>
-          <div className="side-section">Récemment ouvert</div>
+          <div className="side-section">{t("Récemment ouvert", "Recently opened")}</div>
           <div className="side-recent">
             {recent.map((r) => (
               <button key={r.id} onClick={() => openLesson(r.id)} title={r.title}>
@@ -172,22 +173,30 @@ export function Sidebar() {
         <LingqCard />
         <BackupCard />
         <button className="ai-card" style={{ textAlign: "left", cursor: "pointer" }} onClick={() => go("settings")}>
-          <span className="eyebrow">IA locale</span>
+          <span className="eyebrow">{t("IA locale", "Local AI")}</span>
           <span className="ai-row">
             <span className={`dot ${llm ? "ok" : busy ? "busy" : ""}`} />
-            {llm ? `${llm.name} · prêt` : busy ? "Téléchargement…" : "Traduction : à installer"}
+            {llm ? t(`${llm.name} · prêt`, `${llm.name} · ready`) : busy ? t("Téléchargement…", "Downloading…") : t("Traduction : à installer", "Translation: to install")}
           </span>
           <span className="ai-row">
             <span className={`dot ${asr ? "ok" : ""}`} />
-            {asr ? (asrText ? "Qwen3-ASR et Whisper · prêts" : `${asr.name.replace("Large v3 ", "")} · prêt`) : "Transcription : à installer"}
+            {asr
+              ? asrText
+                ? t("Qwen3-ASR et Whisper · prêts", "Qwen3-ASR and Whisper · ready")
+                : t(`${asr.name.replace("Large v3 ", "")} · prêt`, `${asr.name.replace("Large v3 ", "")} · ready`)
+              : t("Transcription : à installer", "Transcription: to install")}
           </span>
           <span className="ai-row">
             <span className={`dot ${voice?.installed ? "ok" : voice && downloads[voice.id] ? "busy" : ""}`} />
-            {voice?.installed ? "Voix naturelle · prête" : voice && downloads[voice.id] ? "Voix : téléchargement…" : "Voix naturelle : à installer"}
+            {voice?.installed
+              ? t("Voix naturelle · prête", "Natural voice · ready")
+              : voice && downloads[voice.id]
+                ? t("Voix : téléchargement…", "Voice: downloading…")
+                : t("Voix naturelle : à installer", "Natural voice: to install")}
           </span>
           <span className="ai-row">
             <span className="dot ok" />
-            Dictionnaire hors ligne
+            {t("Dictionnaire hors ligne", "Offline dictionary")}
           </span>
         </button>
       </div>

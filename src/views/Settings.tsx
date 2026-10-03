@@ -3,10 +3,11 @@ import { Icon } from "../components/Icon";
 import { Segmented, Switch } from "../components/ui";
 import { api, isTauri } from "../lib/api";
 import { confirmAsk } from "../lib/dialogs";
-import { LANGS, STARTERS, langInfo, theLang } from "../lib/langs";
+import { t, type UiLang } from "../lib/i18n";
+import { LANGS, STARTERS, coreLangs, langInfo, langLower, starterCollection, theLang } from "../lib/langs";
 import { PROFILES } from "../lib/profiles";
 import { formatBytes, useApp } from "../lib/store";
-import { NATURAL_VOICES, naturalVoiceFor, pronounce } from "../lib/pronounce";
+import { naturalVoiceFor, naturalVoices, pronounce } from "../lib/pronounce";
 import { loadVoices, sayWord, voicesFor } from "../lib/tts";
 import { useUpdate } from "../lib/updater";
 import type { LangCode, ModelRow } from "../lib/types";
@@ -25,7 +26,12 @@ function ModelLine({ m }: { m: ModelRow }) {
   const isActive = !!activeKey && settings[activeKey] === m.id;
 
   const remove = async () => {
-    if (!(await confirmAsk(`Supprimer ${m.name} (${formatBytes(m.size)}) de ce Mac ?`, "Supprimer le modèle", "Supprimer"))) return;
+    const ok = await confirmAsk(
+      t(`Supprimer ${m.name} (${formatBytes(m.size)}) de ce Mac ?`, `Delete ${m.name} (${formatBytes(m.size)}) from this Mac?`),
+      t("Supprimer le modèle", "Delete the model"),
+      t("Supprimer", "Delete"),
+    );
+    if (!ok) return;
     await api().modelDelete(m.id);
     await refresh();
   };
@@ -34,7 +40,7 @@ function ModelLine({ m }: { m: ModelRow }) {
     <div className="set-row model-row">
       <div className="grow">
         <strong>
-          {m.name} {isActive && m.installed && <span className="chip light" style={{ marginLeft: 6, height: 22 }}>Actif</span>}
+          {m.name} {isActive && m.installed && <span className="chip light" style={{ marginLeft: 6, height: 22 }}>{t("Actif", "Active")}</span>}
         </strong>
         <span>
           {m.detail} · {formatBytes(m.size)}
@@ -45,7 +51,7 @@ function ModelLine({ m }: { m: ModelRow }) {
               <i style={{ width: `${(dl.received / Math.max(1, dl.total)) * 100}%` }} />
             </div>
             <span className="num">
-              {formatBytes(dl.received)} sur {formatBytes(dl.total)}
+              {t(`${formatBytes(dl.received)} sur ${formatBytes(dl.total)}`, `${formatBytes(dl.received)} of ${formatBytes(dl.total)}`)}
               {dl.speed > 0 ? ` · ${formatBytes(dl.speed)}/s` : ""}
             </span>
           </>
@@ -56,20 +62,20 @@ function ModelLine({ m }: { m: ModelRow }) {
         <>
           {activeKey && !isActive && (
             <button className="btn sm soft" onClick={() => setSetting(activeKey, m.id)}>
-              Utiliser
+              {t("Utiliser", "Use")}
             </button>
           )}
-          <button className="icon-btn" onClick={remove} aria-label={`Supprimer ${m.name}`}>
+          <button className="icon-btn" onClick={remove} aria-label={t(`Supprimer ${m.name}`, `Delete ${m.name}`)}>
             <Icon name="trash" size={16} />
           </button>
         </>
       ) : dl && !dl.error ? (
         <button className="btn sm ghost" onClick={() => cancel(m.id)}>
-          Annuler
+          {t("Annuler", "Cancel")}
         </button>
       ) : (
         <button className="btn sm outline" onClick={() => (activeKey && setSetting(activeKey, m.id), download(m.id))}>
-          <Icon name="download" size={14} /> {m.partial > 0 || dl?.error ? "Reprendre" : "Télécharger"}
+          <Icon name="download" size={14} /> {m.partial > 0 || dl?.error ? t("Reprendre", "Resume") : t("Télécharger", "Download")}
         </button>
       )}
     </div>
@@ -111,7 +117,7 @@ export function Settings() {
       // la leçon d'accueil, sans doublon si la langue avait déjà été étudiée
       const s = STARTERS[code];
       const exists = (await api().lessonsList(code)).some((x) => x.title === s.title);
-      if (!exists) await api().lessonCreate({ lang: code, title: s.title, text: s.text, collection: "Pour commencer" });
+      if (!exists) await api().lessonCreate({ lang: code, title: s.title, text: s.text, collection: starterCollection() });
       bump();
     }
     if (has && code === lang) {
@@ -129,14 +135,41 @@ export function Settings() {
         <div className="settings">
           <header className="page-head">
             <div>
-              <h1>Réglages</h1>
-              <p>Tout fonctionne sur votre Mac, sans compte ni connexion.</p>
+              <h1>{t("Réglages", "Settings")}</h1>
+              <p>{t("Tout fonctionne sur votre Mac, sans compte ni connexion.", "Everything works on your Mac, with no account and no connection.")}</p>
             </div>
           </header>
 
+          <section className="set-section" id="set-ui-lang">
+            <h2>{t("Langue de l'interface", "Interface language")}</h2>
+            <p>
+              {t(
+                "C'est aussi la langue des traductions, des explications du chat et des dictionnaires.",
+                "It is also the language of translations, chat explanations and dictionaries.",
+              )}
+            </p>
+            <div className="set-card">
+              <div className="set-row">
+                <div className="grow">
+                  <strong>{t("Lumen en", "Lumen in")}</strong>
+                </div>
+                <Segmented
+                  id="ui-lang"
+                  label={t("Langue de l'interface", "Interface language")}
+                  value={settings.ui_lang || "fr"}
+                  onChange={(v) => void setSetting("ui_lang", v as UiLang)}
+                  options={[
+                    { value: "fr", label: "Français" },
+                    { value: "en", label: "English" },
+                  ]}
+                />
+              </div>
+            </div>
+          </section>
+
           <section className="set-section">
-            <h2>IA locale</h2>
-            <p>Choisissez la puissance des modèles. Ils sont téléchargés une seule fois puis fonctionnent hors ligne.</p>
+            <h2>{t("IA locale", "Local AI")}</h2>
+            <p>{t("Choisissez la puissance des modèles. Ils sont téléchargés une seule fois puis fonctionnent hors ligne.", "Choose how powerful the models are. They are downloaded once, then work offline.")}</p>
             <div className="profile-grid" style={{ marginBottom: 14 }}>
               {PROFILES.map((p) => (
                 <button key={p.id} className={`profile ${activeProfile === p.id ? "on" : ""}`} onClick={() => pickProfile(p.id)}>
@@ -154,7 +187,7 @@ export function Settings() {
             <div className="set-card">
               <div className="set-row">
                 <div className="grow">
-                  <span className="eyebrow">Traduction et réécriture</span>
+                  <span className="eyebrow">{t("Traduction et réécriture", "Translation and rewriting")}</span>
                 </div>
               </div>
               {models
@@ -164,7 +197,7 @@ export function Settings() {
                 ))}
               <div className="set-row">
                 <div className="grow">
-                  <span className="eyebrow">Transcription audio et vidéo</span>
+                  <span className="eyebrow">{t("Transcription audio et vidéo", "Audio and video transcription")}</span>
                 </div>
               </div>
               {models
@@ -174,8 +207,13 @@ export function Settings() {
                 ))}
               <div className="set-row">
                 <div className="grow">
-                  <span className="eyebrow">Texte des transcriptions</span>
-                  <span>Facultatif, conseillé : Qwen3-ASR écrit le texte, plus juste et sans phrase sautée, et Whisper repère chaque mot dans le temps pour la lanterne. Il couvre 23 langues ; l'estonien, le letton, le lituanien, le slovaque, le slovène, le croate, le bulgare et l'ukrainien restent transcrits par Whisper seul.</span>
+                  <span className="eyebrow">{t("Texte des transcriptions", "Transcript text")}</span>
+                  <span>
+                    {t(
+                      "Facultatif, conseillé : Qwen3-ASR écrit le texte, plus juste et sans phrase sautée, et Whisper repère chaque mot dans le temps pour la lanterne. Il couvre 23 langues ; l'estonien, le letton, le lituanien, le slovaque, le slovène, le croate, le bulgare et l'ukrainien restent transcrits par Whisper seul.",
+                      "Optional, recommended: Qwen3-ASR writes the text, more accurately and without skipped sentences, and Whisper times each word for the lantern. It covers 23 languages; Estonian, Latvian, Lithuanian, Slovak, Slovenian, Croatian, Bulgarian and Ukrainian are still transcribed by Whisper alone.",
+                    )}
+                  </span>
                 </div>
               </div>
               {models
@@ -187,8 +225,8 @@ export function Settings() {
           </section>
 
           <section className="set-section" id="set-langs">
-            <h2>Langues étudiées</h2>
-            <p>Chaque langue a sa bibliothèque, son vocabulaire et ses progrès. Retirer une langue garde ses leçons et ses mots.</p>
+            <h2>{t("Langues étudiées", "Languages you study")}</h2>
+            <p>{t("Chaque langue a sa bibliothèque, son vocabulaire et ses progrès. Retirer une langue garde ses leçons et ses mots.", "Each language has its own library, vocabulary and progress. Removing a language keeps its lessons and words.")}</p>
             <div className="set-card">
               {langs.map((code) => {
                 const l = langInfo(code);
@@ -201,16 +239,18 @@ export function Settings() {
                       <strong>{l.name}</strong>
                       <span>
                         {l.native}
-                        {info?.dict_langs.includes(l.code) ? " · dictionnaire hors ligne inclus" : " · traduction par l'IA et voix naturelle"}
+                        {coreLangs().includes(l.code)
+                          ? t(" · dictionnaire hors ligne inclus", " · offline dictionary (downloaded on first use)")
+                          : t(" · traduction par l'IA et voix naturelle", " · AI translation and natural voice")}
                       </span>
                     </div>
-                    <Switch on onChange={() => toggleLang(l.code)} label={`Ne plus étudier ${l.name.toLowerCase()}`} />
+                    <Switch on onChange={() => toggleLang(l.code)} label={t(`Ne plus étudier ${langLower(l.code)}`, `Stop studying ${l.name}`)} />
                   </div>
                 );
               })}
             </div>
             <div className="lang-add">
-              <span className="eyebrow">Ajouter une langue</span>
+              <span className="eyebrow">{t("Ajouter une langue", "Add a language")}</span>
               <div className="lang-chips">
                 {LANGS.filter((l) => !langs.includes(l.code)).map((l) => (
                   <button key={l.code} className="lang-chip" onClick={() => toggleLang(l.code)} title={`${l.name} · ${l.native}`}>
@@ -226,70 +266,75 @@ export function Settings() {
           </section>
 
           <section className="set-section">
-            <h2>Lecture</h2>
-            <p>Réglez la page à votre œil.</p>
+            <h2>{t("Lecture", "Reading")}</h2>
+            <p>{t("Réglez la page à votre œil.", "Adjust the page to your eye.")}</p>
             <div className="set-card">
               <div className="set-row">
                 <div className="grow">
-                  <strong>Taille du texte</strong>
+                  <strong>{t("Taille du texte", "Text size")}</strong>
                   <span className="num">{settings.font_size} px</span>
                 </div>
-                <input className="range" style={{ width: 220 }} type="range" min={17} max={32} value={settings.font_size} onChange={(e) => setSetting("font_size", e.target.value)} aria-label="Taille du texte" />
+                <input className="range" style={{ width: 220 }} type="range" min={17} max={32} value={settings.font_size} onChange={(e) => setSetting("font_size", e.target.value)} aria-label={t("Taille du texte", "Text size")} />
               </div>
               <div className="set-row">
                 <div className="grow">
-                  <strong>Interligne</strong>
+                  <strong>{t("Interligne", "Line spacing")}</strong>
                 </div>
                 <Segmented
                   id="lh"
                   value={settings.line_height}
                   onChange={(v) => setSetting("line_height", v)}
                   options={[
-                    { value: "1.55", label: "Serré" },
+                    { value: "1.55", label: t("Serré", "Tight") },
                     { value: "1.75", label: "Normal" },
-                    { value: "1.95", label: "Aéré" },
+                    { value: "1.95", label: t("Aéré", "Airy") },
                   ]}
                 />
               </div>
               <div className="set-row">
                 <div className="grow">
-                  <strong>Marquage des mots</strong>
-                  <span>Teinte douce ou simple soulignement</span>
+                  <strong>{t("Marquage des mots", "Word highlighting")}</strong>
+                  <span>{t("Teinte douce ou simple soulignement", "Soft tint or simple underline")}</span>
                 </div>
                 <Segmented
                   id="ws"
                   value={settings.word_style}
                   onChange={(v) => setSetting("word_style", v)}
                   options={[
-                    { value: "tint", label: "Teinte" },
-                    { value: "line", label: "Soulignement" },
+                    { value: "tint", label: t("Teinte", "Tint") },
+                    { value: "line", label: t("Soulignement", "Underline") },
                   ]}
                 />
               </div>
               <div className="set-row">
                 <div className="grow">
-                  <strong>Terminer la page marque les mots bleus comme connus</strong>
-                  <span>Le principe de LingQ : un mot lu sans être consulté est compris.</span>
+                  <strong>{t("Terminer la page marque les mots bleus comme connus", "Finishing the page marks blue words as known")}</strong>
+                  <span>{t("Le principe de LingQ : un mot lu sans être consulté est compris.", "The LingQ principle: a word you read without looking it up is understood.")}</span>
                 </div>
-                <Switch on={settings.finish_marks_known !== "0"} onChange={(v) => setSetting("finish_marks_known", v ? "1" : "0")} label="Marquer comme connus" />
+                <Switch on={settings.finish_marks_known !== "0"} onChange={(v) => setSetting("finish_marks_known", v ? "1" : "0")} label={t("Marquer comme connus", "Mark as known")} />
               </div>
               <div className="set-row">
                 <div className="grow">
-                  <strong>Traduire automatiquement la phrase</strong>
-                  <span>Après chaque mot touché</span>
+                  <strong>{t("Traduire automatiquement la phrase", "Translate the sentence automatically")}</strong>
+                  <span>{t("Après chaque mot touché", "After each word you tap")}</span>
                 </div>
-                <Switch on={settings.auto_sentence !== "0"} onChange={(v) => setSetting("auto_sentence", v ? "1" : "0")} label="Traduire la phrase" />
+                <Switch on={settings.auto_sentence !== "0"} onChange={(v) => setSetting("auto_sentence", v ? "1" : "0")} label={t("Traduire la phrase", "Translate the sentence")} />
               </div>
             </div>
           </section>
 
           <section className="set-section">
-            <h2>Voix</h2>
-            <p>La voix naturelle prononce les mots et les expressions que vous touchez, et lit toute une leçon de texte avec le bouton « Créer l'audio ». Elle est calculée sur votre Mac, seulement quand vous en avez besoin. Les voix du système lisent la leçon à voix haute sans préparation.</p>
+            <h2>{t("Voix", "Voice")}</h2>
+            <p>
+              {t(
+                "La voix naturelle prononce les mots et les expressions que vous touchez, et lit toute une leçon de texte avec le bouton « Créer l'audio ». Elle est calculée sur votre Mac, seulement quand vous en avez besoin. Les voix du système lisent la leçon à voix haute sans préparation.",
+                "The natural voice pronounces the words and phrases you tap, and reads a whole text lesson with the “Create audio” button. It is computed on your Mac, only when you need it. The system voices read the lesson aloud with no preparation.",
+              )}
+            </p>
             <div className="set-card">
               <div className="set-row">
                 <div className="grow">
-                  <span className="eyebrow">Voix naturelle</span>
+                  <span className="eyebrow">{t("Voix naturelle", "Natural voice")}</span>
                 </div>
               </div>
               {models
@@ -300,13 +345,13 @@ export function Settings() {
               {models.some((m) => m.kind === "tts" && m.installed) && (
                 <div className="set-row">
                   <div className="grow">
-                    <strong>Voix pour {theLang(lang)}</strong>
-                    <span>10 voix, comprises dans le téléchargement ; elle lit aussi l'audio créé pour vos leçons</span>
+                    <strong>{t(`Voix pour ${theLang(lang)}`, `Voice for ${theLang(lang)}`)}</strong>
+                    <span>{t("10 voix, comprises dans le téléchargement ; elle lit aussi l'audio créé pour vos leçons", "10 voices, included in the download; it also reads the audio created for your lessons")}</span>
                   </div>
-                  <select className="select" value={naturalVoiceFor(lang)} onChange={(e) => setSetting(`tts_voice_${lang}`, e.target.value)} aria-label="Voix naturelle">
-                    {["Voix féminines", "Voix masculines"].map((g) => (
+                  <select className="select" value={naturalVoiceFor(lang)} onChange={(e) => setSetting(`tts_voice_${lang}`, e.target.value)} aria-label={t("Voix naturelle", "Natural voice")}>
+                    {[...new Set(naturalVoices().map((v) => v.group))].map((g) => (
                       <optgroup key={g} label={g}>
-                        {NATURAL_VOICES.filter((v) => v.group === g).map((v) => (
+                        {naturalVoices().filter((v) => v.group === g).map((v) => (
                           <option key={v.id} value={v.id}>
                             {v.name}
                           </option>
@@ -314,32 +359,35 @@ export function Settings() {
                       </optgroup>
                     ))}
                   </select>
-                  <button className="icon-btn" onClick={() => void pronounce(STARTERS[lang].text.split(/[.!?。]/)[0].split(/\s+/).slice(0, 8).join(" "), lang, settings[voiceKey])} aria-label="Écouter la voix naturelle">
+                  <button className="icon-btn" onClick={() => void pronounce(STARTERS[lang].text.split(/[.!?。]/)[0].split(/\s+/).slice(0, 8).join(" "), lang, settings[voiceKey])} aria-label={t("Écouter la voix naturelle", "Listen to the natural voice")}>
                     <Icon name="speaker" />
                   </button>
                 </div>
               )}
               <div className="set-row">
                 <div className="grow">
-                  <span className="eyebrow">Lecture à voix haute</span>
+                  <span className="eyebrow">{t("Lecture à voix haute", "Reading aloud")}</span>
                 </div>
               </div>
               <div className="set-row">
                 <div className="grow">
-                  <strong>Voix du système pour {theLang(lang)}</strong>
+                  <strong>{t(`Voix du système pour ${theLang(lang)}`, `System voice for ${theLang(lang)}`)}</strong>
                   <span>
-                    {voices.length ? `${voices.length} voix disponible${voices.length > 1 ? "s" : ""}` : "Aucune voix installée pour cette langue"} · d'autres voix dans Réglages Système › Accessibilité › Contenu énoncé
+                    {voices.length
+                      ? t(`${voices.length} voix disponible${voices.length > 1 ? "s" : ""}`, `${voices.length} voice${voices.length > 1 ? "s" : ""} available`)
+                      : t("Aucune voix installée pour cette langue", "No voice installed for this language")}
+                    {t(" · d'autres voix dans Réglages Système › Accessibilité › Contenu énoncé", " · more voices in System Settings › Accessibility › Spoken Content")}
                   </span>
                 </div>
-                <select className="select" value={settings[voiceKey] ?? ""} onChange={(e) => setSetting(voiceKey, e.target.value)} aria-label="Voix">
-                  <option value="">Automatique (la plus naturelle)</option>
+                <select className="select" value={settings[voiceKey] ?? ""} onChange={(e) => setSetting(voiceKey, e.target.value)} aria-label={t("Voix", "Voice")}>
+                  <option value="">{t("Automatique (la plus naturelle)", "Automatic (the most natural)")}</option>
                   {voices.map((v) => (
                     <option key={v.voiceURI} value={v.voiceURI}>
                       {v.name} · {v.lang}
                     </option>
                   ))}
                 </select>
-                <button className="icon-btn" onClick={() => sayWord(STARTERS[lang].text.split(".")[0], lang, settings[voiceKey], Number(settings.tts_rate) || 0.95)} aria-label="Écouter la voix">
+                <button className="icon-btn" onClick={() => sayWord(STARTERS[lang].text.split(".")[0], lang, settings[voiceKey], Number(settings.tts_rate) || 0.95)} aria-label={t("Écouter la voix", "Listen to the voice")}>
                   <Icon name="speaker" />
                 </button>
               </div>
@@ -347,16 +395,21 @@ export function Settings() {
           </section>
 
           <section className="set-section">
-            <h2>Vidéos en ligne</h2>
-            <p>YouTube et la plupart des sites vidéo. Le son est transcrit sur votre Mac et l'image téléchargée en haute définition pour regarder avec la transcription synchronisée.</p>
+            <h2>{t("Vidéos en ligne", "Online videos")}</h2>
+            <p>
+              {t(
+                "YouTube et la plupart des sites vidéo. Le son est transcrit sur votre Mac et l'image téléchargée en haute définition pour regarder avec la transcription synchronisée.",
+                "YouTube and most video sites. The sound is transcribed on your Mac and the picture downloaded in high definition, so you can watch with the transcript in sync.",
+              )}
+            </p>
             <div className="set-card">
               <div className="set-row">
                 <div className="grow">
-                  <strong>Navigateur connecté à YouTube</strong>
-                  <span>Utilisé seulement si YouTube demande de se connecter pour une vidéo.</span>
+                  <strong>{t("Navigateur connecté à YouTube", "Browser signed in to YouTube")}</strong>
+                  <span>{t("Utilisé seulement si YouTube demande de se connecter pour une vidéo.", "Used only if YouTube asks you to sign in for a video.")}</span>
                 </div>
-                <select className="select" value={settings.youtube_browser ?? ""} onChange={(e) => setSetting("youtube_browser", e.target.value)} aria-label="Navigateur">
-                  <option value="">Aucun</option>
+                <select className="select" value={settings.youtube_browser ?? ""} onChange={(e) => setSetting("youtube_browser", e.target.value)} aria-label={t("Navigateur", "Browser")}>
+                  <option value="">{t("Aucun", "None")}</option>
                   <option value="safari">Safari</option>
                   <option value="chrome">Chrome</option>
                   <option value="firefox">Firefox</option>
@@ -368,8 +421,12 @@ export function Settings() {
               </div>
               <div className="set-row">
                 <div className="grow">
-                  <strong>Composants vidéo</strong>
-                  <span>{info?.ytdlp ? "Installés et tenus à jour automatiquement." : "Installés automatiquement au premier import (environ 40 Mo)."}</span>
+                  <strong>{t("Composants vidéo", "Video components")}</strong>
+                  <span>
+                    {info?.ytdlp
+                      ? t("Installés et tenus à jour automatiquement.", "Installed and kept up to date automatically.")
+                      : t("Installés automatiquement au premier import (environ 40 Mo).", "Installed automatically on the first import (about 40 MB).")}
+                  </span>
                 </div>
                 <span className={`dot ${info?.ytdlp ? "ok" : ""}`} />
               </div>
@@ -381,20 +438,20 @@ export function Settings() {
           <LingqSection />
 
           <section className="set-section">
-            <h2>Apparence</h2>
+            <h2>{t("Apparence", "Appearance")}</h2>
             <div className="set-card">
               <div className="set-row">
                 <div className="grow">
-                  <strong>Thème</strong>
+                  <strong>{t("Thème", "Theme")}</strong>
                 </div>
                 <Segmented
                   id="theme"
                   value={settings.theme}
                   onChange={(v) => setSetting("theme", v)}
                   options={[
-                    { value: "system", label: "Système" },
-                    { value: "light", label: "Clair" },
-                    { value: "dark", label: "Sombre" },
+                    { value: "system", label: t("Système", "System") },
+                    { value: "light", label: t("Clair", "Light") },
+                    { value: "dark", label: t("Sombre", "Dark") },
                   ]}
                 />
               </div>
@@ -402,69 +459,72 @@ export function Settings() {
           </section>
 
           <section className="set-section">
-            <h2>À propos</h2>
+            <h2>{t("À propos", "About")}</h2>
             <div className="set-card">
               <div className="set-row">
                 <div className="grow">
                   <strong>Lumen {info?.version}</strong>
-                  <span>Données : {info?.data_dir}</span>
+                  <span>{t(`Données : ${info?.data_dir ?? ""}`, `Data: ${info?.data_dir ?? ""}`)}</span>
                 </div>
                 {isTauri && info && (
                   <button
                     className="btn sm soft"
                     onClick={() => import("@tauri-apps/plugin-opener").then((o) => o.revealItemInDir(info.data_dir + "/lumen.db"))}
                   >
-                    Ouvrir le dossier
+                    {t("Ouvrir le dossier", "Open the folder")}
                   </button>
                 )}
               </div>
               <div className="set-row">
                 <div className="grow">
-                  <strong>Mises à jour</strong>
+                  <strong>{t("Mises à jour", "Updates")}</strong>
                   <span>
                     {upd.phase === "checking"
-                      ? "Recherche en cours…"
+                      ? t("Recherche en cours…", "Checking…")
                       : upd.phase === "uptodate"
-                        ? "Lumen est à jour."
+                        ? t("Lumen est à jour.", "Lumen is up to date.")
                         : upd.phase === "available"
-                          ? `La version ${upd.version} est disponible.`
+                          ? t(`La version ${upd.version} est disponible.`, `Version ${upd.version} is available.`)
                           : upd.phase === "downloading"
-                            ? `Téléchargement… ${Math.round(upd.progress * 100)} %`
+                            ? t(`Téléchargement… ${Math.round(upd.progress * 100)} %`, `Downloading… ${Math.round(upd.progress * 100)}%`)
                             : upd.phase === "ready"
-                              ? "Installée : redémarrez Lumen pour l'utiliser."
+                              ? t("Installée : redémarrez Lumen pour l'utiliser.", "Installed: restart Lumen to use it.")
                               : upd.phase === "error"
-                                ? `Impossible de vérifier : ${upd.error}`
-                                : "Lumen vérifie automatiquement au démarrage et toutes les six heures."}
+                                ? t(`Impossible de vérifier : ${upd.error}`, `Couldn't check: ${upd.error}`)
+                                : t("Lumen vérifie automatiquement au démarrage et toutes les six heures.", "Lumen checks automatically at launch and every six hours.")}
                   </span>
                 </div>
                 {upd.phase === "available" ? (
                   <button className="btn sm primary" onClick={upd.install}>
-                    Mettre à jour
+                    {t("Mettre à jour", "Update")}
                   </button>
                 ) : upd.phase === "ready" ? (
                   <button className="btn sm primary" onClick={upd.restart}>
-                    Redémarrer
+                    {t("Redémarrer", "Restart")}
                   </button>
                 ) : (
                   <button className="btn sm soft" onClick={() => upd.check(true)} disabled={upd.phase === "checking" || upd.phase === "downloading"}>
-                    Rechercher
+                    {t("Rechercher", "Check")}
                   </button>
                 )}
               </div>
               <div className="set-row">
                 <div className="grow">
-                  <strong>Écran d'accueil</strong>
-                  <span>Revoir l'aube de Lumen. Vos leçons et votre vocabulaire restent intacts.</span>
+                  <strong>{t("Écran d'accueil", "Welcome screen")}</strong>
+                  <span>{t("Revoir l'aube de Lumen. Vos leçons et votre vocabulaire restent intacts.", "See Lumen's dawn again. Your lessons and vocabulary stay intact.")}</span>
                 </div>
                 <button className="btn sm soft" onClick={() => useApp.getState().setReplay(true)}>
-                  Revoir l'accueil
+                  {t("Revoir l'accueil", "Replay the welcome")}
                 </button>
               </div>
               <div className="set-row">
                 <div className="grow">
-                  <strong>Crédits</strong>
+                  <strong>{t("Crédits", "Credits")}</strong>
                   <span>
-                    Dictionnaires : Wiktionnaire via kaikki.org (CC BY-SA 4.0). Traduction : Qwen3.5 (Apache 2.0) par llama.cpp (MIT). Transcription : Qwen3-ASR (Apache 2.0) par llama.cpp et Whisper (MIT) par whisper.cpp. Polices : Literata, Newsreader, Geist (OFL).
+                    {t(
+                      "Dictionnaires : Wiktionnaire via kaikki.org (CC BY-SA 4.0). Traduction : Qwen3.5 (Apache 2.0) par llama.cpp (MIT). Transcription : Qwen3-ASR (Apache 2.0) par llama.cpp et Whisper (MIT) par whisper.cpp. Polices : Literata, Newsreader, Geist (OFL).",
+                      "Dictionaries: Wiktionary via kaikki.org (CC BY-SA 4.0). Translation: Qwen3.5 (Apache 2.0) with llama.cpp (MIT). Transcription: Qwen3-ASR (Apache 2.0) with llama.cpp, and Whisper (MIT) with whisper.cpp. Fonts: Literata, Newsreader, Geist (OFL).",
+                    )}
                   </span>
                 </div>
               </div>

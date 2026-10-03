@@ -11,3 +11,4 @@ Distribution
 compilation*.log
 publication.log
 public
+src-tauri/resources/dicts-en

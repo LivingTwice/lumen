@@ -2,6 +2,7 @@ import { AnimatePresence, motion } from "motion/react";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { useApp } from "../lib/store";
 import { Icon } from "./Icon";
+import { formatNumber, t } from "../lib/i18n";
 
 export function Orb({ size = 22 }: { size?: number }) {
   return <span className="orb" style={{ width: size, height: size, ["--s" as string]: `${size}px` }} aria-hidden="true" />;
@@ -110,7 +111,7 @@ export function Sheet({
           >
             <div className="sheet-head">
               <h2>{title}</h2>
-              <button className="icon-btn" onClick={onClose} aria-label="Fermer">
+              <button className="icon-btn" onClick={onClose} aria-label={t("Fermer", "Close")}>
                 <Icon name="close" />
               </button>
             </div>
@@ -203,5 +204,5 @@ export function CountUp({ value, duration = 900 }: { value: number; duration?: n
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
   }, [value, duration]);
-  return <>{shown.toLocaleString("fr-FR")}</>;
+  return <>{formatNumber(shown)}</>;
 }

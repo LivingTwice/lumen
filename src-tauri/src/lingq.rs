@@ -33,7 +33,7 @@ struct BadKey;
 
 impl std::fmt::Display for BadKey {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("LingQ refuse cette clé API. Vérifiez-la sur lingq.com puis collez-la à nouveau.")
+        f.write_str(crate::i18n::t("LingQ refuse cette clé API. Vérifiez-la sur lingq.com puis collez-la à nouveau.", "LingQ refuses this API key. Check it on lingq.com, then paste it again."))
     }
 }
 
@@ -56,7 +56,7 @@ impl Client {
     fn new(key: &str) -> Result<Self> {
         let key = key.trim().trim_start_matches("Token ").trim().to_string();
         if key.is_empty() {
-            bail!("Collez d'abord votre clé API LingQ.");
+            bail!(crate::i18n::t("Collez d'abord votre clé API LingQ.", "Paste your LingQ API key first."));
         }
         let http = reqwest::Client::builder()
             .user_agent("Lumen (lecteur pour apprendre les langues)")
@@ -69,7 +69,7 @@ impl Client {
     /// GET sur l'API. Patiente et réessaie si LingQ est surchargé ou si une
     /// leçon est en cours de préparation de son côté.
     async fn get(&self, path: &str) -> Result<Fetched> {
-        const OFFLINE: &str = "LingQ est injoignable. Vérifiez votre connexion à Internet.";
+        let offline_msg = crate::i18n::t("LingQ est injoignable. Vérifiez votre connexion à Internet.", "LingQ can't be reached. Check your Internet connection.");
         let url = format!("{API}/{path}");
         let mut wait = 2;
         let mut offline = false;
@@ -91,7 +91,7 @@ impl Client {
                     offline = true;
                     continue;
                 }
-                Err(_) => bail!(OFFLINE),
+                Err(_) => bail!(offline_msg),
             };
             offline = false;
             let status = resp.status().as_u16();
@@ -100,20 +100,20 @@ impl Client {
                 200..=299 => {
                     return serde_json::from_slice(&body)
                         .map(Fetched::Ok)
-                        .map_err(|_| anyhow!("LingQ a renvoyé une réponse illisible."))
+                        .map_err(|_| anyhow!(crate::i18n::t("LingQ a renvoyé une réponse illisible.", "LingQ sent back an unreadable answer.")))
                 }
                 401 => return Err(BadKey.into()),
                 403 => return Ok(Fetched::Denied),
                 404 => return Ok(Fetched::Missing),
                 409 | 423 | 429 | 500..=599 => continue,
                 _ if String::from_utf8_lossy(&body).contains("locked") => continue,
-                _ => bail!("LingQ a répondu par une erreur ({status})."),
+                _ => bail!(crate::tr!("LingQ a répondu par une erreur ({status}).", "LingQ answered with an error ({status}).")),
             }
         }
         if offline {
-            bail!(OFFLINE);
+            bail!(offline_msg);
         }
-        bail!("LingQ est surchargé pour le moment. Réessayez dans quelques minutes.")
+        bail!(crate::i18n::t("LingQ est surchargé pour le moment. Réessayez dans quelques minutes.", "LingQ is overloaded right now. Try again in a few minutes."))
     }
 
     /// Parcourt une liste paginée de LingQ (`results`, `next`, `count`).
@@ -169,7 +169,7 @@ impl Client {
                     continue;
                 }
                 let lessons = int_field(it, &["lessonsCount", "lessons_count"]).unwrap_or(-1);
-                out.push(Course { id, title: str_field(it, &["title"]).unwrap_or_else(|| "Cours LingQ".into()), lessons });
+                out.push(Course { id, title: str_field(it, &["title"]).unwrap_or_else(|| crate::i18n::t("Cours LingQ", "LingQ course").into()), lessons });
             }
         };
         self.each_page(&format!("v3/{lang}/collections/my/"), 100, &never, |items, _| {
@@ -220,7 +220,7 @@ impl Client {
         }
         let resp = req.send().await?;
         if !resp.status().is_success() {
-            bail!("audio indisponible ({})", resp.status());
+            bail!(crate::tr!("audio indisponible ({})", "audio unavailable ({})", resp.status()));
         }
         let mut file = tokio::fs::File::create(&path).await?;
         let mut stream = resp.bytes_stream();
@@ -581,17 +581,17 @@ async fn import_lesson(
 ) -> Result<(String, bool)> {
     let lesson = match c.get(&format!("v3/{lang}/lessons/{id}/")).await? {
         Fetched::Ok(v) => v,
-        Fetched::Missing => bail!("leçon introuvable"),
-        Fetched::Denied => bail!("leçon réservée"),
+        Fetched::Missing => bail!(crate::i18n::t("leçon introuvable", "lesson not found")),
+        Fetched::Denied => bail!(crate::i18n::t("leçon réservée", "restricted lesson")),
     };
-    let title = str_field(&lesson, &["title"]).unwrap_or_else(|| "Leçon LingQ".into());
+    let title = str_field(&lesson, &["title"]).unwrap_or_else(|| crate::i18n::t("Leçon LingQ", "LingQ lesson").into());
     let (mut text, mut timings) = lesson_text(&lesson, lang);
     if text.trim().is_empty() {
         text = sentences_text(c, lang, id).await?;
         timings = None;
     }
     if text.trim().is_empty() {
-        bail!("leçon vide");
+        bail!(crate::i18n::t("leçon vide", "empty lesson"));
     }
 
     let audio_url = str_field(&lesson, &["audioUrl", "audio"]);

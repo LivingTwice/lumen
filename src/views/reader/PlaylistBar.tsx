@@ -5,6 +5,7 @@ import { Icon } from "../../components/Icon";
 import { api } from "../../lib/api";
 import { useApp } from "../../lib/store";
 import type { Lesson, LessonSummary, Playlist } from "../../lib/types";
+import { t } from "../../lib/i18n";
 
 /**
  * Playlist suivie par la leçon ouverte, relue à chaque changement. Une
@@ -57,17 +58,17 @@ export function PlaylistStrip({ pl, lessonId, playing }: { pl: Playlist; lessonI
   const go = (id: number) => openLesson(id, { playlist: pl.id, autoplay: playing() });
   return (
     <motion.div className="pl-strip no-drag" initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.25 }}>
-      <button className="icon-btn" onClick={() => prev && go(prev)} disabled={!prev} aria-label="Leçon précédente de la playlist" title="Leçon précédente">
+      <button className="icon-btn" onClick={() => prev && go(prev)} disabled={!prev} aria-label={t("Leçon précédente de la playlist", "Previous lesson in the playlist")} title={t("Leçon précédente", "Previous lesson")}>
         <Icon name="left" size={16} />
       </button>
-      <button className="pl-strip-name" onClick={() => openPlaylist(pl.id)} title="Ouvrir la playlist">
+      <button className="pl-strip-name" onClick={() => openPlaylist(pl.id)} title={t("Ouvrir la playlist", "Open the playlist")}>
         <Icon name="playlist" size={14} />
         <span className="name">{pl.name}</span>
         <span className="num pos">
           {i + 1} / {pl.lessons.length}
         </span>
       </button>
-      <button className="icon-btn" onClick={() => next && go(next)} disabled={!next} aria-label="Leçon suivante de la playlist" title="Leçon suivante">
+      <button className="icon-btn" onClick={() => next && go(next)} disabled={!next} aria-label={t("Leçon suivante de la playlist", "Next lesson in the playlist")} title={t("Leçon suivante", "Next lesson")}>
         <Icon name="right" size={16} />
       </button>
     </motion.div>
@@ -110,10 +111,10 @@ export function UpNext({ next, onGo, onCancel }: { next: LessonSummary; onGo(): 
         <Cover lesson={next} bare />
       </span>
       <span className="up-body">
-        <span className="eyebrow num">Ensuite, dans {left} s</span>
+        <span className="eyebrow num">{t(`Ensuite, dans ${left} s`, `Up next, in ${left} s`)}</span>
         <strong>{next.title}</strong>
       </span>
-      <button className="up-go" onClick={onGo} aria-label={`Lire maintenant : ${next.title}`} title="Lire maintenant">
+      <button className="up-go" onClick={onGo} aria-label={t(`Lire maintenant : ${next.title}`, `Play now: ${next.title}`)} title={t("Lire maintenant", "Play now")}>
         <svg className="up-ring" viewBox="0 0 48 48" aria-hidden="true">
           <circle cx="24" cy="24" r={r} className="ring-bg" />
           <motion.circle
@@ -128,7 +129,7 @@ export function UpNext({ next, onGo, onCancel }: { next: LessonSummary; onGo(): 
         </svg>
         <Icon name="play" size={16} />
       </button>
-      <button className="icon-btn" onClick={onCancel} aria-label="Rester sur cette leçon" title="Rester sur cette leçon">
+      <button className="icon-btn" onClick={onCancel} aria-label={t("Rester sur cette leçon", "Stay on this lesson")} title={t("Rester sur cette leçon", "Stay on this lesson")}>
         <Icon name="close" size={16} />
       </button>
     </motion.div>

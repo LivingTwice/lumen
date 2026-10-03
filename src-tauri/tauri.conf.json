@@ -54,7 +54,7 @@
       "dmg"
     ],
     "category": "Education",
-    "shortDescription": "Apprendre les langues en lisant et en écoutant",
+    "shortDescription": "Learn languages by reading and listening",
     "copyright": "© 2026 Ulysse Rives",
     "icon": [
       "icons/32x32.png",
@@ -64,7 +64,9 @@
       "icons/icon.ico"
     ],
     "resources": {
-      "resources/dicts/*": "dicts/"
+      "resources/dicts/*": "dicts/",
+      "locales/en.lproj/InfoPlist.strings": "en.lproj/InfoPlist.strings",
+      "locales/fr.lproj/InfoPlist.strings": "fr.lproj/InfoPlist.strings"
     },
     "externalBin": [
       "binaries/lumen-whisper"

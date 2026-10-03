@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { Icon } from "../../components/Icon";
 import { api, errorText, isNoModel } from "../../lib/api";
 import { askAbout } from "../../lib/chat";
+import { t } from "../../lib/i18n";
 import { preparePronunciation, pronounce } from "../../lib/pronounce";
 import { useApp } from "../../lib/store";
 import type { DictResult, LangCode, Status, Term } from "../../lib/types";
@@ -31,11 +32,11 @@ export const EXPR_MAX_WORDS = 8;
 /** Jusqu'à 5 mots, l'IA donne le sens en contexte ; au-delà, elle traduit le passage entier. */
 const SENSE_MAX_WORDS = 5;
 
-const STATUS_OPTS: { s: Status; label: string; sw: string }[] = [
+const statusOpts = (): { s: Status; label: string; sw: string }[] => [
   { s: 1, label: "1", sw: "var(--w-l1)" },
   { s: 2, label: "2", sw: "var(--w-l2)" },
   { s: 3, label: "3", sw: "var(--w-l3)" },
-  { s: 4, label: "Connu", sw: "var(--ok)" },
+  { s: 4, label: t("Connu", "Known"), sw: "var(--ok)" },
 ];
 
 interface Props {
@@ -114,8 +115,9 @@ export function WordPanel({ lang, sel, term, onStatus, onTranslation, onSelectPh
         const res = await api().aiWord(lang, sel.surface, sel.sentence, (piece) => {
           if (id !== reqId.current) return;
           raw += piece;
-          const line = raw.split("\n").find((l) => /^\s*sens/i.test(l)) ?? raw.split("\n")[0];
-          setAi(line.replace(/^\s*sens\s*[:：]\s*/i, ""));
+          // « Sens : … » (français) ou « Meaning: … » (anglais)
+          const line = raw.split("\n").find((l) => /^\s*(sens|meaning)/i.test(l)) ?? raw.split("\n")[0];
+          setAi(line.replace(/^\s*(sens|meaning)\s*[:：]\s*/i, ""));
           setAiState("stream");
         });
         if (id !== reqId.current) return;
@@ -164,70 +166,73 @@ export function WordPanel({ lang, sel, term, onStatus, onTranslation, onSelectPh
 
   if (!sel) {
     return (
-      <div className="wp-pane" aria-label="Détail du mot">
+      <div className="wp-pane" aria-label={t("Détail du mot", "Word details")}>
         <div className="wp-scroll">
           <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} style={{ display: "flex", flexDirection: "column", gap: 10, paddingTop: 6 }}>
             <h2 className="display" style={{ fontSize: 28 }}>
-              Touchez un mot
+              {t("Touchez un mot", "Tap a word")}
             </h2>
             <p className="muted" style={{ lineHeight: 1.55 }}>
-              Sa traduction dans cette phrase précise s'affiche ici, calculée sur votre Mac. Glissez sur plusieurs mots pour traduire tout un passage ou créer une expression.
+              {t(
+                "Sa traduction dans cette phrase précise s'affiche ici, calculée sur votre Mac. Glissez sur plusieurs mots pour traduire tout un passage ou créer une expression.",
+                "Its translation in this exact sentence appears here, computed on your Mac. Drag across several words to translate a whole passage or create a phrase.",
+              )}
             </p>
           </motion.div>
           <div className="wp-block" style={{ marginTop: "auto" }}>
-            <span className="eyebrow">Légende</span>
+            <span className="eyebrow">{t("Légende", "Legend")}</span>
             <div className="wp-legend">
               <div>
                 <span className="sw" style={{ background: "var(--w-new)" }} />
-                Nouveau
+                {t("Nouveau", "New")}
               </div>
               <div>
                 <span className="sw" style={{ background: "linear-gradient(90deg, var(--w-l1), var(--w-l3))" }} />
-                En apprentissage (1 à 3)
+                {t("En apprentissage (1 à 3)", "Learning (1 to 3)")}
               </div>
               <div>
                 <span className="sw" style={{ boxShadow: "inset 0 0 0 1px var(--border-strong)" }} />
-                Connu
+                {t("Connu", "Known")}
               </div>
             </div>
           </div>
           <div className="wp-block">
-            <span className="eyebrow">Raccourcis</span>
+            <span className="eyebrow">{t("Raccourcis", "Shortcuts")}</span>
             <div className="shortcuts">
               <span>
                 <span className="kbd">←</span>
                 <span className="kbd">→</span>
               </span>
-              <span>Mot précédent, suivant</span>
+              <span>{t("Mot précédent, suivant", "Previous, next word")}</span>
               <span>
-                <span className="kbd">Maj</span>
+                <span className="kbd">{t("Maj", "Shift")}</span>
                 <span className="kbd">←</span>
                 <span className="kbd">→</span>
               </span>
-              <span>Étendre la sélection</span>
+              <span>{t("Étendre la sélection", "Extend the selection")}</span>
               <span>
                 <span className="kbd">1</span>
                 <span className="kbd">2</span>
                 <span className="kbd">3</span>
                 <span className="kbd">K</span>
               </span>
-              <span>Statut du mot (K : connu)</span>
+              <span>{t("Statut du mot (K : connu)", "Word status (K: known)")}</span>
               <span>
                 <span className="kbd">X</span>
               </span>
-              <span>Ignorer (nom propre…)</span>
+              <span>{t("Ignorer (nom propre…)", "Ignore (proper name…)")}</span>
               <span>
-                <span className="kbd">Espace</span>
+                <span className="kbd">{t("Espace", "Space")}</span>
               </span>
-              <span>Lecture, pause</span>
+              <span>{t("Lecture, pause", "Play, pause")}</span>
               <span>
                 <span className="kbd">↵</span>
               </span>
-              <span>Terminer la page</span>
+              <span>{t("Terminer la page", "Finish the page")}</span>
               <span>
                 <span className="kbd">C</span>
               </span>
-              <span>Discuter de la leçon</span>
+              <span>{t("Discuter de la leçon", "Chat about the lesson")}</span>
             </div>
           </div>
         </div>
@@ -241,10 +246,16 @@ export function WordPanel({ lang, sel, term, onStatus, onTranslation, onSelectPh
   const firstIpa = entries.find((e) => e.ipa)?.ipa;
   const firstPos = entries[0]?.pos;
   const statusLabel =
-    status === 0 ? "Nouveau" : status === 4 ? "Connu" : status === 5 ? "Ignoré" : `En apprentissage · niveau ${status}`;
+    status === 0
+      ? t("Nouveau", "New")
+      : status === 4
+        ? t("Connu", "Known")
+        : status === 5
+          ? t("Ignoré", "Ignored")
+          : t(`En apprentissage · niveau ${status}`, `Learning · level ${status}`);
 
   return (
-    <div className="wp-pane" aria-label="Détail du mot">
+    <div className="wp-pane" aria-label={t("Détail du mot", "Word details")}>
       <AnimatePresence mode="wait">
         <motion.div
           key={key}
@@ -260,21 +271,21 @@ export function WordPanel({ lang, sel, term, onStatus, onTranslation, onSelectPh
                 {sel.surface}
               </h2>
               <div style={{ display: "flex", gap: 2 }}>
-                <button className="icon-btn" onClick={() => void pronounce(sel.surface, lang, settings[`voice_${lang}`])} aria-label="Prononcer">
+                <button className="icon-btn" onClick={() => void pronounce(sel.surface, lang, settings[`voice_${lang}`])} aria-label={t("Prononcer", "Pronounce")}>
                   <Icon name="speaker" size={18} />
                 </button>
-                <button className="icon-btn" onClick={onClose} aria-label="Fermer">
+                <button className="icon-btn" onClick={onClose} aria-label={t("Fermer", "Close")}>
                   <Icon name="close" size={16} />
                 </button>
               </div>
             </div>
             <div className="wp-sub">
-              {sel.isPhrase && <span className="chip">{term ? "Expression" : `${sel.words} mots sélectionnés`}</span>}
+              {sel.isPhrase && <span className="chip">{term ? t("Expression", "Phrase") : t(`${sel.words} mots sélectionnés`, `${sel.words} words selected`)}</span>}
               {firstIpa && <span className="ipa">/{firstIpa}/</span>}
               {firstPos && <span>{firstPos}</span>}
               {lemma && (
                 <span>
-                  forme de <b>{lemma}</b>
+                  {t("forme de", "form of")} <b>{lemma}</b>
                 </span>
               )}
             </div>
@@ -282,21 +293,26 @@ export function WordPanel({ lang, sel, term, onStatus, onTranslation, onSelectPh
           </div>
 
           {sel.phrase && (
-            <button className="wp-expr" onClick={() => onSelectPhrase(sel.phrase!.a, sel.phrase!.b)} title="Ouvrir l'expression">
-              <span className="eyebrow">Fait partie de l'expression</span>
+            <button className="wp-expr" onClick={() => onSelectPhrase(sel.phrase!.a, sel.phrase!.b)} title={t("Ouvrir l'expression", "Open the phrase")}>
+              <span className="eyebrow">{t("Fait partie de l'expression", "Part of the phrase")}</span>
               <strong>{sel.phrase.surface}</strong>
               {sel.phrase.translation && <span className="wp-expr-tr">{sel.phrase.translation}</span>}
             </button>
           )}
 
           <div className="wp-block">
-            <span className="eyebrow">{sel.words > SENSE_MAX_WORDS ? "Traduction" : "Dans cette phrase"}</span>
+            <span className="eyebrow">{sel.words > SENSE_MAX_WORDS ? t("Traduction", "Translation") : t("Dans cette phrase", "In this sentence")}</span>
             {aiState === "nomodel" ? (
               <div className="wp-note" style={{ display: "flex", flexDirection: "column", gap: 10, alignItems: "flex-start" }}>
-                {llmDownloading ? "Le modèle de traduction se télécharge. La traduction en contexte apparaîtra ici dès qu'il sera prêt." : "La traduction en contexte demande un modèle d'IA locale."}
+                {llmDownloading
+                  ? t(
+                      "Le modèle de traduction se télécharge. La traduction en contexte apparaîtra ici dès qu'il sera prêt.",
+                      "The translation model is downloading. The translation in context will appear here as soon as it's ready.",
+                    )
+                  : t("La traduction en contexte demande un modèle d'IA locale.", "Translation in context needs a local AI model.")}
                 {!llmDownloading && (
                   <button className="btn sm soft" onClick={() => go("settings")}>
-                    Installer un modèle
+                    {t("Installer un modèle", "Install a model")}
                   </button>
                 )}
               </div>
@@ -305,7 +321,11 @@ export function WordPanel({ lang, sel, term, onStatus, onTranslation, onSelectPh
             ) : aiState === "loading" ? (
               <>
                 <div className="skeleton" style={{ height: 28, width: "60%" }} />
-                {slow && <span className="muted" style={{ fontSize: 12.5 }}>L'IA locale s'éveille… La toute première fois, cela prend quelques secondes.</span>}
+                {slow && (
+                  <span className="muted" style={{ fontSize: 12.5 }}>
+                    {t("L'IA locale s'éveille… La toute première fois, cela prend quelques secondes.", "The local AI is waking up… The very first time, it takes a few seconds.")}
+                  </span>
+                )}
               </>
             ) : (
               <div className={`wp-ai ${aiState === "stream" ? "stream" : ""} ${sel.words > SENSE_MAX_WORDS ? "passage" : ""}`}>{ai || "—"}</div>
@@ -319,10 +339,10 @@ export function WordPanel({ lang, sel, term, onStatus, onTranslation, onSelectPh
                   const sense = aiState === "done" && ai && sel.words <= SENSE_MAX_WORDS ? ai : "";
                   onAsk(askAbout(sel.surface, sel.sentence, sel.words > SENSE_MAX_WORDS, sense));
                 }}
-                title="Le chat explique le sens, la grammaire et donne des exemples"
+                title={t("Le chat explique le sens, la grammaire et donne des exemples", "The chat explains the meaning and the grammar, and gives examples")}
               >
                 <Icon name="chat" size={15} />
-                <span>{sel.words > SENSE_MAX_WORDS ? "Expliquer ce passage" : "Demander au chat"}</span>
+                <span>{sel.words > SENSE_MAX_WORDS ? t("Expliquer ce passage", "Explain this passage") : t("Demander au chat", "Ask the chat")}</span>
                 <Icon name="forward" size={13} className="wp-ask-go" />
               </button>
             )}
@@ -333,21 +353,33 @@ export function WordPanel({ lang, sel, term, onStatus, onTranslation, onSelectPh
             (sel.words <= EXPR_MAX_WORDS ? (
               <div className="wp-block">
                 <button className="btn primary glow" style={{ alignSelf: "flex-start" }} onClick={() => onTranslation(sel.key, mine.trim() || (aiState === "done" ? ai : ""), aiNote, sel.sentence)}>
-                  <Icon name="layers" size={15} /> Créer l'expression
+                  <Icon name="layers" size={15} /> {t("Créer l'expression", "Create the phrase")}
                 </button>
                 <span className="muted" style={{ fontSize: 12.5, lineHeight: 1.5 }}>
-                  Elle sera repérée dans toutes vos leçons, avec son niveau d'apprentissage.
+                  {t("Elle sera repérée dans toutes vos leçons, avec son niveau d'apprentissage.", "It will be spotted in all your lessons, with its learning level.")}
                 </span>
               </div>
             ) : (
               <span className="muted" style={{ fontSize: 12.5, lineHeight: 1.5 }}>
-                Au-delà de {EXPR_MAX_WORDS} mots, la sélection est traduite sans devenir une expression.
+                {t(
+                  `Au-delà de ${EXPR_MAX_WORDS} mots, la sélection est traduite sans devenir une expression.`,
+                  `Beyond ${EXPR_MAX_WORDS} words, the selection is translated without becoming a phrase.`,
+                )}
               </span>
             ))}
 
+          {dict?.pending && (
+            <div className="wp-block">
+              <span className="eyebrow">{t("Dictionnaire", "Dictionary")}</span>
+              <span className="muted shimmer" style={{ fontSize: 12.5 }}>
+                {t("Téléchargement du dictionnaire…", "Downloading the dictionary… it will be ready in a moment.")}
+              </span>
+            </div>
+          )}
+
           {entries.length > 0 && (
             <div className="wp-block">
-              <span className="eyebrow">Dictionnaire</span>
+              <span className="eyebrow">{t("Dictionnaire", "Dictionary")}</span>
               <div className="wp-gloss">
                 {entries.slice(0, 2).map((e, i) => (
                   <div key={i}>
@@ -357,7 +389,7 @@ export function WordPanel({ lang, sel, term, onStatus, onTranslation, onSelectPh
                       </div>
                     )}
                     {e.glosses.slice(0, 3).map((g, j) => (
-                      <button key={j} onClick={() => (setMine(g), onTranslation(sel.key, g, term?.note ?? aiNote, sel.sentence))} title="Utiliser comme ma traduction">
+                      <button key={j} onClick={() => (setMine(g), onTranslation(sel.key, g, term?.note ?? aiNote, sel.sentence))} title={t("Utiliser comme ma traduction", "Use as my translation")}>
                         <span className="n">{j + 1}</span>
                         <span>{g}</span>
                       </button>
@@ -372,13 +404,13 @@ export function WordPanel({ lang, sel, term, onStatus, onTranslation, onSelectPh
             <>
             <div className="wp-block">
               <label className="eyebrow" htmlFor="wp-mine">
-                Ma traduction
+                {t("Ma traduction", "My translation")}
               </label>
               <input
                 id="wp-mine"
                 className="input"
                 value={mine}
-                placeholder="Ajoutez votre propre sens"
+                placeholder={t("Ajoutez votre propre sens", "Add your own meaning")}
                 onChange={(e) => setMine(e.target.value)}
                 onBlur={saveMine}
                 onKeyDown={(e) => {
@@ -390,13 +422,13 @@ export function WordPanel({ lang, sel, term, onStatus, onTranslation, onSelectPh
 
             <div className="wp-block">
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-                <span className="eyebrow">Statut</span>
+                <span className="eyebrow">{t("Statut", "Status")}</span>
                 <span className="muted" style={{ fontSize: 12 }}>
                   {statusLabel}
                 </span>
               </div>
-              <div className="status-bar" role="radiogroup" aria-label="Statut du mot">
-                {STATUS_OPTS.map((o) => (
+              <div className="status-bar" role="radiogroup" aria-label={t("Statut du mot", "Word status")}>
+                {statusOpts().map((o) => (
                   <button key={o.s} role="radio" aria-checked={status === o.s} className={status === o.s ? "on" : ""} onClick={() => onStatus(sel.key, o.s)}>
                     {status === o.s && <motion.span layoutId="st-pill" className="st-pill" transition={{ type: "spring", stiffness: 500, damping: 36 }} />}
                     <span className="sw" style={{ background: o.sw }} />
@@ -406,11 +438,11 @@ export function WordPanel({ lang, sel, term, onStatus, onTranslation, onSelectPh
               </div>
               <div style={{ display: "flex", gap: 6 }}>
                 <button className="btn sm ghost" onClick={() => onStatus(sel.key, 5)}>
-                  <Icon name="ban" size={14} /> Ignorer
+                  <Icon name="ban" size={14} /> {t("Ignorer", "Ignore")}
                 </button>
                 {status !== 0 && (
                   <button className="btn sm ghost" onClick={() => onStatus(sel.key, 0)}>
-                    Redevenir nouveau
+                    {t("Redevenir nouveau", "Make new again")}
                   </button>
                 )}
               </div>
@@ -421,7 +453,7 @@ export function WordPanel({ lang, sel, term, onStatus, onTranslation, onSelectPh
       </AnimatePresence>
       <div className="wp-foot">
         <span className="dot ok" />
-        {aiState === "nomodel" ? "Dictionnaire hors ligne" : "Traduit sur votre Mac · aucune donnée envoyée"}
+        {aiState === "nomodel" ? t("Dictionnaire hors ligne", "Offline dictionary") : t("Traduit sur votre Mac · aucune donnée envoyée", "Translated on your Mac · no data sent")}
       </div>
     </div>
   );

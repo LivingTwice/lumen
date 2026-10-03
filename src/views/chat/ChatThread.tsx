@@ -4,8 +4,9 @@ import { Icon } from "../../components/Icon";
 import { Markdown, frenchSpaces, plainText } from "../../components/Markdown";
 import { Orb } from "../../components/ui";
 import { api } from "../../lib/api";
-import { EFFORTS, attachedLesson, langWithArticle, suggestions, useChat, type LessonRef, type Pending } from "../../lib/chat";
-import { langInfo } from "../../lib/langs";
+import { attachedLesson, efforts, langWithArticle, suggestions, useChat, type LessonRef, type Pending } from "../../lib/chat";
+import { count, t } from "../../lib/i18n";
+import { inLang } from "../../lib/langs";
 import { useApp } from "../../lib/store";
 import type { ChatEffort, ChatMessage, LangCode, LessonSummary } from "../../lib/types";
 
@@ -58,7 +59,7 @@ export function ChatThread({ compact = false, lessonNow = null }: { compact?: bo
               <span>{error.text}</span>
               {error.noModel && (
                 <button className="btn sm soft" onClick={() => go("settings")}>
-                  Installer un modèle
+                  {t("Installer un modèle", "Install a model")}
                 </button>
               )}
             </motion.div>
@@ -81,12 +82,18 @@ function Welcome({ lang, lesson, compact }: { lang: LangCode; lesson: LessonRef 
       <div className="chat-dawn" aria-hidden="true">
         <Orb size={compact ? 30 : 42} />
       </div>
-      <h2>{frenchSpaces(lesson ? "Parlons de cette leçon" : "Que voulez-vous comprendre ?")}</h2>
+      <h2>{frenchSpaces(lesson ? t("Parlons de cette leçon", "Let's talk about this lesson") : t("Que voulez-vous comprendre ?", "What would you like to understand?"))}</h2>
       <p>
         {frenchSpaces(
           lesson
-            ? `Lumen a lu « ${lesson.title} ». Demandez le sens d'un mot, une règle de grammaire, un résumé…`
-            : `Posez vos questions sur ${langWithArticle(lang)}, ou écrivez en ${langInfo(lang).name.toLowerCase()} pour vous entraîner : Lumen vous répond et vous corrige.`,
+            ? t(
+                `Lumen a lu « ${lesson.title} ». Demandez le sens d'un mot, une règle de grammaire, un résumé…`,
+                `Lumen has read “${lesson.title}”. Ask for the meaning of a word, a grammar rule, a summary…`,
+              )
+            : t(
+                `Posez vos questions sur ${langWithArticle(lang)}, ou écrivez ${inLang(lang)} pour vous entraîner : Lumen vous répond et vous corrige.`,
+                `Ask your questions about ${langWithArticle(lang)}, or write ${inLang(lang)} to practise: Lumen answers and corrects you.`,
+              ),
         )}
       </p>
       <div className="chat-suggest">
@@ -104,7 +111,7 @@ function Welcome({ lang, lesson, compact }: { lang: LangCode; lesson: LessonRef 
         ))}
       </div>
       <p className="chat-private">
-        <span className="dot ok" /> Calculé sur votre Mac, rien ne quitte votre ordinateur
+        <span className="dot ok" /> {t("Calculé sur votre Mac, rien ne quitte votre ordinateur", "Computed on your Mac, nothing leaves your computer")}
       </p>
     </motion.div>
   );
@@ -144,7 +151,7 @@ function Live({ p, withLesson }: { p: Pending; withLesson: boolean }) {
         {p.phase === "read" && (
           <motion.div className="chat-reading" initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.15 }}>
             <span className="ember" />
-            <span className="shimmer">{withLesson ? "Lumen relit la leçon…" : "Lumen prépare sa réponse…"}</span>
+            <span className="shimmer">{withLesson ? t("Lumen relit la leçon…", "Lumen is rereading the lesson…") : t("Lumen prépare sa réponse…", "Lumen is preparing an answer…")}</span>
           </motion.div>
         )}
         {p.phase !== "read" && p.think && <Thought text={p.thought} secs={p.thoughtSecs} live={p.phase === "think"} since={p.since} />}
@@ -165,7 +172,7 @@ function Thought({ text, secs, live = false, since = 0 }: { text: string; secs: 
       <div className="thought live">
         <div className="thought-head">
           <span className="ember" />
-          <span className="shimmer">Réflexion</span>
+          <span className="shimmer">{t("Réflexion", "Thinking")}</span>
           <Elapsed since={since} />
         </div>
         <div className="thought-box" ref={boxRef}>
@@ -178,7 +185,7 @@ function Thought({ text, secs, live = false, since = 0 }: { text: string; secs: 
     <div className={`thought ${open ? "open" : ""}`}>
       <button className="thought-head" onClick={() => setOpen((o) => !o)} aria-expanded={open}>
         <Icon name="bulb" size={14} />
-        <span>A réfléchi {thinkLength(secs)}</span>
+        <span>{t(`A réfléchi ${thinkLength(secs)}`, `Thought ${thinkLength(secs)}`)}</span>
         <Icon name="chevron" size={14} className="chev" />
       </button>
       <AnimatePresence initial={false}>
@@ -199,10 +206,10 @@ function Thought({ text, secs, live = false, since = 0 }: { text: string; secs: 
 }
 
 function thinkLength(secs: number): string {
-  if (secs < 1) return "un instant";
+  if (secs < 1) return t("un instant", "for a moment");
   const s = Math.round(secs);
-  if (s < 60) return `pendant ${s} s`;
-  return `pendant ${Math.floor(s / 60)} min ${String(s % 60).padStart(2, "0")} s`;
+  if (s < 60) return t(`pendant ${s} s`, `for ${s} s`);
+  return t(`pendant ${Math.floor(s / 60)} min ${String(s % 60).padStart(2, "0")} s`, `for ${Math.floor(s / 60)} min ${String(s % 60).padStart(2, "0")} s`);
 }
 
 /** Secondes écoulées depuis `since`, mises à jour en direct. */
@@ -224,13 +231,13 @@ function CopyButton({ text }: { text: string }) {
       setDone(true);
       window.setTimeout(() => setDone(false), 1400);
     } catch {
-      toast("La copie n'a pas pu se faire.", "error");
+      toast(t("La copie n'a pas pu se faire.", "Couldn't copy."), "error");
     }
   };
   return (
-    <button className="msg-action" onClick={copy} aria-label="Copier la réponse" title="Copier la réponse">
+    <button className="msg-action" onClick={copy} aria-label={t("Copier la réponse", "Copy the answer")} title={t("Copier la réponse", "Copy the answer")}>
       <Icon name={done ? "check" : "copy"} size={14} />
-      {done ? "Copié" : "Copier"}
+      {done ? t("Copié", "Copied") : t("Copier", "Copy")}
     </button>
   );
 }
@@ -277,14 +284,18 @@ function Composer({ compact, lang, lesson, lessonNow }: { compact: boolean; lang
   const toggleThink = () => void setSetting("chat_think", think ? "0" : "1");
   const commands: Command[] = [
     {
-      name: "/leçon",
-      hint: lessonNow ? `Joindre « ${lessonNow.title} »` : "Joindre une leçon de votre bibliothèque",
+      name: t("/leçon", "/lesson"),
+      hint: lessonNow ? t(`Joindre « ${lessonNow.title} »`, `Attach “${lessonNow.title}”`) : t("Joindre une leçon de votre bibliothèque", "Attach a lesson from your library"),
       run: () => (lessonNow ? void attach(lessonNow) : setPicker(true)),
     },
-    { name: "/nouveau", hint: "Commencer une nouvelle conversation", run: () => fresh(lessonNow && compact ? lessonNow : null) },
-    { name: "/réflexion", hint: think ? "Couper la réflexion" : "Laisser l'IA réfléchir avant de répondre", run: toggleThink },
+    { name: t("/nouveau", "/new"), hint: t("Commencer une nouvelle conversation", "Start a new conversation"), run: () => fresh(lessonNow && compact ? lessonNow : null) },
+    {
+      name: t("/réflexion", "/think"),
+      hint: think ? t("Couper la réflexion", "Turn thinking off") : t("Laisser l'IA réfléchir avant de répondre", "Let the AI think before answering"),
+      run: toggleThink,
+    },
   ];
-  if (lesson) commands.splice(1, 0, { name: "/sans-leçon", hint: "Retirer la leçon de la conversation", run: () => void attach(null) });
+  if (lesson) commands.splice(1, 0, { name: t("/sans-leçon", "/no-lesson"), hint: t("Retirer la leçon de la conversation", "Remove the lesson from the conversation"), run: () => void attach(null) });
   const typed = draft.trimStart();
   const query = typed.startsWith("/") && !/\s/.test(typed) ? fold(typed) : null;
   const matches = query !== null ? commands.filter((c) => fold(c.name).startsWith(query)) : [];
@@ -302,8 +313,11 @@ function Composer({ compact, lang, lesson, lessonNow }: { compact: boolean; lang
     void send(draft);
   };
 
-  const name = langInfo(lang).name.toLowerCase();
-  const placeholder = lesson ? "Un mot, une phrase, la grammaire de la leçon…" : compact ? "Posez votre question…" : `Posez une question, ou écrivez en ${name}…`;
+  const placeholder = lesson
+    ? t("Un mot, une phrase, la grammaire de la leçon…", "A word, a sentence, the grammar of the lesson…")
+    : compact
+      ? t("Posez votre question…", "Ask your question…")
+      : t(`Posez une question, ou écrivez ${inLang(lang)}…`, `Ask a question, or write ${inLang(lang)}…`);
 
   return (
     <div className="composer-wrap">
@@ -333,7 +347,7 @@ function Composer({ compact, lang, lesson, lessonNow }: { compact: boolean; lang
             <span className="lesson-chip" title={lesson.title}>
               <Icon name="book" size={13} />
               <span>{lesson.title}</span>
-              <button onClick={() => void attach(null)} aria-label="Retirer la leçon" title="Retirer la leçon">
+              <button onClick={() => void attach(null)} aria-label={t("Retirer la leçon", "Remove the lesson")} title={t("Retirer la leçon", "Remove the lesson")}>
                 <Icon name="close" size={11} stroke={2} />
               </button>
             </span>
@@ -343,7 +357,7 @@ function Composer({ compact, lang, lesson, lessonNow }: { compact: boolean; lang
               onClose={() => setPicker(false)}
               anchor={
                 <button className="ctx-btn" onClick={() => setPicker((o) => !o)} aria-expanded={picker}>
-                  <Icon name="attach" size={14} /> Joindre une leçon
+                  <Icon name="attach" size={14} /> {t("Joindre une leçon", "Attach a lesson")}
                 </button>
               }
             >
@@ -366,7 +380,7 @@ function Composer({ compact, lang, lesson, lessonNow }: { compact: boolean; lang
           value={draft}
           dir="auto"
           placeholder={placeholder}
-          aria-label="Votre message"
+          aria-label={t("Votre message", "Your message")}
           onChange={(e) => {
             setDraft(e.target.value);
             setPick(-1);
@@ -393,10 +407,13 @@ function Composer({ compact, lang, lesson, lessonNow }: { compact: boolean; lang
             className={`think-toggle ${think ? "on" : ""}`}
             onClick={toggleThink}
             aria-pressed={think}
-            title="Avec la réflexion, l'IA raisonne avant de répondre : plus juste pour les questions difficiles, mais plus lent."
+            title={t(
+              "Avec la réflexion, l'IA raisonne avant de répondre : plus juste pour les questions difficiles, mais plus lent.",
+              "With thinking, the AI reasons before answering: more accurate for difficult questions, but slower.",
+            )}
           >
             <Icon name="bulb" size={14} />
-            Réflexion
+            {t("Réflexion", "Thinking")}
           </button>
           <AnimatePresence initial={false}>
             {think && (
@@ -405,15 +422,15 @@ function Composer({ compact, lang, lesson, lessonNow }: { compact: boolean; lang
                   open={effortMenu}
                   onClose={() => setEffortMenu(false)}
                   anchor={
-                    <button className="effort-btn" onClick={() => setEffortMenu((o) => !o)} aria-expanded={effortMenu} title="Effort : la longueur de la réflexion">
-                      {EFFORTS.find((x) => x.value === effort)?.label ?? "Équilibré"}
+                    <button className="effort-btn" onClick={() => setEffortMenu((o) => !o)} aria-expanded={effortMenu} title={t("Effort : la longueur de la réflexion", "Effort: how long the AI thinks")}>
+                      {efforts().find((x) => x.value === effort)?.label ?? t("Équilibré", "Balanced")}
                       <Icon name="chevron" size={13} />
                     </button>
                   }
                 >
                   <div className="effort-menu" role="menu">
-                    <span className="eyebrow">Effort de réflexion</span>
-                    {EFFORTS.map((x) => (
+                    <span className="eyebrow">{t("Effort de réflexion", "Thinking effort")}</span>
+                    {efforts().map((x) => (
                       <button
                         key={x.value}
                         role="menuitemradio"
@@ -443,17 +460,17 @@ function Composer({ compact, lang, lesson, lessonNow }: { compact: boolean; lang
           </AnimatePresence>
           <span style={{ flex: 1 }} />
           {busy ? (
-            <button className="send stop" onClick={() => void stop()} aria-label="Arrêter la réponse" title="Arrêter la réponse (ce qui est écrit est gardé)">
+            <button className="send stop" onClick={() => void stop()} aria-label={t("Arrêter la réponse", "Stop the answer")} title={t("Arrêter la réponse (ce qui est écrit est gardé)", "Stop the answer (what is written is kept)")}>
               <Icon name="stop" size={13} />
             </button>
           ) : (
-            <button className="send" onClick={submit} disabled={!draft.trim()} aria-label="Envoyer" title="Envoyer (Entrée)">
+            <button className="send" onClick={submit} disabled={!draft.trim()} aria-label={t("Envoyer", "Send")} title={t("Envoyer (Entrée)", "Send (Return)")}>
               <Icon name="send" size={16} stroke={2.2} />
             </button>
           )}
         </div>
       </div>
-      {!compact && <p className="composer-hint">Entrée pour envoyer, Maj + Entrée pour aller à la ligne, / pour les commandes</p>}
+      {!compact && <p className="composer-hint">{t("Entrée pour envoyer, Maj + Entrée pour aller à la ligne, / pour les commandes", "Return to send, Shift + Return for a new line, / for commands")}</p>}
     </div>
   );
 }
@@ -512,18 +529,18 @@ function LessonPicker({ lang, now, onPick }: { lang: LangCode; now: LessonRef | 
   }, [lessons, now]);
   return (
     <div className="lesson-pick" role="menu">
-      <span className="eyebrow">Joindre une leçon</span>
+      <span className="eyebrow">{t("Joindre une leçon", "Attach a lesson")}</span>
       {lessons === null ? (
         <div className="skeleton" style={{ height: 30, margin: "6px 8px" }} />
       ) : shown.length === 0 ? (
-        <p className="muted">Aucune leçon dans cette langue pour l'instant.</p>
+        <p className="muted">{t("Aucune leçon dans cette langue pour l'instant.", "No lessons in this language yet.")}</p>
       ) : (
         shown.map((l) => (
           <button key={l.id} role="menuitem" onClick={() => onPick({ id: l.id, title: l.title })}>
             <Icon name={l.id === now?.id ? "book" : "text"} size={14} />
             <span>
               <strong>{l.title}</strong>
-              <small>{l.id === now?.id ? "Lecture en cours" : l.collection || `${l.word_count.toLocaleString("fr-FR")} mots`}</small>
+              <small>{l.id === now?.id ? t("Lecture en cours", "Now reading") : l.collection || count(l.word_count, "mot", "mots", "word", "words")}</small>
             </span>
           </button>
         ))

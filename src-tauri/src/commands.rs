@@ -17,6 +17,7 @@ use crate::dict::DictResult;
 use crate::lingq;
 use crate::media::{self, ImportEvent};
 use crate::models::{self, DownloadEvent};
+use crate::i18n::{self, t};
 use crate::state::AppState;
 use crate::text;
 
@@ -49,7 +50,7 @@ pub struct AppInfo {
 
 #[tauri::command]
 pub async fn app_info(state: State<'_, AppState>) -> R<AppInfo> {
-    let langs = ["en", "es", "it", "de", "pt", "ru"].iter().filter(|l| state.dicts.available(l)).map(|s| s.to_string()).collect();
+    let langs = state.dicts.langs();
     Ok(AppInfo {
         version: env!("CARGO_PKG_VERSION").to_string(),
         data_dir: state.data_dir.display().to_string(),
@@ -66,8 +67,31 @@ pub async fn settings_get(state: State<'_, AppState>) -> R<HashMap<String, Strin
 }
 
 #[tauri::command]
-pub async fn settings_set(state: State<'_, AppState>, key: String, value: String) -> R<()> {
-    db::setting_set(&state.db.lock(), &key, &value).map_err(err)
+pub async fn settings_set(app: tauri::AppHandle, state: State<'_, AppState>, key: String, value: String) -> R<()> {
+    db::setting_set(&state.db.lock(), &key, &value).map_err(err)?;
+    if key == "ui_lang" {
+        i18n::set(&value);
+    }
+    // interface en anglais : les dictionnaires anglais des langues étudiées arrivent en arrière-plan
+    if key == "ui_lang" || key == "langs" {
+        let langs = db::setting(&state.db.lock(), "langs").unwrap_or_default();
+        for lang in langs.split(',').filter(|l| state.dicts.missing(l)) {
+            fetch_dict(&app, lang);
+        }
+    }
+    Ok(())
+}
+
+/// Télécharge en arrière-plan le dictionnaire anglais d'une langue.
+fn fetch_dict(app: &tauri::AppHandle, lang: &str) {
+    use tauri::Manager;
+    let (app, lang) = (app.clone(), lang.to_string());
+    tauri::async_runtime::spawn(async move {
+        let st = app.state::<AppState>();
+        if st.dicts.fetch_en(&lang).await.is_ok() {
+            let _ = app.emit("dict", &lang);
+        }
+    });
 }
 
 // ---------- leçons ----------
@@ -85,7 +109,7 @@ pub struct OpenedLesson {
 }
 
 #[tauri::command]
-pub async fn lesson_open(state: State<'_, AppState>, id: i64) -> R<OpenedLesson> {
+pub async fn lesson_open(app: tauri::AppHandle, state: State<'_, AppState>, id: i64) -> R<OpenedLesson> {
     let conn = state.db.lock();
     let lesson = db::lesson_get(&conn, id).map_err(err)?;
     let tokens = text::tokenize(&lesson.text, &lesson.lang);
@@ -93,10 +117,11 @@ pub async fn lesson_open(state: State<'_, AppState>, id: i64) -> R<OpenedLesson>
     let terms = db::terms_for_keys(&conn, &lesson.lang, &keys).map_err(err)?;
     let lang = lesson.lang.clone();
     drop(conn);
-    // prépare le dictionnaire en arrière-plan
-    let dicts_ready = state.dicts.available(&lang);
-    if dicts_ready {
+    // prépare le dictionnaire en arrière-plan (ou le télécharge, en anglais)
+    if state.dicts.available(&lang) {
         state.dicts.warm(&lang);
+    } else if state.dicts.missing(&lang) {
+        fetch_dict(&app, &lang);
     }
     Ok(OpenedLesson { lesson, tokens, terms })
 }
@@ -104,7 +129,7 @@ pub async fn lesson_open(state: State<'_, AppState>, id: i64) -> R<OpenedLesson>
 #[tauri::command]
 pub async fn lesson_create(state: State<'_, AppState>, lesson: NewLesson) -> R<i64> {
     if lesson.text.trim().is_empty() {
-        return Err("Le texte est vide.".into());
+        return Err(t("Le texte est vide.", "The text is empty.").into());
     }
     db::lesson_create(&state.db.lock(), &lesson).map_err(err)
 }
@@ -134,13 +159,13 @@ pub async fn lesson_set_cover(state: State<'_, AppState>, id: i64, data: Option<
     let new_path = match data {
         Some(bytes) if !bytes.is_empty() => {
             if bytes.len() > 30_000_000 {
-                return Err("Cette image est trop lourde (30 Mo au plus).".into());
+                return Err(t("Cette image est trop lourde (30 Mo au plus).", "This image is too large (30 MB at most).").into());
             }
             let ext = ext.unwrap_or_default().to_lowercase();
             let ext = if ["jpg", "jpeg", "png", "webp", "gif", "heic", "avif"].contains(&ext.as_str()) { ext } else { "jpg".into() };
             std::fs::create_dir_all(&media).map_err(err)?;
             let p = media.join(format!("{}.cover.{ext}", media::new_stem()));
-            std::fs::write(&p, bytes).map_err(|e| format!("Image impossible à enregistrer : {e}"))?;
+            std::fs::write(&p, bytes).map_err(|e| tr!("Image impossible à enregistrer : {e}", "Couldn't save the image: {e}"))?;
             Some(p.display().to_string())
         }
         _ => None,
@@ -219,7 +244,11 @@ pub async fn export_vocab(state: State<'_, AppState>, lang: String, path: String
 // ---------- dictionnaire ----------
 
 #[tauri::command]
-pub async fn dict_lookup(state: State<'_, AppState>, lang: String, word: String) -> R<DictResult> {
+pub async fn dict_lookup(app: tauri::AppHandle, state: State<'_, AppState>, lang: String, word: String) -> R<DictResult> {
+    if state.dicts.missing(&lang) {
+        fetch_dict(&app, &lang);
+        return Ok(DictResult { pending: true, ..Default::default() });
+    }
     if !state.dicts.available(&lang) {
         return Ok(DictResult::default());
     }
@@ -232,16 +261,24 @@ fn active_model(state: &AppState, kind: &str) -> R<&'static models::ModelInfo> {
     let key = if kind == "llm" { "llm_model" } else { "asr_model" };
     let default = if kind == "llm" { "qwen3.5-2b" } else { "whisper-turbo" };
     let id = db::setting(&state.db.lock(), key).unwrap_or_else(|| default.to_string());
-    let m = models::find(&id).or_else(|| models::find(default)).ok_or("modèle inconnu")?;
+    let m = models::find(&id).or_else(|| models::find(default)).ok_or(t("modèle inconnu", "unknown model"))?;
     if !models::installed(&state.data_dir, m) {
         // à défaut, n'importe quel modèle installé du même type
         if let Some(other) = models::CATALOG.iter().find(|x| x.kind == kind && models::installed(&state.data_dir, x)) {
             return Ok(other);
         }
         return Err(if kind == "llm" {
-            "NO_MODEL:Aucun modèle de traduction n'est installé. Ouvrez Réglages › IA locale.".into()
+            t(
+                "NO_MODEL:Aucun modèle de traduction n'est installé. Ouvrez Réglages › IA locale.",
+                "NO_MODEL:No translation model is installed. Open Settings › Local AI.",
+            )
+            .into()
         } else {
-            "NO_MODEL:Aucun modèle de transcription n'est installé. Ouvrez Réglages › IA locale.".into()
+            t(
+                "NO_MODEL:Aucun modèle de transcription n'est installé. Ouvrez Réglages › IA locale.",
+                "NO_MODEL:No transcription model is installed. Open Settings › Local AI.",
+            )
+            .into()
         });
     }
     Ok(m)
@@ -269,7 +306,10 @@ pub async fn ai_word(
     on_event: Channel<AiEvent>,
 ) -> R<WordAnswer> {
     let m = active_model(&state, "llm")?;
-    let key = hash(&["w3", m.id, &lang, &text::normalize_for(&word, &lang), sentence.trim()]);
+    // traductions en français (clé d'origine) ou en anglais (clé à part)
+    let native = i18n::native();
+    let version = if native == "en" { "w3en" } else { "w3" };
+    let key = hash(&[version, m.id, &lang, &text::normalize_for(&word, &lang), sentence.trim()]);
     if let Some(v) = db::cache_get(&state.db.lock(), &key) {
         let (t, n) = v.split_once('\u{1f}').unwrap_or((&v, ""));
         return Ok(WordAnswer { translation: t.to_string(), note: n.to_string(), cached: true });
@@ -282,15 +322,15 @@ pub async fn ai_word(
         if let Ok(d) = state.dicts.lookup(&lang, &word) {
             let glosses: Vec<String> = d.entries.iter().flat_map(|e| e.glosses.iter().take(2).cloned()).take(3).collect();
             if let Some(l) = &d.lemma {
-                hint = format!("forme de {l}");
+                hint = tr!("forme de {l}", "form of {l}");
                 if !glosses.is_empty() {
-                    hint.push_str(" : ");
+                    hint.push_str(t(" : ", ": "));
                 }
             }
             hint.push_str(&glosses.join(" ; ").to_lowercase());
         }
     }
-    let messages = ai::word_messages(&lang, &word, &sentence, &hint);
+    let messages = ai::word_messages(native, &lang, &word, &sentence, &hint);
     let st = state.inner();
     let raw = tokio::task::block_in_place(|| {
         st.ai.generate(&path, &messages, 72, Priority::Interactive(epoch), |piece| {
@@ -314,13 +354,14 @@ pub async fn ai_sentence(
     on_event: Channel<AiEvent>,
 ) -> R<String> {
     let m = active_model(&state, "llm")?;
-    let key = hash(&["s1", m.id, &lang, sentence.trim()]);
+    let native = i18n::native();
+    let key = hash(&[if native == "en" { "s1en" } else { "s1" }, m.id, &lang, sentence.trim()]);
     if let Some(v) = db::cache_get(&state.db.lock(), &key) {
         return Ok(v);
     }
     let path = models::path_of(&state.data_dir, m);
     let epoch = state.ai.next_epoch();
-    let messages = ai::sentence_messages(&lang, &sentence);
+    let messages = ai::sentence_messages(native, &lang, &sentence);
     let st = state.inner();
     let out = tokio::task::block_in_place(|| {
         st.ai.generate(&path, &messages, 260, Priority::Interactive(epoch), |piece| {
@@ -368,7 +409,7 @@ pub async fn ai_simplify(
             result.push_str("\n\n");
             let _ = on_event.send(AiEvent::Piece { text: "\n\n".into() });
         }
-        let messages = ai::simplify_messages(&lang, &level, chunk);
+        let messages = ai::simplify_messages(i18n::native(), &lang, &level, chunk);
         let out = tokio::task::block_in_place(|| {
             st.ai.generate(&path, &messages, 900, Priority::Background, |piece| {
                 let _ = on_event.send(AiEvent::Piece { text: piece.to_string() });
@@ -480,7 +521,7 @@ pub async fn chat_send(
 ) -> R<ChatReply> {
     let text = text.trim().to_string();
     if text.is_empty() {
-        return Err("Écrivez d'abord votre question.".into());
+        return Err(t("Écrivez d'abord votre question.", "Write your question first.").into());
     }
     let m = active_model(&state, "llm")?;
     let path = models::path_of(&state.data_dir, m);
@@ -506,15 +547,16 @@ pub async fn chat_send(
         (title, text, partial)
     });
     let context = excerpt.as_ref().map(|(title, text, partial)| ai::LessonContext { title, text, partial: *partial });
-    let hints: Vec<String> = ai::quoted_words(&text).iter().filter_map(|w| ai::dict_hint(&state.dicts, &chat.lang, w)).collect();
-    let messages = ai::chat_messages(&chat.lang, known, context.as_ref(), ai::recent_history(&history, CHAT_HISTORY_BYTES), &text, &hints);
+    let native = i18n::native();
+    let hints: Vec<String> = ai::quoted_words(&text).iter().filter_map(|w| ai::dict_hint(&state.dicts, native, &chat.lang, w)).collect();
+    let messages = ai::chat_messages(native, &chat.lang, known, context.as_ref(), ai::recent_history(&history, CHAT_HISTORY_BYTES), &text, &hints);
 
     let key = format!("chat:{id}");
     let cancel = Arc::new(AtomicBool::new(false));
     {
         let mut dl = state.downloads.lock();
         if dl.contains_key(&key) {
-            return Err("Lumen répond déjà dans cette conversation.".into());
+            return Err(t("Lumen répond déjà dans cette conversation.", "Lumen is already answering in this conversation.").into());
         }
         dl.insert(key.clone(), cancel.clone());
     }
@@ -556,7 +598,7 @@ pub async fn chat_send(
             // arrêt avant le premier mot : rien n'est enregistré, la question revient dans le champ
             return Ok(ChatReply { chat, user: None, assistant: None, stopped: true });
         }
-        return Err("L'IA n'a pas su répondre. Reformulez votre question, ou réessayez.".into());
+        return Err(t("L'IA n'a pas su répondre. Reformulez votre question, ou réessayez.", "The AI couldn't answer. Rephrase your question, or try again.").into());
     }
     let (user, assistant) = db::chat_append(&mut state.db.lock(), id, &text, answer, &out.thought, thought_secs, &ai::chat_title(&text)).map_err(err)?;
     let chat = db::chat_get(&state.db.lock(), id).map_err(err)?;
@@ -585,8 +627,10 @@ pub async fn models_list(state: State<'_, AppState>) -> R<Vec<ModelRow>> {
         .iter()
         .map(|m| {
             let part = models::part_of(&state.data_dir, m);
+            let mut info = m.clone();
+            info.detail = t(m.detail, m.detail_en);
             ModelRow {
-                info: m.clone(),
+                info,
                 installed: models::installed(&state.data_dir, m),
                 active: m.id == llm || m.id == asr,
                 downloading: dl.contains_key(m.id),
@@ -598,12 +642,12 @@ pub async fn models_list(state: State<'_, AppState>) -> R<Vec<ModelRow>> {
 
 #[tauri::command]
 pub async fn model_download(state: State<'_, AppState>, id: String, on_event: Channel<DownloadEvent>) -> R<()> {
-    let m = models::find(&id).ok_or("modèle inconnu")?;
+    let m = models::find(&id).ok_or(t("modèle inconnu", "unknown model"))?;
     let cancel = Arc::new(AtomicBool::new(false));
     {
         let mut dl = state.downloads.lock();
         if dl.contains_key(m.id) {
-            return Err("Ce modèle est déjà en cours de téléchargement.".into());
+            return Err(t("Ce modèle est déjà en cours de téléchargement.", "This model is already downloading.").into());
         }
         dl.insert(m.id.to_string(), cancel.clone());
     }
@@ -625,7 +669,7 @@ pub async fn model_cancel(state: State<'_, AppState>, id: String) -> R<()> {
 
 #[tauri::command]
 pub async fn model_delete(state: State<'_, AppState>, id: String) -> R<()> {
-    let m = models::find(&id).ok_or("modèle inconnu")?;
+    let m = models::find(&id).ok_or(t("modèle inconnu", "unknown model"))?;
     let p = models::path_of(&state.data_dir, m);
     if state.ai.is_loaded(&p) {
         state.ai.unload();
@@ -658,7 +702,7 @@ fn voice_model(state: &AppState) -> R<&'static models::ModelInfo> {
     models::CATALOG
         .iter()
         .find(|m| m.kind == "tts" && models::installed(&state.data_dir, m))
-        .ok_or_else(|| "NO_VOICE: aucune voix naturelle n'est installée".to_string())
+        .ok_or_else(|| t("NO_VOICE: aucune voix naturelle n'est installée", "NO_VOICE: no natural voice is installed").to_string())
 }
 
 #[derive(Serialize)]
@@ -682,7 +726,7 @@ pub async fn lesson_voice(state: State<'_, AppState>, id: i64, on_event: Channel
     {
         let mut dl = state.downloads.lock();
         if dl.contains_key(&key) {
-            return Err("L'audio de cette leçon est déjà en cours de création.".into());
+            return Err(t("L'audio de cette leçon est déjà en cours de création.", "The audio for this lesson is already being created.").into());
         }
         dl.insert(key.clone(), cancel.clone());
     }
@@ -731,7 +775,7 @@ pub async fn tts_say(state: State<'_, AppState>, lang: String, text: String, pre
     let m = voice_model(&state)?;
     let text: String = text.split_whitespace().collect::<Vec<_>>().join(" ").chars().take(600).collect();
     if text.is_empty() {
-        return Err("Rien à prononcer.".into());
+        return Err(t("Rien à prononcer.", "Nothing to pronounce.").into());
     }
     let voice = voice_for(&state, &lang)?;
     let cached = crate::voice::cached_path(&state.data_dir, m, &lang, &text, &voice);
@@ -756,20 +800,20 @@ pub async fn fetch_url(url: String) -> R<String> {
         .timeout(std::time::Duration::from_secs(30))
         .build()
         .map_err(err)?;
-    let resp = client.get(&url).send().await.map_err(|e| format!("Page inaccessible : {e}"))?;
+    let resp = client.get(&url).send().await.map_err(|e| tr!("Page inaccessible : {e}", "Page unreachable: {e}"))?;
     if !resp.status().is_success() {
-        return Err(format!("La page a répondu {}.", resp.status()));
+        return Err(tr!("La page a répondu {}.", "The page answered {}.", resp.status()));
     }
     let bytes = resp.bytes().await.map_err(err)?;
     if bytes.len() > 15_000_000 {
-        return Err("Page trop volumineuse.".into());
+        return Err(t("Page trop volumineuse.", "This page is too large.").into());
     }
     Ok(String::from_utf8_lossy(&bytes).to_string())
 }
 
 #[tauri::command]
 pub async fn read_file(path: String) -> R<Response> {
-    let bytes = tokio::fs::read(&path).await.map_err(|e| format!("Lecture impossible : {e}"))?;
+    let bytes = tokio::fs::read(&path).await.map_err(|e| tr!("Lecture impossible : {e}", "Couldn't read the file: {e}"))?;
     Ok(Response::new(bytes))
 }
 
@@ -805,7 +849,7 @@ async fn transcribe_into_lesson(
     let (text, timings) = transcribe_media(state, &stored, lang, on_event).await?;
     if text.trim().is_empty() {
         let _ = std::fs::remove_file(&stored);
-        return Err("Aucune parole n'a été reconnue dans ce fichier.".into());
+        return Err(t("Aucune parole n'a été reconnue dans ce fichier.", "No speech was recognized in this file.").into());
     }
     let lesson = NewLesson {
         lang: lang.to_string(),
@@ -836,7 +880,7 @@ pub async fn import_media(
     let _ = on_event.send(ImportEvent::Stage { stage: "copy".into() });
     let stored = media::store_media(&state.data_dir, &src).map_err(err)?;
     let title = title.filter(|t| !t.trim().is_empty()).unwrap_or_else(|| {
-        src.file_stem().and_then(|s| s.to_str()).unwrap_or("Enregistrement").replace(['_', '-'], " ")
+        src.file_stem().and_then(|s| s.to_str()).unwrap_or(t("Enregistrement", "Recording")).replace(['_', '-'], " ")
     });
     let ext = src.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
     let is_video = ["mp4", "mov", "m4v", "mkv", "webm"].contains(&ext.as_str());
@@ -896,7 +940,7 @@ pub async fn import_youtube(state: State<'_, AppState>, lang: String, url: Strin
         if let Some(v) = &video {
             let _ = std::fs::remove_file(v);
         }
-        return Err("Aucune parole n'a été reconnue dans cette vidéo.".into());
+        return Err(t("Aucune parole n'a été reconnue dans cette vidéo.", "No speech was recognized in this video.").into());
     }
     let lesson = NewLesson {
         lang,
@@ -921,7 +965,7 @@ pub async fn import_youtube(state: State<'_, AppState>, lang: String, url: Strin
 #[tauri::command]
 pub async fn lesson_resync(state: State<'_, AppState>, id: i64, on_event: Channel<ImportEvent>) -> R<String> {
     let (lang, text, media) = db::lesson_media(&state.db.lock(), id).map_err(err)?;
-    let media = media.ok_or("Cette leçon n'a pas d'audio à recaler.")?;
+    let media = media.ok_or(t("Cette leçon n'a pas d'audio à recaler.", "This lesson has no audio to realign."))?;
     let m = active_model(&state, "asr")?;
     let model_path = models::path_of(&state.data_dir, m);
     let words = media::transcribe(&model_path, std::path::Path::new(&media), &lang, None, |e| {
@@ -931,7 +975,11 @@ pub async fn lesson_resync(state: State<'_, AppState>, id: i64, on_event: Channe
     .map_err(err)?;
     let (timings, found) = media::align_timings(&text, &lang, &words);
     if found < 0.3 {
-        return Err("L'audio ne correspond pas assez au texte de la leçon pour recaler la lanterne.".into());
+        return Err(t(
+            "L'audio ne correspond pas assez au texte de la leçon pour recaler la lanterne.",
+            "The audio doesn't match the lesson text closely enough to realign the lantern.",
+        )
+        .into());
     }
     db::lesson_set_timings(&state.db.lock(), id, &timings, db::TIMING_PRECISE).map_err(err)?;
     Ok(timings)
@@ -947,7 +995,7 @@ pub async fn lesson_fetch_video(state: State<'_, AppState>, id: i64, on_event: C
         }
     }
     if !source.starts_with("http") {
-        return Err("Cette leçon n'a pas de vidéo en ligne d'origine.".into());
+        return Err(t("Cette leçon n'a pas de vidéo en ligne d'origine.", "This lesson has no original online video.").into());
     }
     let data_dir = state.data_dir.clone();
     let browser = db::setting(&state.db.lock(), "youtube_browser").filter(|b| !b.is_empty());
@@ -987,7 +1035,7 @@ pub async fn lingq_import(
     {
         let mut jobs = state.downloads.lock();
         if jobs.contains_key(LINGQ_JOB) {
-            return Err("Un import LingQ est déjà en cours.".into());
+            return Err(t("Un import LingQ est déjà en cours.", "A LingQ import is already running.").into());
         }
         jobs.insert(LINGQ_JOB.to_string(), cancel.clone());
     }

@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { api, errorText } from "./api";
+import { formatNumber as fmtNumber, locale, setUiLang, systemUiLang, t, type UiLang } from "./i18n";
 import type { AppInfo, DownloadEvent, LangCode, ModelRow } from "./types";
 
 export type View = "library" | "playlists" | "reader" | "chat" | "vocab" | "progress" | "settings";
@@ -18,6 +19,8 @@ export interface DownloadState {
 }
 
 export const DEFAULTS: Record<string, string> = {
+  // langue de l'interface, des traductions et du chat ("fr" ou "en", choisie au premier lancement)
+  ui_lang: "",
   theme: "system",
   font_size: "23",
   line_height: "1.75",
@@ -118,7 +121,12 @@ export const useApp = create<AppStore>((set, get) => ({
     // la dernière leçon ouverte reste « en cours » d'un lancement à l'autre
     const last = Number(settings.last_lesson) || null;
     const queue = (last && Number(settings.last_playlist)) || null;
-    set({ info, settings: { ...DEFAULTS, ...settings }, lessonId: last, queue, ready: true });
+    // langue de l'interface : celle du Mac au premier lancement ; le français pour
+    // ceux qui utilisaient Lumen avant que l'anglais n'existe
+    const ui = (settings.ui_lang || (settings.onboarded ? "fr" : systemUiLang())) as UiLang;
+    setUiLang(ui);
+    set({ info, settings: { ...DEFAULTS, ...settings, ui_lang: ui }, lessonId: last, queue, ready: true });
+    if (settings.ui_lang !== ui) void get().setSetting("ui_lang", ui);
     await get().refreshModels();
     await get().refreshKnown();
     // prépare l'IA en arrière-plan dès l'ouverture de l'application
@@ -130,11 +138,15 @@ export const useApp = create<AppStore>((set, get) => ({
   },
 
   async setSetting(key, value) {
+    // la langue s'applique avant le nouveau rendu (et avant la relecture des modèles)
+    if (key === "ui_lang") setUiLang(value as UiLang);
     set((s) => ({ settings: { ...s.settings, [key]: value } }));
     // écritures à la file : la dernière valeur choisie est toujours la dernière enregistrée
     const write = writes.then(() => api().settingsSet(key, value));
     writes = write.catch(() => {});
     await write;
+    // les descriptions des modèles viennent du natif, dans la langue de l'interface
+    if (key === "ui_lang") await get().refreshModels();
   },
 
   lang() {
@@ -209,7 +221,7 @@ export const useApp = create<AppStore>((set, get) => ({
         delete d[id];
         return { downloads: d };
       });
-      get().toast(`${m?.name ?? "Modèle"} est prêt`, "light");
+      get().toast(t(`${m?.name ?? "Modèle"} est prêt`, `${m?.name ?? "Model"} is ready`), "light");
       // charge le modèle tout de suite pour que la première traduction soit immédiate
       if (m?.kind === "llm") void api().aiWarmup().catch(() => {});
     } catch (e) {
@@ -220,7 +232,7 @@ export const useApp = create<AppStore>((set, get) => ({
         else d[id] = { ...(d[id] ?? { received: 0, total: 1, speed: 0 }), error: msg };
         return { downloads: d };
       });
-      if (msg !== "annulé") get().toast(`Téléchargement interrompu : ${msg}`, "error");
+      if (msg !== "annulé") get().toast(t(`Téléchargement interrompu : ${msg}`, `Download interrupted: ${msg}`), "error");
     }
     await get().refreshModels();
   },
@@ -249,14 +261,17 @@ export const useApp = create<AppStore>((set, get) => ({
 }));
 
 export function formatBytes(n: number): string {
-  if (n >= 1e9) return `${(n / 1e9).toFixed(1).replace(".", ",")} Go`;
-  if (n >= 1e6) return `${Math.round(n / 1e6)} Mo`;
-  return `${Math.round(n / 1e3)} Ko`;
+  if (n >= 1e9) return t(`${(n / 1e9).toFixed(1).replace(".", ",")} Go`, `${(n / 1e9).toFixed(1)} GB`);
+  if (n >= 1e6) return t(`${Math.round(n / 1e6)} Mo`, `${Math.round(n / 1e6)} MB`);
+  return t(`${Math.round(n / 1e3)} Ko`, `${Math.round(n / 1e3)} KB`);
 }
 
 export function formatNumber(n: number): string {
-  return n.toLocaleString("fr-FR");
+  return fmtNumber(n);
 }
+
+/** Locale des dates et des nombres de l'interface. */
+export { locale };
 
 export function formatDuration(secs: number): string {
   const s = Math.max(0, Math.round(secs));

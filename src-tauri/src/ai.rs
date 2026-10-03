@@ -125,7 +125,7 @@ impl Engine {
         *guard = None;
         let be = backend()?;
         let params = LlamaModelParams::default().with_n_gpu_layers(999);
-        let model = LlamaModel::load_from_file(be, path, &params).map_err(|e| anyhow!("modèle illisible : {e}"))?;
+        let model = LlamaModel::load_from_file(be, path, &params).map_err(|e| anyhow!(crate::tr!("modèle illisible : {e}", "unreadable model: {e}")))?;
         let model = Arc::new(model);
         *guard = Some((path.to_path_buf(), model.clone()));
         Ok(model)
@@ -387,10 +387,54 @@ pub fn lang_name(code: &str) -> &'static str {
     }
 }
 
+/// Nom anglais d'une langue (consignes pour un apprenant anglophone).
+pub fn lang_name_en(code: &str) -> &'static str {
+    match code {
+        "en" => "English",
+        "es" => "Spanish",
+        "it" => "Italian",
+        "de" => "German",
+        "pt" => "Portuguese",
+        "ru" => "Russian",
+        "fr" => "French",
+        "nl" => "Dutch",
+        "sv" => "Swedish",
+        "da" => "Danish",
+        "fi" => "Finnish",
+        "et" => "Estonian",
+        "lv" => "Latvian",
+        "lt" => "Lithuanian",
+        "pl" => "Polish",
+        "cs" => "Czech",
+        "sk" => "Slovak",
+        "sl" => "Slovenian",
+        "hr" => "Croatian",
+        "hu" => "Hungarian",
+        "ro" => "Romanian",
+        "bg" => "Bulgarian",
+        "uk" => "Ukrainian",
+        "el" => "Greek",
+        "tr" => "Turkish",
+        "ar" => "Arabic",
+        "hi" => "Hindi",
+        "id" => "Indonesian",
+        "vi" => "Vietnamese",
+        "ko" => "Korean",
+        "ja" => "Japanese",
+        "zh" => "Chinese",
+        _ => "foreign",
+    }
+}
+
 #[allow(dead_code)]
 pub const SYSTEM: &str = "Tu es le moteur de traduction de Lumen, une application d'apprentissage des langues. Tu réponds toujours en français, brièvement et avec exactitude, sans formule de politesse ni commentaire superflu.";
 
+// Les consignes existent pour un apprenant francophone (`native` = "fr") et
+// anglophone ("en") ; les versions françaises sont celles qui ont été éprouvées.
+
 const WORD_SYSTEM: &str = "Tu es un dictionnaire bilingue pour apprenants francophones. On te donne une phrase étrangère et un mot ou une expression de cette phrase. Tu réponds sur deux lignes exactement :\nSens : la traduction française du mot dans cette phrase précise, accordée au contexte (1 à 5 mots, jamais le mot original recopié)\nNote : seulement s'il s'agit d'une expression figée, d'un faux ami ou d'un sens inattendu ; sinon écris -";
+
+const WORD_SYSTEM_EN: &str = "You are a bilingual dictionary for English-speaking learners. You are given a foreign sentence and a word or expression from that sentence. You answer in exactly two lines:\nMeaning: the English translation of the word in this precise sentence, matching the context (1 to 5 words, never the original word copied)\nNote: only if it is a fixed expression, a false friend or an unexpected meaning; otherwise write -";
 
 fn word_query(lang: &str, word: &str, sentence: &str, hint: &str) -> String {
     let mut q = format!("Langue : {}\nPhrase : {sentence}\nMot : {word}", lang_name(lang));
@@ -400,8 +444,33 @@ fn word_query(lang: &str, word: &str, sentence: &str, hint: &str) -> String {
     q
 }
 
-/// Conversation complète (avec exemples) pour la traduction d'un mot en contexte.
-pub fn word_messages(lang: &str, word: &str, sentence: &str, hint: &str) -> Vec<(&'static str, String)> {
+fn word_query_en(lang: &str, word: &str, sentence: &str, hint: &str) -> String {
+    let mut q = format!("Language: {}\nSentence: {sentence}\nWord: {word}", lang_name_en(lang));
+    if !hint.is_empty() {
+        q.push_str(&format!("\nDictionary: {hint}"));
+    }
+    q
+}
+
+/// Conversation complète (avec exemples) pour la traduction d'un mot en contexte,
+/// dans la langue de l'apprenant.
+pub fn word_messages(native: &str, lang: &str, word: &str, sentence: &str, hint: &str) -> Vec<(&'static str, String)> {
+    if native == "en" {
+        return vec![
+            ("system", WORD_SYSTEM_EN.to_string()),
+            ("user", word_query_en("fr", "pris", "Elle a pris le dernier train pour Lyon.", "form of prendre: to take")),
+            ("assistant", "Meaning: took\nNote: -".into()),
+            ("user", word_query_en("es", "embarazada", "Mi hermana está embarazada de tres meses.", "pregnant")),
+            ("assistant", "Meaning: pregnant\nNote: false friend, it does not mean \"embarrassed\"".into()),
+            ("user", word_query_en("de", "verpasst", "Er hat den letzten Bus verpasst.", "form of verpassen: to miss")),
+            ("assistant", "Meaning: missed\nNote: -".into()),
+            ("user", word_query_en("it", "in bocca al lupo", "Domani hai l'esame? In bocca al lupo!", "")),
+            ("assistant", "Meaning: good luck\nNote: fixed expression, literally \"in the wolf's mouth\"".into()),
+            ("user", word_query_en("ru", "читала", "Вчера она читала книгу до полуночи.", "form of читать: to read")),
+            ("assistant", "Meaning: was reading\nNote: -".into()),
+            ("user", word_query_en(lang, word, sentence, hint)),
+        ];
+    }
     vec![
         ("system", WORD_SYSTEM.to_string()),
         ("user", word_query("en", "ran", "She ran to the station to catch the last train.", "forme de run : courir")),
@@ -418,7 +487,17 @@ pub fn word_messages(lang: &str, word: &str, sentence: &str, hint: &str) -> Vec<
     ]
 }
 
-pub fn sentence_messages(lang: &str, sentence: &str) -> Vec<(&'static str, String)> {
+pub fn sentence_messages(native: &str, lang: &str, sentence: &str) -> Vec<(&'static str, String)> {
+    if native == "en" {
+        return vec![
+            ("system", "You are a professional translator. You translate into English, naturally and faithfully. You reply only with the English translation, without quotation marks or comments.".to_string()),
+            ("user", "Sentence in Spanish: El faro estaba lejos de la casa, pero se veía su luz.".into()),
+            ("assistant", "The lighthouse was far from the house, but its light could be seen.".into()),
+            ("user", "Sentence in French: J'aurais aimé le savoir avant.".into()),
+            ("assistant", "I wish I had known that before.".into()),
+            ("user", format!("Sentence in {}: {sentence}", lang_name_en(lang))),
+        ];
+    }
     vec![
         ("system", "Tu es un traducteur professionnel. Tu traduis vers le français de façon naturelle et fidèle. Tu réponds uniquement par la traduction française, sans guillemets ni commentaire.".to_string()),
         ("user", "Phrase en espagnol : El faro estaba lejos de la casa, pero se veía su luz.".into()),
@@ -429,7 +508,14 @@ pub fn sentence_messages(lang: &str, sentence: &str) -> Vec<(&'static str, Strin
     ]
 }
 
-pub fn simplify_messages(lang: &str, level: &str, text: &str) -> Vec<(&'static str, String)> {
+pub fn simplify_messages(native: &str, lang: &str, level: &str, text: &str) -> Vec<(&'static str, String)> {
+    if native == "en" {
+        let l = lang_name_en(lang);
+        return vec![
+            ("system", format!("You rewrite texts in {l} for learners. You write only in {l}.")),
+            ("user", format!("Rewrite this text in {l} for a learner at level {level}: short sentences, common vocabulary, same facts in the same order. Write only the rewritten text, with no title, no translation and no comments.\n\n{text}")),
+        ];
+    }
     let l = lang_name(lang);
     vec![
         ("system", format!("Tu réécris des textes en {l} pour des apprenants. Tu écris uniquement en {l}.")),
@@ -448,6 +534,16 @@ Règles :
 - Pour un mot ou une expression : son sens dans le contexte, sa forme de base, sa nature grammaticale, puis un ou deux exemples.
 - Si tu n'es pas sûr de quelque chose, dis-le au lieu d'inventer.
 - Mise en forme sobre : paragraphes courts, listes, **gras** pour les mots clés, tableaux seulement pour les conjugaisons et les déclinaisons.";
+
+const CHAT_SYSTEM_EN: &str = "You are Lumen, an expert, patient and warm language teacher, built into an app that helps people learn languages by reading and listening. You master grammar, conjugation, vocabulary, pronunciation, idioms, registers and the culture of the countries concerned, and you know how to make all of it simple.
+
+Rules:
+- Answer in English, unless the learner writes to you in another language to practise: then answer in that language, with sentences they can understand, then briefly point out their mistakes and how to correct them, in English.
+- Be precise and concise: get straight to the point, without unnecessary pleasantries.
+- Give examples in the language being studied, each followed by its English translation.
+- For a word or expression: its meaning in context, its base form, its part of speech, then one or two examples.
+- If you are not sure about something, say so instead of making it up.
+- Keep formatting simple: short paragraphs, lists, **bold** for key words, tables only for conjugations and declensions.";
 
 /// Leçon jointe à une conversation.
 pub struct LessonContext<'a> {
@@ -471,6 +567,7 @@ pub fn lang_with_article(code: &str) -> String {
 /// Conversation complète pour le chat : consignes, apprenant, leçon jointe,
 /// échanges précédents (réflexions écartées, comme le veut Qwen) et question.
 pub fn chat_messages(
+    native: &str,
     lang: &str,
     known: i64,
     lesson: Option<&LessonContext>,
@@ -478,6 +575,9 @@ pub fn chat_messages(
     question: &str,
     hints: &[String],
 ) -> Vec<(&'static str, String)> {
+    if native == "en" {
+        return chat_messages_en(lang, known, lesson, history, question, hints);
+    }
     let mut system = String::from(CHAT_SYSTEM);
     system.push_str("\n\nL'apprenant est francophone. ");
     if known < 50 {
@@ -515,15 +615,59 @@ pub fn chat_messages(
     out
 }
 
+fn chat_messages_en(
+    lang: &str,
+    known: i64,
+    lesson: Option<&LessonContext>,
+    history: &[(String, String)],
+    question: &str,
+    hints: &[String],
+) -> Vec<(&'static str, String)> {
+    let name = lang_name_en(lang);
+    let mut system = String::from(CHAT_SYSTEM_EN);
+    system.push_str("\n\nThe learner is an English speaker. ");
+    if known < 50 {
+        system.push_str(&format!("They are a beginner in {name}."));
+    } else {
+        system.push_str(&format!("They are learning {name} and already know about {known} words in this language."));
+    }
+    if let Some(l) = lesson {
+        let part = if l.partial { " (this is only an excerpt, around the passage they are reading: the full lesson is longer)" } else { "" };
+        system.push_str(&format!(
+            "\n\nThe learner is currently reading the lesson \"{}\", in {name}. Rely on this text when they ask about it{part}.\n\n<lesson>\n{}\n</lesson>",
+            l.title.trim(),
+            l.text.trim()
+        ));
+    }
+    let mut out = vec![("system", system)];
+    for (role, content) in history {
+        out.push((if role == "assistant" { "assistant" } else { "user" }, content.trim().to_string()));
+    }
+    let mut q = question.trim().to_string();
+    if lang != "en" && !looks_english(&q) {
+        q.push_str(&format!(
+            "\n\n(I'm practising my {name}: answer me in {name}, with simple sentences. Then, if I made mistakes, add a short \"Corrections\" section written in English.)"
+        ));
+    }
+    if !hints.is_empty() {
+        q.push_str(&format!("\n\n(Dictionary, possible meanings to choose from depending on the context: {})", hints.join("; ")));
+    }
+    out.push(("user", q));
+    out
+}
+
 /// Repère du dictionnaire pour un mot cité dans le chat, par exemple
 /// « andavo : première personne du singulier de l'indicatif imparfait du verbe
 /// andare (andare : aller) ». Seules les formes décrites par le dictionnaire
 /// mènent à leur forme de base : les autres renvois y sont trop peu sûrs.
-pub fn dict_hint(dicts: &crate::dict::Dicts, lang: &str, word: &str) -> Option<String> {
-    if !dicts.available(lang) {
+pub fn dict_hint(dicts: &crate::dict::Dicts, native: &str, lang: &str, word: &str) -> Option<String> {
+    if !dicts.available_in(native, lang) {
         return None;
     }
-    let d = dicts.lookup(lang, word).ok()?;
+    let d = dicts.lookup_in(native, lang, word).ok()?;
+    let en = native == "en";
+    // « andare : aller » en français, « andare: to go » en anglais
+    let colon = if en { ": " } else { " : " };
     let short = |g: &str| -> String {
         let g = g.trim().trim_end_matches('.');
         if g.chars().count() <= 70 {
@@ -537,10 +681,10 @@ pub fn dict_hint(dicts: &crate::dict::Dicts, lang: &str, word: &str) -> Option<S
     };
     let mut parts: Vec<String> = Vec::new();
     if let (Some(lemma), Some(note)) = (&d.lemma, &d.form_note) {
-        let base = dicts.lookup(lang, lemma).map(|r| glosses(&r.entries)).unwrap_or_default();
+        let base = dicts.lookup_in(native, lang, lemma).map(|r| glosses(&r.entries)).unwrap_or_default();
         let note = note.trim().trim_end_matches('.');
         let note = note.chars().next().map(|c| c.to_lowercase().collect::<String>() + &note[c.len_utf8()..]).unwrap_or_default();
-        parts.push(if base.is_empty() { note } else { format!("{note} ({lemma} : {base})") });
+        parts.push(if base.is_empty() { note } else { format!("{note} ({lemma}{colon}{base})") });
     }
     // sens propres du mot, sauf s'il est donné pour la forme d'un autre mot sans
     // plus de détail : ces sens-là sont souvent ceux d'un homonyme (« saliva », la
@@ -553,12 +697,12 @@ pub fn dict_hint(dicts: &crate::dict::Dicts, lang: &str, word: &str) -> Option<S
         .cloned()
         .collect() };
     if !own.is_empty() {
-        parts.push(format!("{} : {}", own[0].pos.to_lowercase(), glosses(&own)));
+        parts.push(format!("{}{colon}{}", own[0].pos.to_lowercase(), glosses(&own)));
     }
     if parts.is_empty() {
         return None;
     }
-    Some(format!("{word} : {}", parts.join(" ; ou ")))
+    Some(format!("{word}{colon}{}", parts.join(if en { "; or " } else { " ; ou " })))
 }
 
 /// Le message est-il écrit en français ? (Sinon, l'apprenant s'entraîne dans
@@ -591,6 +735,38 @@ pub fn looks_french(text: &str) -> bool {
     }
     let hits = words.iter().filter(|w| MARKERS.contains(&w.as_str()) || w.starts_with("l'") || w.starts_with("d'") || w.starts_with("qu'")).count();
     hits >= 2 || hits * 5 >= words.len()
+}
+
+/// Le message est-il écrit en anglais ? (Sinon, l'apprenant anglophone
+/// s'entraîne dans la langue étudiée.) Mots choisis pour ne pas exister tels
+/// quels dans les langues voisines (« in », « me », « no » sont écartés).
+pub fn looks_english(text: &str) -> bool {
+    const MARKERS: &[&str] = &[
+        "the", "what", "what's", "how", "why", "does", "mean", "means", "meaning", "word", "words", "sentence", "you", "your", "this",
+        "that", "these", "those", "can", "could", "would", "should", "please", "thanks", "thank", "hello", "yes", "explain", "translate",
+        "translation", "lesson", "text", "of", "and", "with", "my", "difference", "between", "say", "use", "when", "which", "example",
+        "examples", "are", "it's", "i'm", "give", "tell", "about", "grammar", "verb", "tense",
+    ];
+    let mut plain = String::new();
+    let mut depth = 0;
+    for c in text.chars() {
+        match c {
+            '«' | '“' => depth += 1,
+            '»' | '”' => depth = (depth - 1).max(0),
+            _ if depth == 0 => plain.push(c),
+            _ => {}
+        }
+    }
+    let words: Vec<String> = plain
+        .split(|c: char| !(c.is_alphanumeric() || c == '\'' || c == '’'))
+        .filter(|w| !w.is_empty())
+        .map(|w| w.to_lowercase().replace('’', "'"))
+        .collect();
+    if words.is_empty() {
+        return true;
+    }
+    let hits = words.iter().filter(|w| MARKERS.contains(&w.as_str())).count();
+    hits >= 2 || hits * 4 >= words.len()
 }
 
 /// Mots cités dans une question (entre « », “ ” ou " "), à chercher au
@@ -718,7 +894,7 @@ pub fn parse_word_answer(raw: &str) -> (String, String) {
     for line in raw.lines() {
         let l = line.trim().trim_start_matches(['*', '-', ' ']);
         let lower = l.to_lowercase();
-        if lower.starts_with("sens") {
+        if lower.starts_with("sens") || lower.starts_with("meaning") {
             sense = after_colon(l);
         } else if lower.starts_with("note") {
             note = after_colon(l);
@@ -737,7 +913,8 @@ pub fn parse_word_answer(raw: &str) -> (String, String) {
     };
     let sense = strip(sense);
     let mut note = strip(note);
-    if note == "-" || note == "–" || note.to_lowercase().starts_with("rien") || note.chars().count() < 3 {
+    let lower = note.to_lowercase();
+    if note == "-" || note == "–" || lower.starts_with("rien") || lower.starts_with("none") || note.chars().count() < 3 {
         note.clear();
     }
     (sense, note)
@@ -771,12 +948,12 @@ mod tests {
         assert_eq!(lang_with_article("hu"), "le hongrois");
         let lesson = LessonContext { title: "Il faro", text: "Marta sale le scale.", partial: false };
         let history = vec![("user".to_string(), "Ciao !".to_string()), ("assistant".to_string(), "Ciao ! Come stai ?".to_string())];
-        let m = chat_messages("it", 1200, Some(&lesson), &history, "  Que veut dire « sale » ?  ", &[]);
+        let m = chat_messages("fr", "it", 1200, Some(&lesson), &history, "  Que veut dire « sale » ?  ", &[]);
         assert_eq!(m.iter().map(|(r, _)| *r).collect::<Vec<_>>(), vec!["system", "user", "assistant", "user"]);
         assert!(m[0].1.contains("connaît déjà environ 1200 mots") && m[0].1.contains("l'italien"));
         assert!(m[0].1.contains("« Il faro »") && m[0].1.contains("<leçon>\nMarta sale le scale.\n</leçon>"));
         assert_eq!(m[3].1, "Que veut dire « sale » ?");
-        let m = chat_messages("ru", 0, None, &[], "Привет", &["привет : bonjour".into()]);
+        let m = chat_messages("fr", "ru", 0, None, &[], "Привет", &["привет : bonjour".into()]);
         assert!(m[0].1.contains("Il débute en russe.") && !m[0].1.contains("<leçon>"));
         assert!(m[1].1.starts_with("Привет\n\n(Je m'entraîne : réponds-moi en russe"));
         assert!(m[1].1.ends_with("\n\n(Dictionnaire, sens possibles à choisir selon le contexte : привет : bonjour)"));
@@ -790,12 +967,43 @@ mod tests {
         assert!(!looks_french("Ciao ! Io sono andato al mare ieri, e tu ?"));
         assert!(!looks_french("Привет, как дела ?"));
         assert!(!looks_french("Yesterday I goed to the beach with my friends."));
-        let m = chat_messages("it", 900, None, &[], "Ciao ! Come stai ?", &[]);
+        let m = chat_messages("fr", "it", 900, None, &[], "Ciao ! Come stai ?", &[]);
         assert!(m[1].1.contains("réponds-moi en italien"));
-        let m = chat_messages("it", 900, None, &[], "Comment dit-on « bonjour » ?", &[]);
+        let m = chat_messages("fr", "it", 900, None, &[], "Comment dit-on « bonjour » ?", &[]);
         assert!(!m[1].1.contains("Je m'entraîne"));
-        let m = chat_messages("fr", 900, None, &[], "Je suis allé à la plage.", &[]);
+        let m = chat_messages("fr", "fr", 900, None, &[], "Je suis allé à la plage.", &[]);
         assert!(!m[1].1.contains("Je m'entraîne"));
+    }
+
+    #[test]
+    fn chat_prompt_english() {
+        let lesson = LessonContext { title: "Il faro", text: "Marta sale le scale.", partial: true };
+        let m = chat_messages("en", "it", 1200, Some(&lesson), &[], "What does « sale » mean here?", &["sale: third-person singular present indicative of salire".into()]);
+        assert!(m[0].1.starts_with("You are Lumen") && m[0].1.contains("already know about 1200 words") && m[0].1.contains("Italian"));
+        assert!(m[0].1.contains("\"Il faro\"") && m[0].1.contains("<lesson>\nMarta sale le scale.\n</lesson>") && m[0].1.contains("only an excerpt"));
+        assert!(!m[1].1.contains("practising") && m[1].1.ends_with("salire)"));
+        let m = chat_messages("en", "it", 10, None, &[], "Ciao! Io sono andato al mare ieri, e tu?", &[]);
+        assert!(m[0].1.contains("beginner in Italian") && m[1].1.contains("answer me in Italian") && m[1].1.contains("written in English"));
+        // l'anglais : le français d'un apprenant anglophone, pas une question
+        assert!(looks_english("What does « Marta saliva le scale » mean?"));
+        assert!(looks_english("Explain the past tense"));
+        assert!(looks_english("Thanks!"));
+        assert!(!looks_english("Ciao! Io sono andato al mare ieri, e tu?"));
+        assert!(!looks_english("Привет, как дела?"));
+        assert!(!looks_english("Ich bin in Berlin, und du?"));
+        assert!(!looks_english("Hola, me llamo Ana y tengo un perro."));
+        assert!(!looks_english("Je suis allé à la plage avec mes amis."));
+        let m = chat_messages("en", "en", 900, None, &[], "I goed to the beach.", &[]);
+        assert!(!m[1].1.contains("practising"));
+        // mots et phrases
+        let w = word_messages("en", "it", "andavo", "Quando ero piccolo andavo al mare.", "form of andare: to go");
+        assert!(w[0].1.contains("English-speaking") && w.last().unwrap().1 == "Language: Italian\nSentence: Quando ero piccolo andavo al mare.\nWord: andavo\nDictionary: form of andare: to go");
+        assert!(sentence_messages("en", "de", "Guten Morgen.").last().unwrap().1 == "Sentence in German: Guten Morgen.");
+        assert!(simplify_messages("en", "es", "A2", "Hola.")[1].1.starts_with("Rewrite this text in Spanish for a learner at level A2"));
+        let (s, n) = parse_word_answer("Meaning: was going\nNote: -");
+        assert_eq!((s.as_str(), n.as_str()), ("was going", ""));
+        let (s, n) = parse_word_answer("Meaning: good luck\nNote: fixed expression");
+        assert_eq!((s.as_str(), n.as_str()), ("good luck", "fixed expression"));
     }
 
     #[test]
@@ -826,17 +1034,19 @@ mod tests {
         let res = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources/dicts");
         let tmp = std::env::temp_dir().join(format!("lumen-hint-test-{}", std::process::id()));
         let d = crate::dict::Dicts::new(res, tmp.clone());
-        let h = dict_hint(&d, "it", "andavo").unwrap();
+        let h = dict_hint(&d, "fr", "it", "andavo").unwrap();
         assert!(h.starts_with("andavo : première personne du singulier") && h.contains("(andare : "), "{h}");
-        let h = dict_hint(&d, "en", "chose").unwrap();
+        let h = dict_hint(&d, "fr", "en", "chose").unwrap();
         assert!(h.contains("choose"), "{h}");
         // renvoi sans détail : aucun indice plutôt qu'un homonyme trompeur
-        assert_eq!(dict_hint(&d, "it", "saliva"), None);
+        assert_eq!(dict_hint(&d, "fr", "it", "saliva"), None);
         // homographes (« faro », le phare, et « farò », je ferai) : les deux sens, au modèle de choisir
-        let h = dict_hint(&d, "it", "faro").unwrap();
+        let h = dict_hint(&d, "fr", "it", "faro").unwrap();
         assert!(h.contains("futur simple de fare") && h.contains("ou nom commun : phare"), "{h}");
-        assert_eq!(dict_hint(&d, "ja", "猫"), None);
-        assert_eq!(dict_hint(&d, "it", "zzzqx"), None);
+        assert_eq!(dict_hint(&d, "fr", "ja", "猫"), None);
+        assert_eq!(dict_hint(&d, "fr", "it", "zzzqx"), None);
+        // dictionnaire anglais absent : aucun indice (jamais de définitions françaises)
+        assert_eq!(dict_hint(&d, "en", "it", "andavo"), None);
         let _ = std::fs::remove_dir_all(tmp);
     }
 
@@ -876,16 +1086,65 @@ mod live {
         for (lang, word, sentence, hint) in cases {
             let t = std::time::Instant::now();
             let raw = engine
-                .generate(Path::new(&path), &word_messages(lang, word, sentence, hint), 72, Priority::Background, |_| true)
+                .generate(Path::new(&path), &word_messages("fr", lang, word, sentence, hint), 72, Priority::Background, |_| true)
                 .unwrap();
             let (s, n) = parse_word_answer(&raw);
             println!("[{lang}] {word} -> « {s} » | note : {n} ({:?})\n   brut : {raw:?}", t.elapsed());
             assert!(!s.is_empty());
         }
         let out = engine
-            .generate(Path::new(&path), &sentence_messages("en", "If you are reading this, you are not alone."), 120, Priority::Background, |_| true)
+            .generate(Path::new(&path), &sentence_messages("fr", "en", "If you are reading this, you are not alone."), 120, Priority::Background, |_| true)
             .unwrap();
         println!("phrase -> {out}");
+    }
+
+    /// Test réel en anglais (apprenant anglophone) : sens en contexte, phrase et chat.
+    /// LUMEN_TEST_MODEL=/chemin/modele.gguf cargo test --release --lib english_live -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn english_live() {
+        let Ok(path) = std::env::var("LUMEN_TEST_MODEL") else { return };
+        let engine = Engine::new();
+        let cases = [
+            ("it", "andavo", "Quando ero piccolo andavo sempre al mare con mio nonno.", "form of andare: to go"),
+            ("es", "subía", "Cada mañana, Marta subía las escaleras del viejo faro.", ""),
+            ("de", "ging", "Gestern ging ich nach der Arbeit in den Park.", "form of gehen: to go"),
+            ("fr", "phare", "Chaque matin, Marthe montait l'étroit escalier du vieux phare.", "lighthouse"),
+            ("ru", "нашла", "Однажды она нашла письмо, спрятанное между двумя камнями.", ""),
+            ("it", "in bocca al lupo", "Domani hai l'esame? In bocca al lupo!", ""),
+        ];
+        for (lang, word, sentence, hint) in cases {
+            let t = std::time::Instant::now();
+            let raw = engine
+                .generate(Path::new(&path), &word_messages("en", lang, word, sentence, hint), 72, Priority::Background, |_| true)
+                .unwrap();
+            let (s, n) = parse_word_answer(&raw);
+            println!("[{lang}] {word} -> « {s} » | note : {n} ({:?})\n   brut : {raw:?}", t.elapsed());
+            assert!(!s.is_empty());
+        }
+        let out = engine
+            .generate(Path::new(&path), &sentence_messages("en", "it", "Se stai leggendo queste righe, non sei sola."), 120, Priority::Background, |_| true)
+            .unwrap();
+        println!("phrase -> {out}");
+        // repères du dictionnaire anglais (tools/build_dicts.py --en), comme dans l'application
+        let tmp = std::env::temp_dir().join("lumen-english-live");
+        std::fs::create_dir_all(&tmp).unwrap();
+        let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("resources/dicts-en/it.db.gz");
+        if src.exists() && !tmp.join("it-en-v1.db").exists() {
+            let mut dec = flate2::read::GzDecoder::new(std::fs::File::open(&src).unwrap());
+            std::io::copy(&mut dec, &mut std::fs::File::create(tmp.join("it-en-v1.db")).unwrap()).unwrap();
+        }
+        let dicts = crate::dict::Dicts::new(Path::new("/nonexistent").to_path_buf(), tmp);
+        let flag = Arc::new(AtomicBool::new(false));
+        for q in ["What does “saliva” mean in “Marta saliva le scale”?", "Ciao! Ieri sono andato al mare con mio amici."] {
+            let hints: Vec<String> = quoted_words(q).iter().filter_map(|w| dict_hint(&dicts, "en", "it", w)).collect();
+            println!("\n--- repères : {hints:?}");
+            let msgs = chat_messages("en", "it", 900, None, &[], q, &hints);
+            let g = Gen { max_tokens: 400, think: None, sampling: Sampling::Natural, priority: Priority::Stoppable(flag.clone()) };
+            let out = engine.run(Path::new(&path), &msgs, g, |_| true).unwrap();
+            println!("\n=== {q}\n{}", out.answer);
+            assert!(!out.answer.is_empty());
+        }
     }
 
     /// Chat réel, sans puis avec réflexion, et arrêt en cours de route :
@@ -902,10 +1161,10 @@ mod live {
         };
         // repères du dictionnaire, comme dans l'application
         let dicts = crate::dict::Dicts::new(Path::new(env!("CARGO_MANIFEST_DIR")).join("resources/dicts"), std::env::temp_dir().join("lumen-chat-live-dicts"));
-        let hints = |q: &str| -> Vec<String> { quoted_words(q).iter().filter_map(|w| dict_hint(&dicts, "it", w)).collect() };
+        let hints = |q: &str| -> Vec<String> { quoted_words(q).iter().filter_map(|w| dict_hint(&dicts, "fr", "it", w)).collect() };
         let ask = |q: &str, think: Option<usize>, stop_after: Option<usize>| {
             let flag = Arc::new(AtomicBool::new(false));
-            let msgs = chat_messages("it", 900, Some(&lesson), &[], q, &hints(q));
+            let msgs = chat_messages("fr", "it", 900, Some(&lesson), &[], q, &hints(q));
             let g = Gen { max_tokens: 700, think, sampling: Sampling::Natural, priority: Priority::Stoppable(flag.clone()) };
             let t = std::time::Instant::now();
             let (mut thought_pieces, mut answer_pieces) = (0usize, 0usize);

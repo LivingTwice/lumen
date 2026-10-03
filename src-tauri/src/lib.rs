@@ -1,3 +1,5 @@
+#[macro_use]
+mod i18n;
 mod ai;
 mod asr;
 mod backup;
@@ -27,6 +29,8 @@ pub fn run() {
             let data_dir = app.path().app_data_dir()?;
             std::fs::create_dir_all(&data_dir)?;
             let conn = db::open(&db::path(&data_dir))?;
+            // langue de l'interface, des messages et des traductions
+            i18n::set(&db::setting(&conn, "ui_lang").unwrap_or_default());
             let resource_dir = app.path().resource_dir()?.join("dicts");
             let dicts = dict::Dicts::new(resource_dir, dict::dict_dir(&data_dir));
             app.manage(state::AppState {
@@ -95,7 +99,7 @@ pub fn run() {
             commands::backup_restore,
         ])
         .build(tauri::generate_context!())
-        .expect("erreur au lancement de Lumen")
+        .expect("Lumen couldn't start")
         .run(|app, event| {
             // dernière sauvegarde en quittant, si la progression a changé
             if let tauri::RunEvent::Exit = event {

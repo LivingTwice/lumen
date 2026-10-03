@@ -3,8 +3,9 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Icon } from "../components/Icon";
 import { Orb, Switch } from "../components/ui";
 import { api, errorText } from "../lib/api";
-import { RESTORE_STAGE, formatWhen, pickBackupFolder, reloadProgress, useBackup } from "../lib/backup";
-import { CORE_LANGS, LANGS, STARTERS, langInfo, type LangInfo } from "../lib/langs";
+import { formatWhen, pickBackupFolder, reloadProgress, restoreStage, useBackup } from "../lib/backup";
+import { count, t, type UiLang } from "../lib/i18n";
+import { LANGS, STARTERS, coreLangs, langLower, starterCollection, type LangInfo } from "../lib/langs";
 import { PROFILES } from "../lib/profiles";
 import { formatBytes, formatNumber, useApp } from "../lib/store";
 import type { BackupInfo, BackupRestored, LangCode } from "../lib/types";
@@ -27,8 +28,38 @@ function glow(e: React.MouseEvent<HTMLElement>) {
   el.style.setProperty("--my", `${e.clientY - r.top}px`);
 }
 
+/** Choix de la langue de l'interface, en haut à droite de l'accueil. */
+function UiLangSwitch() {
+  const ui = (useApp((s) => s.settings.ui_lang) || "fr") as UiLang;
+  const setSetting = useApp((s) => s.setSetting);
+  return (
+    <motion.div
+      className="ob-uilang"
+      role="radiogroup"
+      aria-label="Langue · Language"
+      initial={{ opacity: 0, y: -6 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ delay: 1.2, duration: 0.8, ease: EASE }}
+    >
+      {(
+        [
+          ["fr", "Français"],
+          ["en", "English"],
+        ] as const
+      ).map(([code, label]) => (
+        <button key={code} role="radio" aria-checked={ui === code} className={ui === code ? "on" : ""} onClick={() => void setSetting("ui_lang", code)}>
+          {ui === code && <motion.i layoutId="ob-uilang-pill" className="pill" transition={{ type: "spring", stiffness: 420, damping: 34 }} />}
+          <span lang={code}>{label}</span>
+        </button>
+      ))}
+    </motion.div>
+  );
+}
+
 export function Onboarding() {
   const setSetting = useApp((s) => s.setSetting);
+  // la langue de l'interface peut changer à tout moment de l'accueil
+  const ui = useApp((s) => s.settings.ui_lang);
   const download = useApp((s) => s.download);
   const models = useApp((s) => s.models);
   const refreshKnown = useApp((s) => s.refreshKnown);
@@ -115,7 +146,7 @@ export function Onboarding() {
         </span>
         <span className="meta">
           <span className="dot-lang" style={{ background: l.color }} />
-          {CORE_LANGS.includes(l.code) ? `${l.name} · ${l.native}` : l.name}
+          {coreLangs().includes(l.code) && l.name !== l.native ? `${l.name} · ${l.native}` : l.name}
         </span>
         <AnimatePresence>
           {on && (
@@ -197,7 +228,7 @@ export function Onboarding() {
       const s = STARTERS[l];
       // pas de doublon si la leçon d'accueil existe déjà (relecture de l'accueil)
       const existing = (await api().lessonsList(l)).find((x) => x.title === s.title);
-      const id = existing ? existing.id : await api().lessonCreate({ lang: l, title: s.title, text: s.text, collection: "Pour commencer", kind: "text" });
+      const id = existing ? existing.id : await api().lessonCreate({ lang: l, title: s.title, text: s.text, collection: starterCollection(), kind: "text" });
       if (!first) first = id;
     }
     await refreshKnown();
@@ -242,6 +273,7 @@ export function Onboarding() {
       </div>
 
       <div className="ob-top drag" data-tauri-drag-region />
+      <UiLangSwitch />
 
       <div className="ob-stage" ref={stageRef}>
         {/* l'astre se lève derrière l'horizon : on le découpe à la ligne d'horizon */}
@@ -295,15 +327,21 @@ export function Onboarding() {
                 </span>
               </h1>
               <motion.p className="ob-lead" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 2.3, duration: 1 }}>
-                Apprenez une langue comme vous avez appris la vôtre : en lisant et en écoutant ce qui vous passionne. Un mot à la fois, jusqu'à ce que tout s'éclaire.
+                {/* changement de langue : le texte se fond dans le nouveau */}
+                <motion.span key={ui} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.45 }}>
+                  {t(
+                    "Apprenez une langue comme vous avez appris la vôtre : en lisant et en écoutant ce qui vous passionne. Un mot à la fois, jusqu'à ce que tout s'éclaire.",
+                    "Learn a language the way you learned your own: by reading and listening to what you love. One word at a time, until everything lights up.",
+                  )}
+                </motion.span>
               </motion.p>
               <motion.div className="ob-welcome-actions" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 2.8, duration: 0.8, ease: EASE }}>
                 <button className="ob-cta" onClick={() => setN(1)}>
-                  Commencer <Icon name="forward" size={16} stroke={2} />
+                  {t("Commencer", "Get started")} <Icon name="forward" size={16} stroke={2} />
                 </button>
                 {!replay && (
                   <button className="ob-restore-link" onClick={openRestore}>
-                    <Icon name="cloud" size={15} /> J'ai déjà utilisé Lumen : retrouver ma progression
+                    <Icon name="cloud" size={15} /> {t("J'ai déjà utilisé Lumen : retrouver ma progression", "I've used Lumen before: get my progress back")}
                   </button>
                 )}
               </motion.div>
@@ -312,20 +350,20 @@ export function Onboarding() {
 
           {n === 1 && (
             <motion.div key="1" className="ob-step form" {...stepAnim}>
-              <h2>Quelles langues voulez-vous apprendre ?</h2>
-              <p className="ob-sub">Chacune a sa bibliothèque et son vocabulaire. Vous pourrez en ajouter ou en retirer plus tard.</p>
+              <h2>{t("Quelles langues voulez-vous apprendre ?", "Which languages do you want to learn?")}</h2>
+              <p className="ob-sub">{t("Chacune a sa bibliothèque et son vocabulaire. Vous pourrez en ajouter ou en retirer plus tard.", "Each one has its own library and vocabulary. You can add or remove languages later.")}</p>
               <div className="ob-langs-scroll">
-                <div className="ob-group">Avec dictionnaire hors ligne</div>
-                <div className="ob-grid langs">{LANGS.filter((l) => CORE_LANGS.includes(l.code)).map((l, i) => langCard(l, 0.15 + i * 0.06))}</div>
-                <div className="ob-group">Avec la traduction par l'IA et la voix naturelle</div>
-                <div className="ob-grid langs compact">{LANGS.filter((l) => !CORE_LANGS.includes(l.code)).map((l, i) => langCard(l, 0.5 + i * 0.025))}</div>
+                <div className="ob-group">{t("Avec dictionnaire hors ligne", "With an offline dictionary")}</div>
+                <div className="ob-grid langs">{LANGS.filter((l) => coreLangs().includes(l.code)).map((l, i) => langCard(l, 0.15 + i * 0.06))}</div>
+                <div className="ob-group">{t("Avec la traduction par l'IA et la voix naturelle", "With AI translation and the natural voice")}</div>
+                <div className="ob-grid langs compact">{LANGS.filter((l) => !coreLangs().includes(l.code)).map((l, i) => langCard(l, 0.5 + i * 0.025))}</div>
               </div>
               <div className="ob-actions">
                 <button className="ob-link" onClick={() => setN(0)}>
-                  Retour
+                  {t("Retour", "Back")}
                 </button>
                 <button className="ob-cta" disabled={!langs.length} onClick={() => setN(2)}>
-                  Continuer <Icon name="forward" size={16} stroke={2} />
+                  {t("Continuer", "Continue")} <Icon name="forward" size={16} stroke={2} />
                 </button>
               </div>
             </motion.div>
@@ -333,8 +371,13 @@ export function Onboarding() {
 
           {n === 2 && (
             <motion.div key="2" className="ob-step form" {...stepAnim}>
-              <h2>Une IA qui vit sur votre Mac</h2>
-              <p className="ob-sub">Elle traduit chaque mot dans son contexte, sans jamais rien envoyer en ligne. Le modèle se télécharge pendant que vous commencez à lire.</p>
+              <h2>{t("Une IA qui vit sur votre Mac", "An AI that lives on your Mac")}</h2>
+              <p className="ob-sub">
+                {t(
+                  "Elle traduit chaque mot dans son contexte, sans jamais rien envoyer en ligne. Le modèle se télécharge pendant que vous commencez à lire.",
+                  "It translates every word in its context, without ever sending anything online. The model downloads while you start reading.",
+                )}
+              </p>
               <div className="ob-grid profiles">
                 {PROFILES.map((p, i) => (
                   <motion.button
@@ -359,10 +402,10 @@ export function Onboarding() {
               </div>
               <div className="ob-actions">
                 <button className="ob-link" onClick={() => setN(3)}>
-                  Plus tard
+                  {t("Plus tard", "Later")}
                 </button>
                 <button className="ob-cta" onClick={startDownload}>
-                  <Icon name="download" size={16} stroke={2} /> Télécharger et continuer
+                  <Icon name="download" size={16} stroke={2} /> {t("Télécharger et continuer", "Download and continue")}
                 </button>
               </div>
             </motion.div>
@@ -370,38 +413,48 @@ export function Onboarding() {
 
           {n === 3 && restored && (
             <motion.div key="3r" className="ob-step ready" {...stepAnim}>
-              <h2>Bon retour</h2>
+              <h2>{t("Bon retour", "Welcome back")}</h2>
               <p className="ob-sub">
-                {formatNumber(restored.counts.known)} mots connus et {formatNumber(restored.counts.lessons)} leçon{restored.counts.lessons > 1 ? "s" : ""} vous attendent, exactement là où vous les aviez laissés.
+                {t(
+                  `${formatNumber(restored.counts.known)} mots connus et ${count(restored.counts.lessons, "leçon", "leçons", "", "")} vous attendent, exactement là où vous les aviez laissés.`,
+                  `${formatNumber(restored.counts.known)} known words and ${count(restored.counts.lessons, "", "", "lesson", "lessons")} are waiting for you, exactly where you left them.`,
+                )}
               </p>
               <button className="ob-cta" onClick={finishRestored} disabled={!!bloom}>
-                Retrouver ma bibliothèque <Icon name="library" size={16} />
+                {t("Retrouver ma bibliothèque", "Back to my library")} <Icon name="library" size={16} />
               </button>
             </motion.div>
           )}
 
           {n === 3 && !restored && (
             <motion.div key="3" className="ob-step ready" {...stepAnim}>
-              <h2>Tout est prêt</h2>
+              <h2>{t("Tout est prêt", "Everything is ready")}</h2>
               <p className="ob-sub">
-                Une courte histoire vous attend dans chaque langue choisie. Touchez les mots inconnus, écoutez la page, puis terminez-la : les mots compris rejoignent votre vocabulaire.
+                {t(
+                  "Une courte histoire vous attend dans chaque langue choisie. Touchez les mots inconnus, écoutez la page, puis terminez-la : les mots compris rejoignent votre vocabulaire.",
+                  "A short story is waiting for you in each language you chose. Tap the unknown words, listen to the page, then finish it: the words you understood join your vocabulary.",
+                )}
               </p>
               {offerBackup && (
                 <motion.label className="ob-backup" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.35, duration: 0.6, ease: EASE }}>
                   <Icon name="cloud" size={20} />
                   <span>
-                    <strong>Sauvegarder ma progression dans {backup.icloud ? "iCloud Drive" : "le dossier choisi"}</strong>
-                    <small>Une copie à l'abri, retrouvée en un clic si ce Mac s'efface ou sur un nouveau Mac.</small>
+                    <strong>
+                      {backup.icloud
+                        ? t("Sauvegarder ma progression dans iCloud Drive", "Back up my progress to iCloud Drive")
+                        : t("Sauvegarder ma progression dans le dossier choisi", "Back up my progress to the chosen folder")}
+                    </strong>
+                    <small>{t("Une copie à l'abri, retrouvée en un clic si ce Mac s'efface ou sur un nouveau Mac.", "A safe copy, back in one click if this Mac is wiped, or on a new Mac.")}</small>
                   </span>
-                  <Switch on={saveCloud} onChange={setSaveCloud} label="Sauvegarder ma progression" />
+                  <Switch on={saveCloud} onChange={setSaveCloud} label={t("Sauvegarder ma progression", "Back up my progress")} />
                 </motion.label>
               )}
               <button className="ob-cta" onClick={finish} disabled={!!bloom || !langs.length}>
-                Ouvrir ma première lecture <Icon name="book" size={16} />
+                {t("Ouvrir ma première lecture", "Open my first reading")} <Icon name="book" size={16} />
               </button>
               {!langs.length && (
                 <button className="ob-link" onClick={() => setN(1)}>
-                  Choisir une langue d'abord
+                  {t("Choisir une langue d'abord", "Choose a language first")}
                 </button>
               )}
             </motion.div>
@@ -409,19 +462,20 @@ export function Onboarding() {
 
           {n === 4 && (
             <motion.div key="4" className="ob-step form" {...stepAnim}>
-              <h2>Retrouver ma progression</h2>
-              <p className="ob-sub">Vos mots, vos expressions, vos leçons et vos réglages reviennent tels que vous les aviez laissés.</p>
+              <h2>{t("Retrouver ma progression", "Get my progress back")}</h2>
+              <p className="ob-sub">{t("Vos mots, vos expressions, vos leçons et vos réglages reviennent tels que vous les aviez laissés.", "Your words, phrases, lessons and settings come back just as you left them.")}</p>
               {restoring ? (
                 <div className="ob-restoring">
                   <Orb size={30} />
-                  <strong>{RESTORE_STAGE[restoring.stage] ?? "Restauration…"}</strong>
+                  <strong>{restoreStage(restoring.stage) ?? t("Restauration…", "Restoring…")}</strong>
                   <div className="ob-progress">
                     <i style={{ width: `${restoring.stage === "media" ? 8 + restoring.value * 92 : restoring.stage === "apply" ? 100 : 8}%` }} />
                   </div>
                 </div>
               ) : found === null ? (
                 <div className="ob-search">
-                  <Orb size={20} /> Recherche dans {backup?.icloud === false ? "le dossier choisi" : "votre iCloud Drive"}…
+                  <Orb size={20} />{" "}
+                  {backup?.icloud === false ? t("Recherche dans le dossier choisi…", "Searching the chosen folder…") : t("Recherche dans votre iCloud Drive…", "Searching your iCloud Drive…")}
                 </div>
               ) : found.length ? (
                 <div className="ob-grid backups">
@@ -439,12 +493,12 @@ export function Onboarding() {
                       <span className="ob-device">
                         <Icon name="laptop" size={15} /> {b.device_name}
                       </span>
-                      <strong className="pname">{formatNumber(b.counts.known)} mots connus</strong>
+                      <strong className="pname">{count(b.counts.known, "mot connu", "mots connus", "known word", "known words")}</strong>
                       <span className="pdesc">
-                        {formatNumber(b.counts.lessons)} leçon{b.counts.lessons > 1 ? "s" : ""}
-                        {b.counts.langs.length ? ` en ${b.counts.langs.map((l) => langInfo(l).name.toLowerCase()).join(", ")}` : ""}
+                        {count(b.counts.lessons, "leçon", "leçons", "lesson", "lessons")}
+                        {b.counts.langs.length ? t(` en ${b.counts.langs.map((l) => langLower(l)).join(", ")}`, ` in ${b.counts.langs.map((l) => langLower(l)).join(", ")}`) : ""}
                         <br />
-                        Sauvegardée {formatWhen(b.saved_at)}
+                        {t(`Sauvegardée ${formatWhen(b.saved_at)}`, `Backed up ${formatWhen(b.saved_at)}`)}
                       </span>
                       <AnimatePresence>
                         {picked === b.key && (
@@ -457,25 +511,30 @@ export function Onboarding() {
                   ))}
                 </div>
               ) : (
-                <p className="ob-empty">{searchError || `Aucune sauvegarde de Lumen dans ${backup?.icloud === false ? "ce dossier" : "votre iCloud Drive"}.`}</p>
+                <p className="ob-empty">
+                  {searchError ||
+                    (backup?.icloud === false
+                      ? t("Aucune sauvegarde de Lumen dans ce dossier.", "No Lumen backup in this folder.")
+                      : t("Aucune sauvegarde de Lumen dans votre iCloud Drive.", "No Lumen backup in your iCloud Drive."))}
+                </p>
               )}
               {restoreError && !restoring && <p className="ob-error">{restoreError}</p>}
               <div className="ob-actions">
                 <button className="ob-link" onClick={() => setN(0)} disabled={!!restoring}>
-                  Retour
+                  {t("Retour", "Back")}
                 </button>
                 {found !== null && !found.length ? (
                   <>
                     <button className="ob-link" onClick={chooseFolder}>
-                      Choisir un dossier…
+                      {t("Choisir un dossier…", "Choose a folder…")}
                     </button>
                     <button className="ob-cta" onClick={() => setN(1)}>
-                      Commencer sans sauvegarde <Icon name="forward" size={16} stroke={2} />
+                      {t("Commencer sans sauvegarde", "Start without a backup")} <Icon name="forward" size={16} stroke={2} />
                     </button>
                   </>
                 ) : (
                   <button className="ob-cta" onClick={doRestore} disabled={!picked || !!restoring || found === null}>
-                    Restaurer <Icon name="forward" size={16} stroke={2} />
+                    {t("Restaurer", "Restore")} <Icon name="forward" size={16} stroke={2} />
                   </button>
                 )}
               </div>

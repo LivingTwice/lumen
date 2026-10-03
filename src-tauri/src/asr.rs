@@ -69,10 +69,10 @@ pub fn transcribe(
     cancel: &AtomicBool,
     mut on_progress: impl FnMut(f64),
 ) -> Result<String> {
-    let name = language_name(lang).ok_or_else(|| anyhow!("langue non prise en charge par Qwen3-ASR"))?;
+    let name = language_name(lang).ok_or_else(|| anyhow!(crate::i18n::t("langue non prise en charge par Qwen3-ASR", "language not supported by Qwen3-ASR")))?;
     let be = backend()?;
     let model = engine.exclusive(|| LlamaModel::load_from_file(be, model_path, &LlamaModelParams::default().with_n_gpu_layers(999)))
-        .map_err(|e| anyhow!("modèle de transcription illisible : {e}"))?;
+        .map_err(|e| anyhow!(crate::tr!("modèle de transcription illisible : {e}", "unreadable transcription model: {e}")))?;
     let threads = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4).min(8) as i32;
     let params = MtmdContextParams {
         use_gpu: true,
@@ -82,10 +82,10 @@ pub fn transcribe(
         image_min_tokens: -1,
         image_max_tokens: -1,
     };
-    let mmproj = mmproj_path.to_str().ok_or_else(|| anyhow!("chemin du modèle illisible"))?;
+    let mmproj = mmproj_path.to_str().ok_or_else(|| anyhow!(crate::i18n::t("chemin du modèle illisible", "unreadable model path")))?;
     let mctx = engine
         .exclusive(|| MtmdContext::init_from_file(mmproj, &model, &params))
-        .map_err(|e| anyhow!("partie audio du modèle illisible : {e}"))?;
+        .map_err(|e| anyhow!(crate::tr!("partie audio du modèle illisible : {e}", "unreadable audio part of the model: {e}")))?;
     let pieces = split_on_silence(pcm, CHUNK_SECS);
     let mut texts: Vec<String> = Vec::new();
     for (a, b) in pieces {
@@ -113,7 +113,7 @@ fn transcribe_piece(model: &LlamaModel, mctx: &MtmdContext, audio: &[f32], name:
     } else {
         audio
     };
-    let bitmap = MtmdBitmap::from_audio_data(audio).map_err(|e| anyhow!("son illisible : {e}"))?;
+    let bitmap = MtmdBitmap::from_audio_data(audio).map_err(|e| anyhow!(crate::tr!("son illisible : {e}", "unreadable sound: {e}")))?;
     // format de Qwen3-ASR ; la langue imposée donne une sortie en texte seul
     let prompt = format!(
         "<|im_start|>system\n<|im_end|>\n<|im_start|>user\n{}<|im_end|>\n<|im_start|>assistant\nlanguage {name}<asr_text>",

@@ -3,6 +3,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { Icon } from "../../components/Icon";
 import { Orb, Sheet } from "../../components/ui";
 import { api, errorText, isNoModel } from "../../lib/api";
+import { count, t } from "../../lib/i18n";
 import { LEVELS, langInfo } from "../../lib/langs";
 import { formatNumber, useApp } from "../../lib/store";
 import { paginate, sentenceBounds } from "../../lib/tokenize";
@@ -121,7 +122,7 @@ export function Reader() {
         if (!alive) return;
         // leçon supprimée entre-temps : on l'oublie
         useApp.getState().forgetLesson(lessonId);
-        toast("Cette leçon n'existe plus.", "error");
+        toast(t("Cette leçon n'existe plus.", "This lesson no longer exists."), "error");
         go("library");
       });
     void api().aiWarmup().catch(() => {});
@@ -147,7 +148,7 @@ export function Reader() {
     if (!pl || !lesson) return;
     const nextId = pl.lessons[pl.lessons.indexOf(lesson.id) + 1];
     if (!nextId) {
-      toast(`Fin de la playlist « ${pl.name} »`, "light");
+      toast(t(`Fin de la playlist « ${pl.name} »`, `End of the playlist “${pl.name}”`), "light");
       void api().playlistUpdate(pl.id, { current: 0 });
       return;
     }
@@ -479,7 +480,7 @@ export function Reader() {
     void refreshKnown();
     if (page < pages.length - 1) {
       goPage(page + 1);
-      if (added) toast(`${added} mot${added > 1 ? "s" : ""} rejoigne${added > 1 ? "nt" : ""} vos mots connus`, "light");
+      if (added) toast(t(`${added} mot${added > 1 ? "s" : ""} rejoigne${added > 1 ? "nt" : ""} vos mots connus`, `${count(added, "", "", "word joins", "words join")} your known words`), "light");
     } else {
       playerRef.current?.stop();
       // leçon terminée : la prochaine lecture repart du début
@@ -622,10 +623,10 @@ export function Reader() {
     return (
       <div className="empty" style={{ flex: 1, justifyContent: "center" }}>
         <Orb size={44} />
-        <h3>Aucune lecture en cours</h3>
-        <p>Choisissez une leçon dans la bibliothèque.</p>
+        <h3>{t("Aucune lecture en cours", "Nothing being read")}</h3>
+        <p>{t("Choisissez une leçon dans la bibliothèque.", "Choose a lesson in the library.")}</p>
         <button className="btn primary" onClick={() => go("library")}>
-          Bibliothèque
+          {t("Bibliothèque", "Library")}
         </button>
       </div>
     );
@@ -719,8 +720,8 @@ export function Reader() {
             <button
               className="icon-btn no-drag"
               onClick={() => setSetting("reader_sidebar", sideHidden ? "1" : "0")}
-              aria-label={sideHidden ? "Afficher la barre latérale" : "Masquer la barre latérale"}
-              title={sideHidden ? "Afficher la barre latérale" : "Masquer la barre latérale pour lire plus au large"}
+              aria-label={sideHidden ? t("Afficher la barre latérale", "Show the sidebar") : t("Masquer la barre latérale", "Hide the sidebar")}
+              title={sideHidden ? t("Afficher la barre latérale", "Show the sidebar") : t("Masquer la barre latérale pour lire plus au large", "Hide the sidebar to read with more room")}
             >
               <Icon name="sidebar" size={18} />
             </button>
@@ -728,8 +729,8 @@ export function Reader() {
           <button
             className="icon-btn no-drag"
             onClick={() => (pl ? openPlaylist(pl.id) : go("library"))}
-            aria-label={pl ? "Retour à la playlist" : "Retour à la bibliothèque"}
-            title={pl ? `Retour à « ${pl.name} »` : undefined}
+            aria-label={pl ? t("Retour à la playlist", "Back to the playlist") : t("Retour à la bibliothèque", "Back to the library")}
+            title={pl ? t(`Retour à « ${pl.name} »`, `Back to “${pl.name}”`) : undefined}
           >
             <Icon name="back" size={18} />
           </button>
@@ -742,8 +743,8 @@ export function Reader() {
               {lesson.title}
             </span>
           )}
-          <button className="btn sm soft no-drag" onClick={() => setSimplify(true)} title="Réécrire ce texte à un niveau plus simple">
-            <Icon name="sparkle" size={14} /> Simplifier
+          <button className="btn sm soft no-drag" onClick={() => setSimplify(true)} title={t("Réécrire ce texte à un niveau plus simple", "Rewrite this text at a simpler level")}>
+            <Icon name="sparkle" size={14} /> {t("Simplifier", "Simplify")}
           </button>
         </div>
 
@@ -778,7 +779,7 @@ export function Reader() {
                     <button onClick={() => openPlaylist(pl.id)}>{pl.name}</button>
                   </>
                 ) : (
-                  <button onClick={() => go("library")}>Bibliothèque</button>
+                  <button onClick={() => go("library")}>{t("Bibliothèque", "Library")}</button>
                 )}
                 {!pl && lesson.collection && (
                   <>
@@ -790,13 +791,9 @@ export function Reader() {
               <h1 dir="auto">{lesson.title}</h1>
               <div className="reader-chips">
                 <span className="chip">{li.name}</span>
-                <span className="chip num">
-                  Page {page + 1} sur {pages.length}
-                </span>
-                <span className="chip new num">
-                  {newOnPage} nouveau{newOnPage > 1 ? "x" : ""}
-                </span>
-                <span className="chip num">{formatNumber(pr.words)} mots</span>
+                <span className="chip num">{t(`Page ${page + 1} sur ${pages.length}`, `Page ${page + 1} of ${pages.length}`)}</span>
+                <span className="chip new num">{t(`${newOnPage} nouveau${newOnPage > 1 ? "x" : ""}`, `${newOnPage} new`)}</span>
+                <span className="chip num">{count(pr.words, "mot", "mots", "word", "words")}</span>
               </div>
             </header>
 
@@ -831,26 +828,29 @@ export function Reader() {
             <div className="page-end">
               {pages.length > 1 && (
                 <div className="page-nav">
-                  <button className="icon-btn" onClick={() => goPage(page - 1)} disabled={page === 0} aria-label="Page précédente">
+                  <button className="icon-btn" onClick={() => goPage(page - 1)} disabled={page === 0} aria-label={t("Page précédente", "Previous page")}>
                     <Icon name="left" />
                   </button>
                   <span className="num">
                     {page + 1} / {pages.length}
                   </span>
-                  <button className="icon-btn" onClick={() => goPage(page + 1)} disabled={isLast} aria-label="Page suivante sans marquer">
+                  <button className="icon-btn" onClick={() => goPage(page + 1)} disabled={isLast} aria-label={t("Page suivante sans marquer", "Next page without marking")}>
                     <Icon name="right" />
                   </button>
                 </div>
               )}
               <p>
                 {settings.finish_marks_known !== "0" && newOnPage > 0
-                  ? `Les ${newOnPage} mots bleus que vous n'avez pas consultés rejoindront vos mots connus.`
+                  ? t(
+                      `Les ${newOnPage} mots bleus que vous n'avez pas consultés rejoindront vos mots connus.`,
+                      `The ${newOnPage} blue word${newOnPage > 1 ? "s" : ""} you didn't look up will join your known words.`,
+                    )
                   : isLast
-                    ? "Dernière page de la leçon."
-                    : "Tous les mots de cette page sont déjà rencontrés."}
+                    ? t("Dernière page de la leçon.", "Last page of the lesson.")
+                    : t("Tous les mots de cette page sont déjà rencontrés.", "You have already met every word on this page.")}
               </p>
               <button className="btn primary lg glow" onClick={finishPage} disabled={illum}>
-                {isLast ? "Terminer la leçon" : "Terminer la page"}
+                {isLast ? t("Terminer la leçon", "Finish the lesson") : t("Terminer la page", "Finish the page")}
                 <Icon name="forward" size={16} stroke={2} />
               </button>
             </div>
@@ -904,29 +904,29 @@ export function Reader() {
                   ))}
                   <Orb size={46} />
                 </div>
-                <h2>Leçon terminée</h2>
+                <h2>{t("Leçon terminée", "Lesson finished")}</h2>
                 <p className="muted">{lesson.title}</p>
                 <div className="complete-stats">
                   <div>
                     <strong>{formatNumber(complete.read)}</strong>
-                    <span>mots lus</span>
+                    <span>{t("mots lus", "words read")}</span>
                   </div>
                   <div>
                     <strong>{formatNumber(complete.known)}</strong>
-                    <span>nouveaux connus</span>
+                    <span>{t("nouveaux connus", "newly known")}</span>
                   </div>
                   <div>
                     <strong>{formatNumber(complete.lingqs)}</strong>
-                    <span>mots étudiés</span>
+                    <span>{t("mots étudiés", "words studied")}</span>
                   </div>
                 </div>
                 <div style={{ display: "flex", gap: 10 }}>
                   <button className="btn outline lg" onClick={() => go("library")}>
-                    Bibliothèque
+                    {t("Bibliothèque", "Library")}
                   </button>
                   {complete.next ? (
                     <button className="btn primary lg glow" onClick={() => openLesson(complete.next!, pl ? { playlist: pl.id } : undefined)}>
-                      Leçon suivante <Icon name="forward" size={16} />
+                      {t("Leçon suivante", "Next lesson")} <Icon name="forward" size={16} />
                     </button>
                   ) : (
                     <button
@@ -936,7 +936,7 @@ export function Reader() {
                         goPage(0);
                       }}
                     >
-                      Relire
+                      {t("Relire", "Read again")}
                     </button>
                   )}
                 </div>
@@ -946,7 +946,7 @@ export function Reader() {
         </AnimatePresence>
       </div>
 
-      <aside className="word-panel" aria-label="Panneau latéral">
+      <aside className="word-panel" aria-label={t("Panneau latéral", "Side panel")}>
         <div className="wp-top drag" data-tauri-drag-region>
           <AsideTabs value={aside} onChange={setAside} />
         </div>
@@ -1023,7 +1023,7 @@ function SimplifySheet({ open, onClose, lessonTitle, text, lang }: { open: boole
   };
 
   const save = async () => {
-    const id = await api().lessonCreate({ lang, title: `${lessonTitle} (${level})`, text: out, kind: "simplified", collection: "Versions simplifiées" });
+    const id = await api().lessonCreate({ lang, title: `${lessonTitle} (${level})`, text: out, kind: "simplified", collection: t("Versions simplifiées", "Simplified versions") });
     bump();
     onClose();
     openLesson(id);
@@ -1033,28 +1033,33 @@ function SimplifySheet({ open, onClose, lessonTitle, text, lang }: { open: boole
     <Sheet
       open={open}
       onClose={() => state !== "run" && onClose()}
-      title="Simplifier le texte"
+      title={t("Simplifier le texte", "Simplify the text")}
       footer={
         state === "done" ? (
           <>
             <button className="btn ghost" onClick={run}>
-              Recommencer
+              {t("Recommencer", "Start over")}
             </button>
             <button className="btn primary" onClick={save}>
-              Créer la leçon simplifiée
+              {t("Créer la leçon simplifiée", "Create the simplified lesson")}
             </button>
           </>
         ) : (
           <button className="btn primary glow" onClick={run} disabled={state === "run"}>
-            <Icon name="sparkle" size={15} /> {state === "run" ? "Réécriture…" : "Réécrire"}
+            <Icon name="sparkle" size={15} /> {state === "run" ? t("Réécriture…", "Rewriting…") : t("Réécrire", "Rewrite")}
           </button>
         )
       }
     >
       <div className="import-pane">
-        <p className="muted">L'IA locale réécrit la leçon avec des phrases plus courtes et un vocabulaire plus courant, en gardant le sens. Une nouvelle leçon est créée : l'originale reste intacte.</p>
+        <p className="muted">
+          {t(
+            "L'IA locale réécrit la leçon avec des phrases plus courtes et un vocabulaire plus courant, en gardant le sens. Une nouvelle leçon est créée : l'originale reste intacte.",
+            "The local AI rewrites the lesson with shorter sentences and more common vocabulary, keeping the meaning. A new lesson is created: the original stays intact.",
+          )}
+        </p>
         <div className="field">
-          <span className="label">Niveau visé</span>
+          <span className="label">{t("Niveau visé", "Target level")}</span>
           <div style={{ display: "flex", gap: 8 }}>
             {LEVELS.map((l) => (
               <button key={l.id} className={`chip ${level === l.id ? "on" : ""}`} onClick={() => setLevel(l.id)} disabled={state === "run"}>

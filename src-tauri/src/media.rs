@@ -32,13 +32,13 @@ pub fn media_dir(data_dir: &Path) -> PathBuf {
 
 pub fn sidecar_path() -> Result<PathBuf> {
     let exe = std::env::current_exe()?;
-    let dir = exe.parent().ok_or_else(|| anyhow!("dossier de l'application introuvable"))?;
+    let dir = exe.parent().ok_or_else(|| anyhow!(crate::i18n::t("dossier de l'application introuvable", "application folder not found")))?;
     let name = if cfg!(windows) { "lumen-whisper.exe" } else { "lumen-whisper" };
     let p = dir.join(name);
     if p.exists() {
         return Ok(p);
     }
-    Err(anyhow!("le composant de transcription est absent de l'application"))
+    Err(anyhow!(crate::i18n::t("le composant de transcription est absent de l'application", "the transcription component is missing from the app")))
 }
 
 /// Copie le fichier dans la bibliothèque de Lumen et renvoie son nouveau chemin.
@@ -72,7 +72,7 @@ pub async fn transcribe(
         .stderr(Stdio::null())
         .kill_on_drop(true)
         .spawn()?;
-    let stdout = child.stdout.take().ok_or_else(|| anyhow!("sortie indisponible"))?;
+    let stdout = child.stdout.take().ok_or_else(|| anyhow!(crate::i18n::t("sortie indisponible", "output unavailable")))?;
     let mut lines = BufReader::new(stdout).lines();
     let mut result: Option<Vec<WWord>> = None;
     let mut error: Option<String> = None;
@@ -87,7 +87,7 @@ pub async fn transcribe(
             Some("done") => {
                 result = Some(serde_json::from_value(v["words"].clone()).unwrap_or_default());
             }
-            Some("error") => error = Some(v["message"].as_str().unwrap_or("erreur inconnue").to_string()),
+            Some("error") => error = Some(v["message"].as_str().unwrap_or(crate::i18n::t("erreur inconnue", "unknown error")).to_string()),
             _ => {}
         }
     }
@@ -95,7 +95,7 @@ pub async fn transcribe(
     if let Some(e) = error {
         return Err(anyhow!(e));
     }
-    result.ok_or_else(|| anyhow!("la transcription s'est arrêtée sans résultat"))
+    result.ok_or_else(|| anyhow!(crate::i18n::t("la transcription s'est arrêtée sans résultat", "the transcription stopped without a result")))
 }
 
 /// Assemble le texte et les horodatages par mot : [[début, fin, t0, t1], …]
@@ -527,8 +527,8 @@ async fn run_ytdlp(
     cmd.args(args);
     cmd.stdout(Stdio::piped()).stderr(Stdio::piped()).kill_on_drop(true);
     let mut child = cmd.spawn()?;
-    let stdout = child.stdout.take().ok_or_else(|| anyhow!("sortie indisponible"))?;
-    let stderr = child.stderr.take().ok_or_else(|| anyhow!("sortie indisponible"))?;
+    let stdout = child.stdout.take().ok_or_else(|| anyhow!(crate::i18n::t("sortie indisponible", "output unavailable")))?;
+    let stderr = child.stderr.take().ok_or_else(|| anyhow!(crate::i18n::t("sortie indisponible", "output unavailable")))?;
     let err_task = tokio::spawn(async move {
         let mut lines = BufReader::new(stderr).lines();
         let mut last = Vec::new();
@@ -576,9 +576,10 @@ async fn run_with_fallback(
         Ok(v) => Ok(v),
         Err(e) if needs_cookies(&e) => match browser {
             Some(b) => run_ytdlp(data_dir, ytdlp, args, Some(b), on_progress).await,
-            None => Err(anyhow!(
-                "YouTube demande une vérification pour cette vidéo. Choisissez votre navigateur dans Réglages › YouTube pour que Lumen utilise votre session. ({e})"
-            )),
+            None => Err(anyhow!(crate::tr!(
+                "YouTube demande une vérification pour cette vidéo. Choisissez votre navigateur dans Réglages › YouTube pour que Lumen utilise votre session. ({e})",
+                "YouTube asks for a verification for this video. Choose your browser in Settings › YouTube so that Lumen can use your session. ({e})"
+            ))),
         },
         Err(e) => Err(e),
     }
@@ -610,8 +611,8 @@ pub async fn yt_audio(
         url.into(),
     ];
     let out = run_with_fallback(data_dir, ytdlp, &args, browser, on_progress).await?;
-    let title = out.iter().find_map(|l| l.strip_prefix("TITLE:")).unwrap_or("Vidéo").to_string();
-    let file = out.iter().find_map(|l| l.strip_prefix("FILE:")).ok_or_else(|| anyhow!("fichier audio introuvable"))?;
+    let title = out.iter().find_map(|l| l.strip_prefix("TITLE:")).unwrap_or(crate::i18n::t("Vidéo", "Video")).to_string();
+    let file = out.iter().find_map(|l| l.strip_prefix("FILE:")).ok_or_else(|| anyhow!(crate::i18n::t("fichier audio introuvable", "audio file not found")))?;
     Ok((PathBuf::from(file), title))
 }
 
@@ -639,7 +640,7 @@ pub async fn yt_video(
         url.into(),
     ];
     let out = run_with_fallback(data_dir, ytdlp, &args, browser, on_progress).await?;
-    let file = out.iter().find_map(|l| l.strip_prefix("FILE:")).ok_or_else(|| anyhow!("fichier vidéo introuvable"))?;
+    let file = out.iter().find_map(|l| l.strip_prefix("FILE:")).ok_or_else(|| anyhow!(crate::i18n::t("fichier vidéo introuvable", "video file not found")))?;
     Ok(PathBuf::from(file))
 }
 

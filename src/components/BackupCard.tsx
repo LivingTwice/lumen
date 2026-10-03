@@ -2,6 +2,7 @@ import { AnimatePresence, motion } from "motion/react";
 import { useBackup } from "../lib/backup";
 import { useApp } from "../lib/store";
 import { Icon } from "./Icon";
+import { t } from "../lib/i18n";
 
 /** Une semaine de répit après « Plus tard ». */
 const SNOOZE = 7 * 86400;
@@ -22,8 +23,8 @@ export function BackupCard() {
 
   const activate = async () => {
     if (!(await useBackup.getState().enable(true))) return;
-    const where = useBackup.getState().status?.icloud ? "dans iCloud Drive" : "dans le dossier choisi";
-    toast(useBackup.getState().status?.last_at ? `Progression sauvegardée ${where}` : `Sauvegarde activée ${where}`, "light");
+    const where = useBackup.getState().status?.icloud ? t("dans iCloud Drive", "to iCloud Drive") : t("dans le dossier choisi", "to the chosen folder");
+    toast(useBackup.getState().status?.last_at ? t(`Progression sauvegardée ${where}`, `Progress backed up ${where}`) : t(`Sauvegarde activée ${where}`, `Backup turned on, ${where}`), "light");
   };
 
   const openSettings = () => {
@@ -44,21 +45,24 @@ export function BackupCard() {
         >
           <div className="update-head">
             <span className="update-dot" />
-            <strong>Mettez vos progrès à l'abri</strong>
+            <strong>{t("Mettez vos progrès à l'abri", "Keep your progress safe")}</strong>
             <button
               className="icon-btn"
               style={{ width: 24, height: 24, marginLeft: "auto" }}
               onClick={() => void setSetting("backup_snooze", String(Math.floor(Date.now() / 1000)))}
-              aria-label="Plus tard"
+              aria-label={t("Plus tard", "Later")}
             >
               <Icon name="close" size={12} />
             </button>
           </div>
           <span className="muted" style={{ fontSize: 11.5, lineHeight: 1.45 }}>
-            Une copie de vos mots et de vos leçons dans votre {status.icloud ? "iCloud Drive" : "dossier de sauvegarde"}, si ce Mac venait à s'effacer.
+            {t(
+              `Une copie de vos mots et de vos leçons dans votre ${status.icloud ? "iCloud Drive" : "dossier de sauvegarde"}, si ce Mac venait à s'effacer.`,
+              `A copy of your words and lessons in your ${status.icloud ? "iCloud Drive" : "backup folder"}, in case this Mac is ever wiped.`,
+            )}
           </span>
           <button className="btn sm primary glow" disabled={saving} onClick={() => void activate()}>
-            <Icon name="cloud" size={14} /> {saving ? "Sauvegarde…" : "Activer la sauvegarde"}
+            <Icon name="cloud" size={14} /> {saving ? t("Sauvegarde…", "Backing up…") : t("Activer la sauvegarde", "Turn on backup")}
           </button>
         </motion.div>
       )}
@@ -75,7 +79,7 @@ export function BackupCard() {
         >
           <div className="update-head">
             <span className="update-dot warn" />
-            <strong>Sauvegarde interrompue</strong>
+            <strong>{t("Sauvegarde interrompue", "Backup interrupted")}</strong>
           </div>
           <span className="muted" style={{ fontSize: 11.5, lineHeight: 1.45 }}>
             {status.error}

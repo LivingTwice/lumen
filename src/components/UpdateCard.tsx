@@ -1,6 +1,7 @@
 import { AnimatePresence, motion } from "motion/react";
 import { useUpdate } from "../lib/updater";
 import { Icon } from "./Icon";
+import { t } from "../lib/i18n";
 
 /** Carte discrète en bas de la barre latérale quand une mise à jour existe. */
 export function UpdateCard() {
@@ -18,16 +19,16 @@ export function UpdateCard() {
         >
           <div className="update-head">
             <span className="update-dot" />
-            <strong>{phase === "ready" ? "Mise à jour installée" : `Lumen ${version} est disponible`}</strong>
+            <strong>{phase === "ready" ? t("Mise à jour installée", "Update installed") : t(`Lumen ${version} est disponible`, `Lumen ${version} is available`)}</strong>
             {phase === "available" && (
-              <button className="icon-btn" style={{ width: 24, height: 24, marginLeft: "auto" }} onClick={dismiss} aria-label="Plus tard">
+              <button className="icon-btn" style={{ width: 24, height: 24, marginLeft: "auto" }} onClick={dismiss} aria-label={t("Plus tard", "Later")}>
                 <Icon name="close" size={12} />
               </button>
             )}
           </div>
           {phase === "available" && (
             <button className="btn sm primary glow" onClick={install}>
-              <Icon name="download" size={14} /> Mettre à jour
+              <Icon name="download" size={14} /> {t("Mettre à jour", "Update")}
             </button>
           )}
           {phase === "downloading" && (
@@ -37,7 +38,7 @@ export function UpdateCard() {
           )}
           {phase === "ready" && (
             <button className="btn sm primary glow" onClick={restart}>
-              Redémarrer Lumen
+              {t("Redémarrer Lumen", "Restart Lumen")}
             </button>
           )}
           {error && phase !== "available" && <span className="muted" style={{ fontSize: 11.5 }}>{error}</span>}

@@ -4,8 +4,9 @@ import { Icon } from "../components/Icon";
 import { Orb, Segmented } from "../components/ui";
 import { api, errorText, isTauri } from "../lib/api";
 import { pickSavePath } from "../lib/dialogs";
-import { langInfo } from "../lib/langs";
-import { formatNumber, useApp } from "../lib/store";
+import { count, t } from "../lib/i18n";
+import { inLang } from "../lib/langs";
+import { useApp } from "../lib/store";
 import { pronounce } from "../lib/pronounce";
 import type { Term, TermQuery } from "../lib/types";
 
@@ -41,18 +42,18 @@ export function Vocabulary() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lang, filter, search]);
 
-  const setStatus = async (t: Term, status: number) => {
-    setItems((prev) => prev.map((x) => (x.term === t.term ? { ...x, status: status as Term["status"] } : x)));
-    await api().termSet({ lang, term: t.term, status });
-    if (status === 4 || t.status === 4) void refreshKnown();
+  const setStatus = async (tm: Term, status: number) => {
+    setItems((prev) => prev.map((x) => (x.term === tm.term ? { ...x, status: status as Term["status"] } : x)));
+    await api().termSet({ lang, term: tm.term, status });
+    if (status === 4 || tm.status === 4) void refreshKnown();
   };
 
   const exportCsv = async () => {
-    const path = await pickSavePath(`lumen-${lang}-vocabulaire.csv`);
+    const path = await pickSavePath(t(`lumen-${lang}-vocabulaire.csv`, `lumen-${lang}-vocabulary.csv`));
     if (!path) return;
     try {
       await api().exportVocab(lang, path);
-      toast("Vocabulaire exporté (compatible Anki)", "light");
+      toast(t("Vocabulaire exporté (compatible Anki)", "Vocabulary exported (Anki compatible)"), "light");
     } catch (e) {
       toast(errorText(e), "error");
     }
@@ -65,12 +66,12 @@ export function Vocabulary() {
         <div className="view-inner">
           <header className="page-head">
             <div>
-              <h1>Vocabulaire</h1>
-              <p>Les mots et expressions que vous avez rencontrés en {langInfo(lang).name.toLowerCase()}.</p>
+              <h1>{t("Vocabulaire", "Vocabulary")}</h1>
+              <p>{t(`Les mots et expressions que vous avez rencontrés ${inLang(lang)}.`, `The words and phrases you have met ${inLang(lang)}.`)}</p>
             </div>
             {isTauri && (
               <button className="btn soft" onClick={exportCsv}>
-                <Icon name="export" size={16} /> Exporter en CSV
+                <Icon name="export" size={16} /> {t("Exporter en CSV", "Export as CSV")}
               </button>
             )}
           </header>
@@ -78,59 +79,69 @@ export function Vocabulary() {
           <div className="vocab-toolbar">
             <Segmented
               id="vocab-filter"
-              label="Filtrer"
+              label={t("Filtrer", "Filter")}
               value={filter}
               onChange={(v) => setFilter(v as TermQuery["filter"])}
               options={[
-                { value: "learning", label: "En apprentissage" },
-                { value: "known", label: "Connus" },
-                { value: "phrases", label: "Expressions" },
-                { value: "ignored", label: "Ignorés" },
-                { value: "all", label: "Tous" },
+                { value: "learning", label: t("En apprentissage", "Learning") },
+                { value: "known", label: t("Connus", "Known") },
+                { value: "phrases", label: t("Expressions", "Phrases") },
+                { value: "ignored", label: t("Ignorés", "Ignored") },
+                { value: "all", label: t("Tous", "All") },
               ]}
             />
             <label className="search" style={{ marginLeft: "auto" }}>
               <Icon name="search" size={16} />
-              <input placeholder="Chercher un mot ou un sens" value={search} onChange={(e) => setSearch(e.target.value)} aria-label="Chercher" />
+              <input placeholder={t("Chercher un mot ou un sens", "Search a word or a meaning")} value={search} onChange={(e) => setSearch(e.target.value)} aria-label={t("Chercher", "Search")} />
             </label>
-            <span className="muted num">{formatNumber(total)} terme{total > 1 ? "s" : ""}</span>
+            <span className="muted num">{count(total, "terme", "termes", "term", "terms")}</span>
           </div>
 
           {!loading && items.length === 0 ? (
             <div className="empty">
               <Orb size={40} />
-              <h3>Rien ici pour l'instant</h3>
-              <p>Touchez les mots pendant la lecture : ils apparaîtront ici, avec leur traduction et la phrase où vous les avez croisés.</p>
+              <h3>{t("Rien ici pour l'instant", "Nothing here yet")}</h3>
+              <p>
+                {t(
+                  "Touchez les mots pendant la lecture : ils apparaîtront ici, avec leur traduction et la phrase où vous les avez croisés.",
+                  "Tap words while you read: they will appear here, with their translation and the sentence where you met them.",
+                )}
+              </p>
             </div>
           ) : (
             <div className="vocab-list">
               <div className="vocab-row head">
-                <span>Terme</span>
-                <span>Sens</span>
-                <span>Rencontré dans</span>
-                <span>Statut</span>
+                <span>{t("Terme", "Term")}</span>
+                <span>{t("Sens", "Meaning")}</span>
+                <span>{t("Rencontré dans", "Met in")}</span>
+                <span>{t("Statut", "Status")}</span>
               </div>
-              {items.map((t, i) => (
+              {items.map((tm, i) => (
                 <motion.div
-                  key={t.term}
+                  key={tm.term}
                   className="vocab-row"
                   initial={{ opacity: 0 }}
                   animate={{ opacity: 1 }}
                   transition={{ delay: Math.min(i, 20) * 0.012 }}
                 >
                   <span className="vocab-term" style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                    {t.term}
-                    <button className="icon-btn" style={{ width: 26, height: 26 }} onClick={() => void pronounce(t.term, lang, settings[`voice_${lang}`])} aria-label={`Prononcer ${t.term}`}>
+                    {tm.term}
+                    <button
+                      className="icon-btn"
+                      style={{ width: 26, height: 26 }}
+                      onClick={() => void pronounce(tm.term, lang, settings[`voice_${lang}`])}
+                      aria-label={t(`Prononcer ${tm.term}`, `Pronounce ${tm.term}`)}
+                    >
                       <Icon name="speaker" size={14} />
                     </button>
                   </span>
-                  <span className="vocab-tr">{t.translation || <span className="muted">—</span>}</span>
-                  <span className="vocab-ctx" title={t.context}>
-                    {t.context || "—"}
+                  <span className="vocab-tr">{tm.translation || <span className="muted">·</span>}</span>
+                  <span className="vocab-ctx" title={tm.context}>
+                    {tm.context || "·"}
                   </span>
-                  <span className="status-dots" role="radiogroup" aria-label={`Statut de ${t.term}`}>
+                  <span className="status-dots" role="radiogroup" aria-label={t(`Statut de ${tm.term}`, `Status of ${tm.term}`)}>
                     {[1, 2, 3, 4].map((s) => (
-                      <button key={s} role="radio" aria-checked={t.status === s} className={`s${s} ${t.status === s ? "on" : ""}`} onClick={() => setStatus(t, s)}>
+                      <button key={s} role="radio" aria-checked={tm.status === s} className={`s${s} ${tm.status === s ? "on" : ""}`} onClick={() => setStatus(tm, s)}>
                         {s === 4 ? <Icon name="check" size={13} stroke={2.4} /> : s}
                       </button>
                     ))}
@@ -142,7 +153,7 @@ export function Vocabulary() {
           {items.length < total && (
             <div style={{ display: "flex", justifyContent: "center", padding: 20 }}>
               <button className="btn soft" onClick={() => load(items.length)} disabled={loading}>
-                Afficher plus
+                {t("Afficher plus", "Show more")}
               </button>
             </div>
           )}

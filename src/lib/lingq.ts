@@ -3,18 +3,21 @@
 // pendant qu'on lit ou qu'on change de vue.
 import { create } from "zustand";
 import { api, errorText } from "./api";
+import { count, t } from "./i18n";
 import { langInfo } from "./langs";
-import { formatNumber, useApp } from "./store";
+import { useApp } from "./store";
 import type { LangCode, LingqLang, LingqReport, LingqStage } from "./types";
 
 export const LINGQ_KEY_URL = "https://www.lingq.com/accounts/apikey/";
 
-export const STAGE_LABEL: Record<LingqStage, string> = {
-  known: "Mots connus",
-  ignored: "Mots ignorés",
-  cards: "LingQ",
-  lessons: "Leçons",
-};
+export function stageLabel(stage: LingqStage): string {
+  return {
+    known: t("Mots connus", "Known words"),
+    ignored: t("Mots ignorés", "Ignored words"),
+    cards: "LingQ",
+    lessons: t("Leçons", "Lessons"),
+  }[stage];
+}
 
 type Phase = "idle" | "scanning" | "ready" | "importing" | "done";
 type Option = "vocab" | "lessons" | "audio";
@@ -40,19 +43,17 @@ interface LingqState {
   reset(): void;
 }
 
-/** « 1 leçon », « 3 leçons » : accord simple pour les résumés. */
-export function plural(n: number, one: string, many: string): string {
-  return `${formatNumber(n)} ${n > 1 ? many : one}`;
-}
+/** « 1 leçon », « 3 leçons » : nombre et nom accordés (français, puis anglais). */
+export const plural = count;
 
 /** « 120 mots et 3 leçons importés », ou chaîne vide si rien n'a changé. */
 export function summary(r: LingqReport): string {
   const parts: string[] = [];
-  if (r.words) parts.push(plural(r.words, "mot", "mots"));
-  if (r.lessons) parts.push(plural(r.lessons, "leçon", "leçons"));
+  if (r.words) parts.push(plural(r.words, "mot", "mots", "word", "words"));
+  if (r.lessons) parts.push(plural(r.lessons, "leçon", "leçons", "lesson", "lessons"));
   if (!parts.length) return "";
   const fem = !r.words;
-  return `${parts.join(" et ")} import${fem ? "ée" : "é"}${r.words + r.lessons > 1 ? "s" : ""}`;
+  return t(`${parts.join(" et ")} import${fem ? "ée" : "é"}${r.words + r.lessons > 1 ? "s" : ""}`, `${parts.join(" and ")} imported`);
 }
 
 export const useLingq = create<LingqState>((set, get) => ({
@@ -74,7 +75,7 @@ export const useLingq = create<LingqState>((set, get) => ({
     try {
       const account = await api().lingqScan(key);
       if (!account.length) {
-        set({ phase: "idle", error: "Ce compte LingQ ne contient rien dans les langues que Lumen propose." });
+        set({ phase: "idle", error: t("Ce compte LingQ ne contient rien dans les langues que Lumen propose.", "This LingQ account has nothing in the languages Lumen offers.") });
         return;
       }
       // par défaut, seulement les langues déjà étudiées dans Lumen (les autres se cochent à la main)
@@ -117,11 +118,11 @@ export const useLingq = create<LingqState>((set, get) => ({
       app.bumpLibrary();
       await app.refreshKnown();
       const s = summary(report);
-      const fallback = report.skipped ? "Tout était déjà dans Lumen" : "Rien de nouveau à importer";
-      app.toast(report.cancelled ? `Import interrompu${s ? ` : ${s}` : ""}` : s || fallback, "light");
+      const fallback = report.skipped ? t("Tout était déjà dans Lumen", "Everything was already in Lumen") : t("Rien de nouveau à importer", "Nothing new to import");
+      app.toast(report.cancelled ? t(`Import interrompu${s ? ` : ${s}` : ""}`, `Import stopped${s ? `: ${s}` : ""}`) : s || fallback, "light");
     } catch (e) {
       set({ phase: "ready", error: errorText(e), stage: null });
-      app.toast(`Import LingQ impossible : ${errorText(e)}`, "error");
+      app.toast(t(`Import LingQ impossible : ${errorText(e)}`, `LingQ import failed: ${errorText(e)}`), "error");
     }
   },
 
@@ -136,6 +137,6 @@ export const useLingq = create<LingqState>((set, get) => ({
 
 /** Ligne de progression lisible : « Anglais · Mots connus ». */
 export function stageText(stage: LingqState["stage"]): string {
-  if (!stage) return "Connexion à LingQ…";
-  return `${langInfo(stage.lang).name} · ${STAGE_LABEL[stage.stage]}`;
+  if (!stage) return t("Connexion à LingQ…", "Connecting to LingQ…");
+  return `${langInfo(stage.lang).name} · ${stageLabel(stage.stage)}`;
 }

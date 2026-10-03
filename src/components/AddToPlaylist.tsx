@@ -6,6 +6,7 @@ import type { LessonSummary, Playlist } from "../lib/types";
 import { PlaylistCover } from "./Cover";
 import { Icon } from "./Icon";
 import { Sheet } from "./ui";
+import { t } from "../lib/i18n";
 
 /** « Ajouter à une playlist » : une leçon entre dans une ou plusieurs playlists, ou en crée une. */
 export function AddToPlaylist({ lesson, all, onClose }: { lesson: LessonSummary | null; all: LessonSummary[]; onClose(): void }) {
@@ -51,7 +52,8 @@ export function AddToPlaylist({ lesson, all, onClose }: { lesson: LessonSummary 
       setName("");
       const ls = await api().playlistsList(shown.lang);
       setLists(ls);
-      toast(`Playlist « ${ls.find((p) => p.id === id)?.name ?? n} » créée`, "light");
+      const made = ls.find((p) => p.id === id)?.name ?? n;
+      toast(t(`Playlist « ${made} » créée`, `Playlist “${made}” created`), "light");
     } catch (e) {
       toast(errorText(e), "error");
     }
@@ -61,8 +63,8 @@ export function AddToPlaylist({ lesson, all, onClose }: { lesson: LessonSummary 
   const withShown = all.some((l) => l.id === shown.id) ? all : [...all, shown];
 
   return (
-    <Sheet open={!!lesson} onClose={onClose} title="Ajouter à une playlist" width={520} footer={<button className="btn primary" onClick={onClose}>Terminé</button>}>
-      <p className="muted atp-lesson">« {shown.title} »</p>
+    <Sheet open={!!lesson} onClose={onClose} title={t("Ajouter à une playlist", "Add to a playlist")} width={520} footer={<button className="btn primary" onClick={onClose}>{t("Terminé", "Done")}</button>}>
+      <p className="muted atp-lesson">{t(`« ${shown.title} »`, `“${shown.title}”`)}</p>
       {lists && lists.length > 0 && (
         <div className="pick-list atp-list">
           {lists.map((p) => {
@@ -74,7 +76,7 @@ export function AddToPlaylist({ lesson, all, onClose }: { lesson: LessonSummary 
                 </span>
                 <span className="pick-body">
                   <strong>{p.name}</strong>
-                  <span className="num">{plural(p.lessons.length, "leçon")}</span>
+                  <span className="num">{plural(p.lessons.length, "leçon", "lesson")}</span>
                 </span>
                 <span className="pick-check" aria-hidden="true">
                   <Icon name={on ? "check" : "plus"} size={15} stroke={2.2} />
@@ -88,15 +90,15 @@ export function AddToPlaylist({ lesson, all, onClose }: { lesson: LessonSummary 
         <input
           ref={input}
           className="input"
-          placeholder={lists && !lists.length ? "Nom de votre première playlist" : "Nouvelle playlist"}
+          placeholder={lists && !lists.length ? t("Nom de votre première playlist", "Name of your first playlist") : t("Nouvelle playlist", "New playlist")}
           value={name}
           maxLength={120}
           onChange={(e) => setName(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && name.trim() && create()}
-          aria-label="Nom de la nouvelle playlist"
+          aria-label={t("Nom de la nouvelle playlist", "Name of the new playlist")}
         />
         <button className="btn soft" onClick={create} disabled={!name.trim()}>
-          <Icon name="plus" size={15} /> Créer
+          <Icon name="plus" size={15} /> {t("Créer", "Create")}
         </button>
       </div>
     </Sheet>

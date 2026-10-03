@@ -3,7 +3,8 @@ import { useState } from "react";
 import { Icon } from "../components/Icon";
 import { Orb, Switch } from "../components/ui";
 import { isTauri } from "../lib/api";
-import { langInfo } from "../lib/langs";
+import { t } from "../lib/i18n";
+import { langInfo, langLower } from "../lib/langs";
 import { LINGQ_KEY_URL, plural, stageText, summary, useLingq } from "../lib/lingq";
 import { formatNumber, useApp } from "../lib/store";
 
@@ -29,14 +30,19 @@ export function LingqSection() {
   return (
     <section className="set-section">
       <h2>LingQ</h2>
-      <p>Retrouvez dans Lumen tout votre parcours LingQ : mots connus et ignorés, LingQ avec leurs traductions et leurs notes, et les leçons de tous vos cours avec leur audio.</p>
+      <p>
+        {t(
+          "Retrouvez dans Lumen tout votre parcours LingQ : mots connus et ignorés, LingQ avec leurs traductions et leurs notes, et les leçons de tous vos cours avec leur audio.",
+          "Bring your whole LingQ journey into Lumen: known and ignored words, LingQs with their translations and notes, and the lessons of all your courses with their audio.",
+        )}
+      </p>
 
       <div className="set-card">
         <div className="set-row">
           <div className="grow">
-            <strong>Clé API LingQ</strong>
+            <strong>{t("Clé API LingQ", "LingQ API key")}</strong>
             <span>
-              Copiez-la depuis{" "}
+              {t("Copiez-la depuis", "Copy it from")}{" "}
               <a
                 className="link"
                 href={LINGQ_KEY_URL}
@@ -47,7 +53,7 @@ export function LingqSection() {
               >
                 lingq.com/accounts/apikey <Icon name="external" size={12} stroke={2} />
               </a>
-              , connecté à votre compte. Elle reste sur ce Mac.
+              {t(", connecté à votre compte. Elle reste sur ce Mac.", ", signed in to your account. It stays on this Mac.")}
             </span>
           </div>
         </div>
@@ -57,27 +63,27 @@ export function LingqSection() {
               className="input"
               type={show ? "text" : "password"}
               value={key}
-              placeholder="Collez votre clé ici"
+              placeholder={t("Collez votre clé ici", "Paste your key here")}
               spellCheck={false}
               autoComplete="off"
               autoCorrect="off"
               onChange={(e) => setSetting("lingq_key", e.target.value.trim())}
               onKeyDown={(e) => e.key === "Enter" && key && !busy && lq.scan(key)}
-              aria-label="Clé API LingQ"
+              aria-label={t("Clé API LingQ", "LingQ API key")}
             />
-            <button className={`icon-btn ${show ? "on" : ""}`} onClick={() => setShow(!show)} aria-label={show ? "Masquer la clé" : "Afficher la clé"}>
+            <button className={`icon-btn ${show ? "on" : ""}`} onClick={() => setShow(!show)} aria-label={show ? t("Masquer la clé", "Hide the key") : t("Afficher la clé", "Show the key")}>
               <Icon name="eye" size={15} />
             </button>
           </div>
           <button className="btn sm primary" disabled={!key || busy} onClick={() => lq.scan(key)}>
-            {lq.phase === "scanning" ? "Analyse…" : lq.account.length ? "Analyser à nouveau" : "Analyser mon compte"}
+            {lq.phase === "scanning" ? t("Analyse…", "Scanning…") : lq.account.length ? t("Analyser à nouveau", "Scan again") : t("Analyser mon compte", "Scan my account")}
           </button>
         </div>
         <AnimatePresence initial={false}>
           {lq.phase === "scanning" && (
             <motion.div key="scan" className="set-row lingq-wait" {...enter}>
               <Orb size={18} />
-              <span>Lecture de votre compte LingQ, langue par langue…</span>
+              <span>{t("Lecture de votre compte LingQ, langue par langue…", "Reading your LingQ account, language by language…")}</span>
             </motion.div>
           )}
           {lq.error && (
@@ -100,12 +106,12 @@ export function LingqSection() {
                     <i style={{ width: `${pct}%` }} />
                   </div>
                   <span className="num">
-                    {lq.total ? `${formatNumber(lq.done)} sur ${formatNumber(lq.total)}` : "Préparation…"}
+                    {lq.total ? t(`${formatNumber(lq.done)} sur ${formatNumber(lq.total)}`, `${formatNumber(lq.done)} of ${formatNumber(lq.total)}`) : t("Préparation…", "Preparing…")}
                     {lq.stage?.stage === "lessons" && lq.lastLesson ? ` · ${lq.lastLesson}` : ""}
                   </span>
                 </div>
                 <button className="btn sm ghost" onClick={lq.cancel}>
-                  Arrêter
+                  {t("Arrêter", "Stop")}
                 </button>
               </div>
             ) : (
@@ -116,13 +122,15 @@ export function LingqSection() {
                       <Icon name="check" size={15} stroke={2.2} />
                     </span>
                     <div className="grow">
-                      <strong>{lq.report.cancelled ? "Import interrompu" : "Import terminé"}</strong>
+                      <strong>{lq.report.cancelled ? t("Import interrompu", "Import stopped") : t("Import terminé", "Import finished")}</strong>
                       <span>
                         {[
-                          summary(lq.report) || "Rien de nouveau",
-                          lq.report.skipped ? `${plural(lq.report.skipped, "leçon déjà présente", "leçons déjà présentes")}` : "",
-                          lq.report.failed ? `${plural(lq.report.failed, "leçon inaccessible", "leçons inaccessibles")} (réservées ou vides)` : "",
-                          lq.report.audio_failed ? `${plural(lq.report.audio_failed, "leçon", "leçons")} sans audio` : "",
+                          summary(lq.report) || t("Rien de nouveau", "Nothing new"),
+                          lq.report.skipped ? plural(lq.report.skipped, "leçon déjà présente", "leçons déjà présentes", "lesson already there", "lessons already there") : "",
+                          lq.report.failed
+                            ? `${plural(lq.report.failed, "leçon inaccessible", "leçons inaccessibles", "unavailable lesson", "unavailable lessons")} ${t("(réservées ou vides)", "(restricted or empty)")}`
+                            : "",
+                          lq.report.audio_failed ? `${plural(lq.report.audio_failed, "leçon", "leçons", "lesson", "lessons")} ${t("sans audio", "without audio")}` : "",
                         ]
                           .filter(Boolean)
                           .join(" · ")}
@@ -133,7 +141,7 @@ export function LingqSection() {
 
                 <div className="set-row">
                   <div className="grow">
-                    <span className="eyebrow">Sur votre compte</span>
+                    <span className="eyebrow">{t("Sur votre compte", "On your account")}</span>
                   </div>
                 </div>
                 {lq.account.map((a) => {
@@ -146,54 +154,63 @@ export function LingqSection() {
                       <div className="grow">
                         <strong>{li.name}</strong>
                         <span className="num">
-                          {plural(a.known_words, "mot connu", "mots connus")} · {plural(a.lingqs, "LingQ", "LingQ")} · {plural(a.courses.length, "cours", "cours")},{" "}
-                          {plural(a.lessons, "leçon", "leçons")}
+                          {plural(a.known_words, "mot connu", "mots connus", "known word", "known words")} · {plural(a.lingqs, "LingQ", "LingQ", "LingQ", "LingQs")} ·{" "}
+                          {plural(a.courses.length, "cours", "cours", "course", "courses")}, {plural(a.lessons, "leçon", "leçons", "lesson", "lessons")}
                         </span>
                       </div>
-                      <Switch on={lq.chosen.includes(a.lang)} onChange={() => lq.toggleLang(a.lang)} label={`Importer ${li.name.toLowerCase()}`} />
+                      <Switch on={lq.chosen.includes(a.lang)} onChange={() => lq.toggleLang(a.lang)} label={t(`Importer ${langLower(a.lang)}`, `Import ${li.name}`)} />
                     </div>
                   );
                 })}
 
                 <div className="set-row">
                   <div className="grow">
-                    <span className="eyebrow">À importer</span>
+                    <span className="eyebrow">{t("À importer", "To import")}</span>
                   </div>
                 </div>
                 <div className="set-row">
                   <div className="grow">
-                    <strong>Vocabulaire</strong>
-                    <span>Mots connus, ignorés et LingQ, avec traductions, notes et contexte. Les niveaux 1 à 3 restent en apprentissage, le niveau 4 et ✓ deviennent connus.</span>
-                  </div>
-                  <Switch on={lq.vocab} onChange={(v) => lq.setOption("vocab", v)} label="Importer le vocabulaire" />
-                </div>
-                <div className="set-row">
-                  <div className="grow">
-                    <strong>Leçons</strong>
+                    <strong>{t("Vocabulaire", "Vocabulary")}</strong>
                     <span>
-                      {lessonCount > 0 ? `Le texte ${lessonCount > 1 ? `des ${formatNumber(lessonCount)} leçons` : "de la leçon"} de vos cours` : "Le texte des leçons de vos cours"}, rangé par cours dans la
-                      bibliothèque.
+                      {t(
+                        "Mots connus, ignorés et LingQ, avec traductions, notes et contexte. Les niveaux 1 à 3 restent en apprentissage, le niveau 4 et ✓ deviennent connus.",
+                        "Known and ignored words and LingQs, with translations, notes and context. Levels 1 to 3 stay in learning, level 4 and ✓ become known.",
+                      )}
                     </span>
                   </div>
-                  <Switch on={lq.lessons} onChange={(v) => lq.setOption("lessons", v)} label="Importer les leçons" />
+                  <Switch on={lq.vocab} onChange={(v) => lq.setOption("vocab", v)} label={t("Importer le vocabulaire", "Import the vocabulary")} />
+                </div>
+                <div className="set-row">
+                  <div className="grow">
+                    <strong>{t("Leçons", "Lessons")}</strong>
+                    <span>
+                      {t(
+                        `${lessonCount > 0 ? `Le texte ${lessonCount > 1 ? `des ${formatNumber(lessonCount)} leçons` : "de la leçon"} de vos cours` : "Le texte des leçons de vos cours"}, rangé par cours dans la bibliothèque.`,
+                        `The text of ${lessonCount > 1 ? `the ${formatNumber(lessonCount)} lessons` : "the lessons"} in your courses, sorted by course in the library.`,
+                      )}
+                    </span>
+                  </div>
+                  <Switch on={lq.lessons} onChange={(v) => lq.setOption("lessons", v)} label={t("Importer les leçons", "Import the lessons")} />
                 </div>
                 {lq.lessons && (
                   <div className="set-row">
                     <div className="grow">
-                      <strong>Audio des leçons</strong>
-                      <span>Écoute synchronisée avec la lanterne. Comptez quelques Mo par leçon.</span>
+                      <strong>{t("Audio des leçons", "Lesson audio")}</strong>
+                      <span>{t("Écoute synchronisée avec la lanterne. Comptez quelques Mo par leçon.", "Listening in sync with the lantern. Allow a few MB per lesson.")}</span>
                     </div>
-                    <Switch on={lq.audio} onChange={(v) => lq.setOption("audio", v)} label="Importer l'audio" />
+                    <Switch on={lq.audio} onChange={(v) => lq.setOption("audio", v)} label={t("Importer l'audio", "Import the audio")} />
                   </div>
                 )}
 
                 <div className="set-row lingq-go">
                   <p className="lingq-note">
-                    Rien n'est effacé : un mot déjà présent garde son statut s'il est plus avancé, et une leçon déjà importée n'est pas dupliquée. Sur LingQ, les leçons lues
-                    pour l'import remontent dans votre étagère « Continuer ».
+                    {t(
+                      "Rien n'est effacé : un mot déjà présent garde son statut s'il est plus avancé, et une leçon déjà importée n'est pas dupliquée. Sur LingQ, les leçons lues pour l'import remontent dans votre étagère « Continuer ».",
+                      "Nothing is erased: a word already there keeps its status if it is further along, and a lesson already imported isn't duplicated. On LingQ, the lessons read for the import move up in your “Continue” shelf.",
+                    )}
                   </p>
                   <button className="btn primary glow" disabled={!canStart} onClick={() => lq.start(key)}>
-                    <Icon name="import" size={15} /> {lq.phase === "done" ? "Importer à nouveau" : "Tout importer"}
+                    <Icon name="import" size={15} /> {lq.phase === "done" ? t("Importer à nouveau", "Import again") : t("Tout importer", "Import everything")}
                   </button>
                 </div>
               </>

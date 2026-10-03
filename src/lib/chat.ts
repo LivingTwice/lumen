@@ -3,15 +3,18 @@
 // s'écrire pendant qu'on passe du lecteur à la vue Chat.
 import { create } from "zustand";
 import { api, errorText, isNoModel } from "./api";
-import { langInfo } from "./langs";
+import { t } from "./i18n";
+import { inLang, langInfo } from "./langs";
 import { useApp } from "./store";
 import type { ChatEffort, ChatMessage, ChatSummary, ChatThread, LangCode } from "./types";
 
-export const EFFORTS: { value: ChatEffort; label: string; hint: string }[] = [
-  { value: "low", label: "Rapide", hint: "Une courte réflexion, pour vérifier une intuition" },
-  { value: "medium", label: "Équilibré", hint: "Le bon compromis entre justesse et rapidité" },
-  { value: "high", label: "Approfondi", hint: "La réflexion la plus longue, pour les questions difficiles" },
-];
+export function efforts(): { value: ChatEffort; label: string; hint: string }[] {
+  return [
+    { value: "low", label: t("Rapide", "Quick"), hint: t("Une courte réflexion, pour vérifier une intuition", "A short reflection, to check a hunch") },
+    { value: "medium", label: t("Équilibré", "Balanced"), hint: t("Le bon compromis entre justesse et rapidité", "The right balance between accuracy and speed") },
+    { value: "high", label: t("Approfondi", "Thorough"), hint: t("La réflexion la plus longue, pour les questions difficiles", "The longest reflection, for difficult questions") },
+  ];
+}
 
 export interface LessonRef {
   id: number;
@@ -66,12 +69,13 @@ interface ChatState {
 
 /** Leçon jointe à la conversation affichée. */
 export function attachedLesson(s: Pick<ChatState, "thread" | "draftLesson">): LessonRef | null {
-  if (s.thread) return s.thread.chat.lesson_id ? { id: s.thread.chat.lesson_id, title: s.thread.chat.lesson_title ?? "Leçon" } : null;
+  if (s.thread) return s.thread.chat.lesson_id ? { id: s.thread.chat.lesson_id, title: s.thread.chat.lesson_title ?? t("Leçon", "Lesson") } : null;
   return s.draftLesson;
 }
 
-/** « l'italien », « le russe » : nom de la langue avec son article. */
+/** « l'italien », « le russe » : nom de la langue avec son article (« Italian » en anglais). */
 export function langWithArticle(lang: LangCode): string {
+  if (t("fr", "en") === "en") return langInfo(lang).name;
   const n = langInfo(lang).name.toLowerCase();
   // h muet dans « l'hindi », aspiré dans « le hongrois »
   return /^[aeéiou]/.test(n) || n === "hindi" ? `l'${n}` : `le ${n}`;
@@ -79,28 +83,34 @@ export function langWithArticle(lang: LangCode): string {
 
 /** Questions proposées sur une conversation vide. */
 export function suggestions(lang: LangCode, withLesson: boolean): string[] {
-  const name = langInfo(lang).name.toLowerCase();
+  const name = langInfo(lang).name;
   if (withLesson)
     return [
-      "Résume cette leçon en quelques phrases",
-      "Explique-moi les points de grammaire importants du texte",
-      "Quels mots de cette leçon dois-je retenir en priorité ?",
-      `Pose-moi trois questions en ${name} sur le texte`,
+      t("Résume cette leçon en quelques phrases", "Summarize this lesson in a few sentences"),
+      t("Explique-moi les points de grammaire importants du texte", "Explain the important grammar points in the text"),
+      t("Quels mots de cette leçon dois-je retenir en priorité ?", "Which words from this lesson should I learn first?"),
+      t(`Pose-moi trois questions ${inLang(lang)} sur le texte`, `Ask me three questions ${inLang(lang)} about the text`),
     ];
   return [
-    `Discutons en ${name}, à mon niveau`,
-    `Quelles sont les difficultés de ${langWithArticle(lang)} pour un francophone ?`,
-    `Écris-moi une courte histoire en ${name} pour débutant`,
-    "Donne-moi dix mots utiles pour la vie de tous les jours",
+    t(`Discutons ${inLang(lang)}, à mon niveau`, `Let's chat ${inLang(lang)}, at my level`),
+    t(`Quelles sont les difficultés de ${langWithArticle(lang)} pour un francophone ?`, `What is hard about ${name} for an English speaker?`),
+    t(`Écris-moi une courte histoire ${inLang(lang)} pour débutant`, `Write me a short story ${inLang(lang)} for beginners`),
+    t("Donne-moi dix mots utiles pour la vie de tous les jours", "Give me ten useful words for everyday life"),
   ];
 }
 
 /** Question préparée sur un mot, une expression ou un passage du lecteur ;
  *  `sense` : la traduction en contexte déjà trouvée, qui guide l'explication. */
 export function askAbout(surface: string, sentence: string, passage: boolean, sense = ""): string {
+  const s = sentence.trim();
+  // en anglais, guillemets “ ” : le chat y repère les mots cités, comme dans « »
+  if (t("fr", "en") === "en") {
+    if (passage) return `Explain this passage: “${surface}”`;
+    const word = sense ? `“${surface}” (translated here as “${sense}”)` : `“${surface}”`;
+    return s && s !== surface ? `Explain ${word} in this sentence: “${s}”` : `Explain ${word}`;
+  }
   if (passage) return `Explique-moi ce passage : « ${surface} »`;
   const word = sense ? `« ${surface} » (traduit ici par « ${sense} »)` : `« ${surface} »`;
-  const s = sentence.trim();
   return s && s !== surface ? `Explique-moi ${word} dans cette phrase : « ${s} »` : `Explique-moi ${word}`;
 }
 

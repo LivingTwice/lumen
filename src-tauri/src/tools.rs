@@ -102,7 +102,7 @@ async fn fetch(url: &str, dest: &Path, mut on_progress: impl FnMut(u64, u64)) ->
         .build()?;
     let resp = client.get(url).send().await?;
     if !resp.status().is_success() {
-        return Err(anyhow!("téléchargement refusé ({})", resp.status()));
+        return Err(anyhow!(crate::tr!("téléchargement refusé ({})", "download refused ({})", resp.status())));
     }
     let total = resp.content_length().unwrap_or(0);
     let tmp = dest.with_extension("part");
@@ -139,7 +139,7 @@ pub async fn ensure_youtube_tools(data_dir: &Path, mut on_progress: impl FnMut(f
             }
         })
         .await
-        .map_err(|e| anyhow!("moteur JavaScript : {e}"))?;
+        .map_err(|e| anyhow!(crate::tr!("moteur JavaScript : {e}", "JavaScript engine: {e}")))?;
     }
     if need_ytdlp {
         let url = format!("https://github.com/yt-dlp/yt-dlp/releases/latest/download/{}", ytdlp_asset());
@@ -154,7 +154,7 @@ pub async fn ensure_youtube_tools(data_dir: &Path, mut on_progress: impl FnMut(f
     } else {
         maybe_self_update(data_dir).await;
     }
-    find_ytdlp(data_dir).ok_or_else(|| anyhow!("yt-dlp est introuvable"))
+    find_ytdlp(data_dir).ok_or_else(|| anyhow!(crate::i18n::t("yt-dlp est introuvable", "yt-dlp can't be found")))
 }
 
 /// YouTube change souvent : on met à jour la copie gérée de yt-dlp au plus

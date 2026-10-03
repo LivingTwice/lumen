@@ -4,15 +4,18 @@
 // est gardée en cache côté natif, et préparée dès qu'un mot est touché.
 
 import { api, isTauri } from "./api";
+import { t } from "./i18n";
 import { useApp } from "./store";
 import { sayWord } from "./tts";
 import type { LangCode } from "./types";
 
 /** Les 10 voix de Supertonic (identifiant = numéro du locuteur), pour toutes les langues. */
-export const NATURAL_VOICES = [
-  ...[1, 2, 3, 4, 5].map((n) => ({ id: String(n - 1), name: `Féminine ${n}`, group: "Voix féminines" })),
-  ...[1, 2, 3, 4, 5].map((n) => ({ id: String(n + 4), name: `Masculine ${n}`, group: "Voix masculines" })),
-];
+export function naturalVoices() {
+  return [
+    ...[1, 2, 3, 4, 5].map((n) => ({ id: String(n - 1), name: t(`Féminine ${n}`, `Female ${n}`), group: t("Voix féminines", "Female voices") })),
+    ...[1, 2, 3, 4, 5].map((n) => ({ id: String(n + 4), name: t(`Masculine ${n}`, `Male ${n}`), group: t("Voix masculines", "Male voices") })),
+  ];
+}
 
 /** Voix naturelle choisie pour une langue (même logique que le natif). */
 export function naturalVoiceFor(lang: string): string {

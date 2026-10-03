@@ -4,14 +4,17 @@
 import { create } from "zustand";
 import { api, errorText, isTauri } from "./api";
 import { useChat } from "./chat";
+import { count, isEn, locale, t } from "./i18n";
 import { formatBytes, formatNumber, useApp } from "./store";
 import type { BackupInfo, BackupRestored, BackupStatus } from "./types";
 
-export const RESTORE_STAGE: Record<string, string> = {
-  download: "Lecture de la sauvegarde…",
-  media: "Copie de l'audio et des couvertures…",
-  apply: "Mise en place de votre progression…",
-};
+export function restoreStage(stage: string): string | undefined {
+  return {
+    download: t("Lecture de la sauvegarde…", "Reading the backup…"),
+    media: t("Copie de l'audio et des couvertures…", "Copying audio and covers…"),
+    apply: t("Mise en place de votre progression…", "Setting up your progress…"),
+  }[stage];
+}
 
 interface BackupState {
   status: BackupStatus | null;
@@ -125,51 +128,54 @@ export async function reloadProgress() {
 
 /** Message de fin de restauration. */
 export function restoredText(r: BackupRestored): string {
-  const lessons = `${formatNumber(r.counts.lessons)} leçon${r.counts.lessons > 1 ? "s" : ""}`;
-  return `Progression retrouvée : ${formatNumber(r.counts.known)} mots connus, ${lessons}`;
+  const lessons = count(r.counts.lessons, "leçon", "leçons", "lesson", "lessons");
+  return t(
+    `Progression retrouvée : ${formatNumber(r.counts.known)} mots connus, ${lessons}`,
+    `Progress restored: ${formatNumber(r.counts.known)} known words, ${lessons}`,
+  );
 }
 
-/** « à l'instant », « il y a 4 min », « hier à 18:05 », « le 3 octobre à 9:12 ». */
+/** « à l'instant », « il y a 4 min », « hier à 18:05 », « le 3 octobre à 9:12 » (« just now », « 4 min ago »…). */
 export function formatWhen(ts: number): string {
   const d = new Date(ts * 1000);
   const now = new Date();
   const secs = (now.getTime() - d.getTime()) / 1000;
-  if (secs < 60) return "à l'instant";
-  if (secs < 3600) return `il y a ${Math.floor(secs / 60)} min`;
-  const time = d.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
+  if (secs < 60) return t("à l'instant", "just now");
+  if (secs < 3600) return t(`il y a ${Math.floor(secs / 60)} min`, `${Math.floor(secs / 60)} min ago`);
+  const time = d.toLocaleTimeString(locale(), { hour: "2-digit", minute: "2-digit" });
   const yesterday = new Date(now);
   yesterday.setDate(now.getDate() - 1);
-  if (d.toDateString() === now.toDateString()) return `aujourd'hui à ${time}`;
-  if (d.toDateString() === yesterday.toDateString()) return `hier à ${time}`;
-  return `le ${frenchDate(d, d.getFullYear() !== now.getFullYear())} à ${time}`;
+  if (d.toDateString() === now.toDateString()) return t(`aujourd'hui à ${time}`, `today at ${time}`);
+  if (d.toDateString() === yesterday.toDateString()) return t(`hier à ${time}`, `yesterday at ${time}`);
+  return t(`le ${frenchDate(d, d.getFullYear() !== now.getFullYear())} à ${time}`, `on ${frenchDate(d, d.getFullYear() !== now.getFullYear())} at ${time}`);
 }
 
-/** « 1er octobre », « 12 mars 2025 ». */
+/** « 1er octobre », « 12 mars 2025 » (« October 1 », « March 12, 2025 » en anglais). */
 export function frenchDate(d: Date, year = false): string {
-  const s = d.toLocaleDateString("fr-FR", { day: "numeric", month: "long", ...(year ? { year: "numeric" } : {}) });
-  return d.getDate() === 1 ? s.replace(/^1 /, "1er ") : s;
+  const s = d.toLocaleDateString(locale(), { day: "numeric", month: "long", ...(year ? { year: "numeric" } : {}) });
+  return !isEn() && d.getDate() === 1 ? s.replace(/^1 /, "1er ") : s;
 }
 
-/** Version d'un jour précédent (« 2026-10-01 ») : « jeudi 1er octobre ». */
+/** Version d'un jour précédent (« 2026-10-01 ») : « jeudi 1er octobre » (« Thursday, October 1 »). */
 export function dayLabel(day: string): string {
   const d = new Date(`${day}T12:00:00`);
-  const weekday = d.toLocaleDateString("fr-FR", { weekday: "long" });
-  return `${weekday} ${frenchDate(d, d.getFullYear() !== new Date().getFullYear())}`;
+  const weekday = d.toLocaleDateString(locale(), { weekday: "long" });
+  return t(`${weekday} ${frenchDate(d, d.getFullYear() !== new Date().getFullYear())}`, `${weekday}, ${frenchDate(d, d.getFullYear() !== new Date().getFullYear())}`);
 }
 
 /** Où en est l'envoi vers le nuage (vide quand il n'y a rien d'utile à dire). */
 export function cloudText(s: BackupStatus): string {
   switch (s.cloud) {
     case "uploaded":
-      return "dans iCloud";
+      return t("dans iCloud", "in iCloud");
     case "uploading":
-      return "envoi vers iCloud…";
+      return t("envoi vers iCloud…", "uploading to iCloud…");
     case "waiting":
-      return "en attente d'envoi vers iCloud";
+      return t("en attente d'envoi vers iCloud", "waiting to upload to iCloud");
     case "error":
-      return `iCloud : ${s.cloud_error ?? "envoi impossible"}`;
+      return t(`iCloud : ${s.cloud_error ?? "envoi impossible"}`, `iCloud: ${s.cloud_error ?? "upload failed"}`);
     case "local":
-      return s.icloud ? "" : "dans le dossier choisi";
+      return s.icloud ? "" : t("dans le dossier choisi", "in the chosen folder");
     default:
       return "";
   }
@@ -177,12 +183,15 @@ export function cloudText(s: BackupStatus): string {
 
 /** Ligne d'état sous « Sauvegarde automatique ». */
 export function statusLine(s: BackupStatus, saving: boolean): string {
-  if (saving || s.running) return "Sauvegarde en cours…";
+  if (saving || s.running) return t("Sauvegarde en cours…", "Backing up…");
   if (s.error) return s.error;
-  if (!s.enabled) return s.decided ? "Désactivée : votre progression ne vit que sur ce Mac." : "Activez-la pour mettre votre progression à l'abri.";
-  if (!s.dir) return "iCloud Drive n'est pas activé sur ce Mac : choisissez un dossier.";
-  if (s.last_at === null) return "Activée : la première copie se fera dès votre première lecture.";
-  const parts = [`Sauvegardée ${formatWhen(s.last_at)}`, formatBytes(s.size + s.media_size)];
+  if (!s.enabled)
+    return s.decided
+      ? t("Désactivée : votre progression ne vit que sur ce Mac.", "Off: your progress only lives on this Mac.")
+      : t("Activez-la pour mettre votre progression à l'abri.", "Turn it on to keep your progress safe.");
+  if (!s.dir) return t("iCloud Drive n'est pas activé sur ce Mac : choisissez un dossier.", "iCloud Drive isn't turned on on this Mac: choose a folder.");
+  if (s.last_at === null) return t("Activée : la première copie se fera dès votre première lecture.", "On: the first copy will be made as soon as you start reading.");
+  const parts = [t(`Sauvegardée ${formatWhen(s.last_at)}`, `Backed up ${formatWhen(s.last_at)}`), formatBytes(s.size + s.media_size)];
   const cloud = cloudText(s);
   if (cloud) parts.push(cloud);
   return parts.join(" · ");
@@ -190,7 +199,7 @@ export function statusLine(s: BackupStatus, saving: boolean): string {
 
 /** Emplacement lisible : « iCloud Drive › Lumen », « Dropbox › Lumen ». */
 export function placeLabel(s: BackupStatus): string {
-  if (!s.dir) return "Aucun";
+  if (!s.dir) return t("Aucun", "None");
   if (s.icloud) return "iCloud Drive › Lumen";
   const home = s.dir.match(/^\/Users\/[^/]+/)?.[0];
   const rel = home ? s.dir.slice(home.length + 1) : s.dir;
@@ -199,9 +208,9 @@ export function placeLabel(s: BackupStatus): string {
 
 /** Choisit un autre dossier (Dropbox, Google Drive, clé USB…). */
 export async function pickBackupFolder(): Promise<string | null> {
-  if (!isTauri) return "/Users/vous/Dropbox";
+  if (!isTauri) return t("/Users/vous/Dropbox", "/Users/you/Dropbox");
   const { open } = await import("@tauri-apps/plugin-dialog");
-  const res = await open({ directory: true, multiple: false, title: "Dossier de sauvegarde de Lumen" });
+  const res = await open({ directory: true, multiple: false, title: t("Dossier de sauvegarde de Lumen", "Lumen backup folder") });
   return typeof res === "string" ? res : null;
 }
 

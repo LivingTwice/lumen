@@ -477,7 +477,7 @@ pub struct PlaylistPatch {
 /// Nom propre, jamais vide, de longueur raisonnable.
 fn playlist_name(name: &str) -> String {
     let n: String = name.split_whitespace().collect::<Vec<_>>().join(" ").chars().take(120).collect();
-    if n.is_empty() { "Nouvelle playlist".into() } else { n }
+    if n.is_empty() { crate::i18n::t("Nouvelle playlist", "New playlist").into() } else { n }
 }
 
 pub fn playlists_list(c: &Connection, lang: &str) -> Result<Vec<Playlist>> {

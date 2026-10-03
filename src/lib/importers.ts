@@ -1,5 +1,6 @@
 // Extraction de texte depuis toutes les sources importables.
 import { Readability } from "@mozilla/readability";
+import { t } from "./i18n";
 import JSZip from "jszip";
 
 export interface Extracted {
@@ -47,7 +48,7 @@ export function extractArticle(html: string, url: string): Extracted {
   base.href = url;
   doc.head.prepend(base);
   const art = new Readability(doc, { charThreshold: 200 }).parse();
-  if (!art || !art.content) throw new Error("Aucun article lisible n'a été trouvé sur cette page.");
+  if (!art || !art.content) throw new Error(t("Aucun article lisible n'a été trouvé sur cette page.", "No readable article was found on this page."));
   const content = new DOMParser().parseFromString(art.content, "text/html");
   const text = cleanText(htmlToParagraphs(content));
   return { title: (art.title || new URL(url).hostname).trim(), text };
@@ -61,13 +62,13 @@ export interface Chapter extends Extracted {
 export async function extractEpub(data: ArrayBuffer): Promise<{ book: string; chapters: Chapter[] }> {
   const zip = await JSZip.loadAsync(data);
   const container = await zip.file("META-INF/container.xml")?.async("string");
-  if (!container) throw new Error("Ce fichier EPUB est invalide.");
+  if (!container) throw new Error(t("Ce fichier EPUB est invalide.", "This EPUB file is invalid."));
   const opfPath = /full-path="([^"]+)"/.exec(container)?.[1];
-  if (!opfPath) throw new Error("Ce fichier EPUB est invalide.");
+  if (!opfPath) throw new Error(t("Ce fichier EPUB est invalide.", "This EPUB file is invalid."));
   const opf = await zip.file(opfPath)!.async("string");
   const opfDoc = new DOMParser().parseFromString(opf, "application/xml");
   const dir = opfPath.includes("/") ? opfPath.slice(0, opfPath.lastIndexOf("/") + 1) : "";
-  const book = opfDoc.getElementsByTagName("dc:title")[0]?.textContent?.trim() || "Livre";
+  const book = opfDoc.getElementsByTagName("dc:title")[0]?.textContent?.trim() || t("Livre", "Book");
   const manifest = new Map<string, string>();
   for (const item of Array.from(opfDoc.getElementsByTagName("item"))) {
     manifest.set(item.getAttribute("id") ?? "", item.getAttribute("href") ?? "");
@@ -86,9 +87,9 @@ export async function extractEpub(data: ArrayBuffer): Promise<{ book: string; ch
     const text = cleanText(htmlToParagraphs(usable));
     const words = text.split(/\s+/).filter(Boolean).length;
     if (words < 40) continue; // pages de garde, tables, mentions légales
-    chapters.push({ title: heading || `Chapitre ${chapters.length + 1}`, text, words });
+    chapters.push({ title: heading || t(`Chapitre ${chapters.length + 1}`, `Chapter ${chapters.length + 1}`), text, words });
   }
-  if (!chapters.length) throw new Error("Aucun chapitre lisible dans ce livre.");
+  if (!chapters.length) throw new Error(t("Aucun chapitre lisible dans ce livre.", "No readable chapter in this book."));
   return { book, chapters };
 }
 
@@ -137,7 +138,7 @@ export async function extractPdf(data: ArrayBuffer): Promise<Extracted> {
     if (para) parts.push(para);
   }
   const info = meta?.info as { Title?: string } | undefined;
-  return { title: info?.Title?.trim() || "Document PDF", text: cleanText(parts.join("\n\n")) };
+  return { title: info?.Title?.trim() || t("Document PDF", "PDF document"), text: cleanText(parts.join("\n\n")) };
 }
 
 /** Sous-titres SRT ou WebVTT : texte seul, regroupé en paragraphes. */

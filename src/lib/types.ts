@@ -123,6 +123,8 @@ export interface DictResult {
   entries: DictEntry[];
   lemma?: string | null;
   form_note?: string | null;
+  /** dictionnaire anglais en cours de téléchargement (interface en anglais) */
+  pending?: boolean;
 }
 
 export interface DayStat {

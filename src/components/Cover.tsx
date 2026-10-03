@@ -5,16 +5,17 @@ import { useApp } from "../lib/store";
 import type { LessonSummary } from "../lib/types";
 import { Icon, type IconName } from "./Icon";
 import { Menu } from "./ui";
+import { t } from "../lib/i18n";
 
 export const KIND: Record<string, { label: string; icon: IconName }> = {
-  text: { label: "Texte", icon: "text" },
+  text: { get label() { return t("Texte", "Text"); }, icon: "text" },
   web: { label: "Article", icon: "globe" },
-  book: { label: "Livre", icon: "book" },
+  book: { get label() { return t("Livre", "Book"); }, icon: "book" },
   pdf: { label: "PDF", icon: "file" },
-  subtitles: { label: "Sous-titres", icon: "text" },
+  subtitles: { get label() { return t("Sous-titres", "Subtitles"); }, icon: "text" },
   audio: { label: "Audio", icon: "wave" },
-  video: { label: "Vidéo", icon: "video" },
-  simplified: { label: "Simplifié", icon: "sparkle" },
+  video: { get label() { return t("Vidéo", "Video"); }, icon: "video" },
+  simplified: { get label() { return t("Simplifié", "Simplified"); }, icon: "sparkle" },
 };
 
 // ---------- œuvre générée ----------
@@ -296,7 +297,7 @@ function CoverButton({ lessonId, custom }: { lessonId: number; custom: boolean }
     try {
       if (await chooseCover(lessonId)) {
         bump();
-        toast("Nouvelle couverture", "light");
+        toast(t("Nouvelle couverture", "New cover"), "light");
       }
     } catch (e) {
       toast(errorText(e), "error");
@@ -319,8 +320,8 @@ function CoverButton({ lessonId, custom }: { lessonId: number; custom: boolean }
       className={`cover-edit ${busy ? "busy" : ""}`}
       onClick={() => (custom ? setMenu((m) => !m) : void choose())}
       disabled={busy}
-      aria-label="Changer la couverture"
-      title="Changer la couverture"
+      aria-label={t("Changer la couverture", "Change the cover")}
+      title={t("Changer la couverture", "Change the cover")}
     >
       <Icon name="image" size={13} stroke={1.9} />
     </button>
@@ -330,11 +331,11 @@ function CoverButton({ lessonId, custom }: { lessonId: number; custom: boolean }
       {custom ? (
         <Menu open={menu} onClose={() => setMenu(false)} align="right" anchor={button}>
           <button className="menu-item" onClick={choose}>
-            <Icon name="image" size={16} /> Choisir une autre image
+            <Icon name="image" size={16} /> {t("Choisir une autre image", "Choose another image")}
           </button>
           <div className="menu-sep" />
           <button className="menu-item danger" onClick={remove}>
-            <Icon name="close" size={16} /> Retirer la couverture
+            <Icon name="close" size={16} /> {t("Retirer la couverture", "Remove the cover")}
           </button>
         </Menu>
       ) : (

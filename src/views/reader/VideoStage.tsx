@@ -5,6 +5,7 @@ import { api, errorText, isTauri } from "../../lib/api";
 import { useApp } from "../../lib/store";
 import { sentenceBounds } from "../../lib/tokenize";
 import type { Lesson, Term, Token } from "../../lib/types";
+import { t } from "../../lib/i18n";
 
 export type StageSize = "compact" | "large";
 
@@ -253,7 +254,7 @@ export function VideoStage({ lesson, tokens, terms, cursor, playing, onHost, onW
         if (e.type === "progress") setFetching(e.value);
       });
       onVideoReady(path);
-      toast("La vidéo est prête", "light");
+      toast(t("La vidéo est prête", "The video is ready"), "light");
     } catch (e) {
       toast(errorText(e), "error");
     } finally {
@@ -271,21 +272,21 @@ export function VideoStage({ lesson, tokens, terms, cursor, playing, onHost, onW
             {canFetch ? (
               fetching === null ? (
                 <>
-                  <strong>L'image de cette vidéo n'a pas encore été téléchargée</strong>
+                  <strong>{t("L'image de cette vidéo n'a pas encore été téléchargée", "The picture of this video hasn't been downloaded yet")}</strong>
                   <button className="btn sm video-get" onClick={(e) => (e.stopPropagation(), fetchVideo())}>
-                    <Icon name="download" size={14} /> Télécharger la vidéo
+                    <Icon name="download" size={14} /> {t("Télécharger la vidéo", "Download the video")}
                   </button>
                 </>
               ) : (
                 <>
-                  <strong>Téléchargement de la vidéo…</strong>
+                  <strong>{t("Téléchargement de la vidéo…", "Downloading the video…")}</strong>
                   <div className="bar live" style={{ width: 220 }}>
                     <i style={{ width: `${fetching}%` }} />
                   </div>
                 </>
               )
             ) : (
-              <strong>Leçon audio</strong>
+              <strong>{t("Leçon audio", "Audio lesson")}</strong>
             )}
           </div>
         )}
@@ -296,15 +297,21 @@ export function VideoStage({ lesson, tokens, terms, cursor, playing, onHost, onW
         )}
         <div className="video-tools" onClick={(e) => e.stopPropagation()}>
           {cinema ? (
-            <button className={`icon-btn ${showTr ? "on" : ""}`} onClick={() => setSetting("video_translate", showTr ? "0" : "1")} aria-label="Sous-titres traduits" title="Sous-titres traduits en français">
-              <span style={{ fontSize: 11, fontWeight: 700 }}>FR</span>
+            <button className={`icon-btn ${showTr ? "on" : ""}`} onClick={() => setSetting("video_translate", showTr ? "0" : "1")} aria-label={t("Sous-titres traduits", "Translated subtitles")}
+              title={t("Sous-titres traduits en français", "Subtitles translated into English")}
+            >
+              <span style={{ fontSize: 11, fontWeight: 700 }}>{t("FR", "EN")}</span>
             </button>
           ) : (
-            <button className="icon-btn" onClick={() => setSetting("video_size", size === "large" ? "compact" : "large")} aria-label={size === "large" ? "Réduire la vidéo" : "Agrandir la vidéo"} title={size === "large" ? "Réduire la vidéo" : "Agrandir la vidéo"}>
+            <button className="icon-btn" onClick={() => setSetting("video_size", size === "large" ? "compact" : "large")} aria-label={size === "large" ? t("Réduire la vidéo", "Make the video smaller") : t("Agrandir la vidéo", "Make the video larger")}
+              title={size === "large" ? t("Réduire la vidéo", "Make the video smaller") : t("Agrandir la vidéo", "Make the video larger")}
+            >
               <Icon name={size === "large" ? "layers" : "video"} size={16} />
             </button>
           )}
-          <button className="icon-btn" onClick={() => setCinema((c) => !c)} aria-label={cinema ? "Quitter le plein écran" : "Plein écran"} title={cinema ? "Quitter le plein écran (Échap)" : "Plein écran, sous-titres sous l'image"}>
+          <button className="icon-btn" onClick={() => setCinema((c) => !c)} aria-label={cinema ? t("Quitter le plein écran", "Exit full screen") : t("Plein écran", "Full screen")}
+            title={cinema ? t("Quitter le plein écran (Échap)", "Exit full screen (Esc)") : t("Plein écran, sous-titres sous l'image", "Full screen, subtitles under the picture")}
+          >
             <Icon name={cinema ? "shrink" : "expand"} size={16} />
           </button>
         </div>
@@ -339,8 +346,8 @@ export function VideoStage({ lesson, tokens, terms, cursor, playing, onHost, onW
             </>
           ) : (
             <p className="sub-hint">
-              Les sous-titres s'affichent ici pendant la lecture. Touchez un mot : sa traduction apparaît à droite.
-              <span>Espace : lecture · Échap : quitter le plein écran</span>
+              {t("Les sous-titres s'affichent ici pendant la lecture. Touchez un mot : sa traduction apparaît à droite.", "Subtitles appear here while the video plays. Tap a word: its translation appears on the right.")}
+              <span>{t("Espace : lecture · Échap : quitter le plein écran", "Space: play · Esc: exit full screen")}</span>
             </p>
           )}
         </div>

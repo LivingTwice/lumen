@@ -1,10 +1,11 @@
 import { isTauri } from "./api";
+import { t } from "./i18n";
 
 /** Demande de confirmation native (boîte de dialogue macOS dans l'app). */
-export async function confirmAsk(message: string, title = "Lumen", okLabel = "Confirmer"): Promise<boolean> {
+export async function confirmAsk(message: string, title = "Lumen", okLabel = t("Confirmer", "Confirm")): Promise<boolean> {
   if (isTauri) {
     const { ask } = await import("@tauri-apps/plugin-dialog");
-    return ask(message, { title, kind: "warning", okLabel, cancelLabel: "Annuler" });
+    return ask(message, { title, kind: "warning", okLabel, cancelLabel: t("Annuler", "Cancel") });
   }
   return window.confirm(message);
 }

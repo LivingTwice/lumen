@@ -1,0 +1,2 @@
+/* Shown by macOS when Lumen asks for access to iCloud Drive (or Dropbox, Google Drive…) for backups */
+"NSFileProviderDomainUsageDescription" = "Lumen backs up your progress (words, lessons, settings) to your iCloud Drive or the folder you chose, so that it's never lost.";

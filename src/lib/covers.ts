@@ -1,6 +1,7 @@
 // Couvertures des leçons : miniature YouTube, image choisie, ou œuvre
 // générée (voir components/Cover.tsx).
 import { api, isTauri } from "./api";
+import { t } from "./i18n";
 import { pickFiles } from "./dialogs";
 
 /** Identifiant d'une vidéo YouTube dans une adresse (watch, youtu.be, shorts, embed, live). */
@@ -78,7 +79,7 @@ export async function prepareCover(blob: Blob): Promise<Uint8Array> {
     if (!out) throw new Error("jpeg");
     return new Uint8Array(await out.arrayBuffer());
   } catch {
-    throw "Cette image ne peut pas être lue. Essayez un fichier JPEG ou PNG.";
+    throw t("Cette image ne peut pas être lue. Essayez un fichier JPEG ou PNG.", "This image can't be read. Try a JPEG or PNG file.");
   } finally {
     URL.revokeObjectURL(url);
   }

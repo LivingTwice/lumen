@@ -6,7 +6,8 @@ import { Icon } from "../components/Icon";
 import { Menu, Orb, Segmented, Sheet, useGlow } from "../components/ui";
 import { api, errorText } from "../lib/api";
 import { confirmAsk } from "../lib/dialogs";
-import { STARTERS, langInfo } from "../lib/langs";
+import { count, isEn, t } from "../lib/i18n";
+import { STARTERS, inLang, starterCollection } from "../lib/langs";
 import { formatDuration, formatNumber, useApp } from "../lib/store";
 import type { LessonSummary } from "../lib/types";
 
@@ -14,6 +15,7 @@ type Filter = "all" | "text" | "audio" | "book" | "done";
 
 function greeting() {
   const h = new Date().getHours();
+  if (isEn()) return h >= 5 && h < 12 ? "Good morning" : h >= 12 && h < 18 ? "Good afternoon" : "Good evening";
   if (h < 5) return "Bonne nuit";
   if (h < 18) return "Bonjour";
   return "Bonsoir";
@@ -45,27 +47,27 @@ function LessonCard({ l, index, onDelete, onRename, onPlaylist }: { l: LessonSum
       ref={glow.ref}
       onMouseMove={glow.onMouseMove}
     >
-      <button className="lesson-hit" onClick={() => openLesson(l.id)} aria-label={`Ouvrir ${l.title}`} />
+      <button className="lesson-hit" onClick={() => openLesson(l.id)} aria-label={t(`Ouvrir ${l.title}`, `Open ${l.title}`)} />
       <Cover lesson={l} progress={progressOf(l)} editable />
       <div className="lesson-body">
         {l.collection && <span className="lesson-collection">{l.collection}</span>}
         <h3 className="lesson-title">{l.title}</h3>
         <p className="lesson-excerpt">{l.excerpt}</p>
         <div className="lesson-meta">
-          <span className="num">{formatNumber(l.word_count)} mots</span>
+          <span className="num">{count(l.word_count, "mot", "mots", "word", "words")}</span>
           <span className="sep" />
-          <span className="num new-dot">{formatNumber(l.new_words)} nouveaux</span>
+          <span className="num new-dot">{formatNumber(l.new_words)} {t("nouveaux", "new")}</span>
           {l.completed && (
             <span className="done-pill">
-              <Icon name="check" size={12} stroke={2.4} /> Lu
+              <Icon name="check" size={12} stroke={2.4} /> {t("Lu", "Read")}
             </span>
           )}
         </div>
-        <div className="lesson-known" title={`${l.known_pct} % des mots déjà rencontrés`}>
+        <div className="lesson-known" title={t(`${l.known_pct} % des mots déjà rencontrés`, `${l.known_pct}% of the words already met`)}>
           <div className="bar">
             <i style={{ width: `${l.known_pct}%` }} />
           </div>
-          <span className="num">{l.known_pct} %</span>
+          <span className="num">{t(`${l.known_pct} %`, `${l.known_pct}%`)}</span>
         </div>
       </div>
       <div className="lesson-menu">
@@ -74,20 +76,20 @@ function LessonCard({ l, index, onDelete, onRename, onPlaylist }: { l: LessonSum
           onClose={() => setMenu(false)}
           align="right"
           anchor={
-            <button className="icon-btn" onClick={() => setMenu((m) => !m)} aria-label="Options de la leçon">
+            <button className="icon-btn" onClick={() => setMenu((m) => !m)} aria-label={t("Options de la leçon", "Lesson options")}>
               <Icon name="more" size={18} stroke={2.6} />
             </button>
           }
         >
           <button className="menu-item" onClick={() => (setMenu(false), onPlaylist())}>
-            <Icon name="playlist" size={16} /> Ajouter à une playlist…
+            <Icon name="playlist" size={16} /> {t("Ajouter à une playlist…", "Add to a playlist…")}
           </button>
           <button className="menu-item" onClick={() => (setMenu(false), onRename())}>
-            <Icon name="edit" size={16} /> Renommer
+            <Icon name="edit" size={16} /> {t("Renommer", "Rename")}
           </button>
           <div className="menu-sep" />
           <button className="menu-item danger" onClick={() => (setMenu(false), onDelete())}>
-            <Icon name="trash" size={16} /> Supprimer
+            <Icon name="trash" size={16} /> {t("Supprimer", "Delete")}
           </button>
         </Menu>
       </div>
@@ -133,16 +135,21 @@ export function Library() {
 
   const addStarter = async () => {
     const s = STARTERS[lang];
-    const id = await api().lessonCreate({ lang, title: s.title, text: s.text, collection: "Pour commencer", kind: "text" });
+    const id = await api().lessonCreate({ lang, title: s.title, text: s.text, collection: starterCollection(), kind: "text" });
     bump();
     openLesson(id);
   };
 
   const remove = async (l: LessonSummary) => {
-    if (!(await confirmAsk(`Supprimer « ${l.title} » ? Les mots appris sont conservés.`, "Supprimer la leçon", "Supprimer"))) return;
+    const ok = await confirmAsk(
+      t(`Supprimer « ${l.title} » ? Les mots appris sont conservés.`, `Delete “${l.title}”? The words you learned are kept.`),
+      t("Supprimer la leçon", "Delete the lesson"),
+      t("Supprimer", "Delete"),
+    );
+    if (!ok) return;
     await api().lessonDelete(l.id);
     useApp.getState().forgetLesson(l.id);
-    toast("Leçon supprimée");
+    toast(t("Leçon supprimée", "Lesson deleted"));
     bump();
   };
 
@@ -160,7 +167,6 @@ export function Library() {
     bump();
   };
 
-  const li = langInfo(lang);
 
   return (
     <>
@@ -168,7 +174,7 @@ export function Library() {
         <div style={{ flex: 1 }} data-tauri-drag-region />
         <label className="search no-drag">
           <Icon name="search" size={16} />
-          <input placeholder="Rechercher une leçon" value={query} onChange={(e) => setQuery(e.target.value)} aria-label="Rechercher une leçon" />
+          <input placeholder={t("Rechercher une leçon", "Search lessons")} value={query} onChange={(e) => setQuery(e.target.value)} aria-label={t("Rechercher une leçon", "Search lessons")} />
         </label>
       </div>
       <div className="view">
@@ -179,11 +185,11 @@ export function Library() {
                 {greeting()}.
               </h1>
               <p>
-                {lessons ? `${lessons.length} leçon${lessons.length > 1 ? "s" : ""} en ${li.name.toLowerCase()}` : "…"} · {formatNumber(known)} mots connus
+                {lessons ? `${count(lessons.length, "leçon", "leçons", "lesson", "lessons")} ${inLang(lang)}` : "…"} · {count(known, "mot connu", "mots connus", "known word", "known words")}
               </p>
             </div>
             <button className="btn soft" onClick={() => openImport()}>
-              <Icon name="import" size={16} /> Importer du contenu
+              <Icon name="import" size={16} /> {t("Importer du contenu", "Import content")}
             </button>
           </header>
 
@@ -198,18 +204,24 @@ export function Library() {
             >
               <Cover lesson={resume} big progress={progressOf(resume)} />
               <div className="hero-body">
-                <span className="eyebrow">Reprendre la lecture</span>
+                <span className="eyebrow">{t("Reprendre la lecture", "Continue reading")}</span>
                 <h2 className="display">{resume.title}</h2>
                 <p className="hero-excerpt">{resume.excerpt}…</p>
                 <div className="hero-foot">
                   <button className="btn primary lg glow" onClick={() => openLesson(resume.id)}>
-                    <Icon name="book" size={17} /> Continuer
+                    <Icon name="book" size={17} /> {t("Continuer", "Continue")}
                   </button>
                   <span className="muted num">
                     {resume.has_media && resume.position > 1
-                      ? `Reprise à ${formatDuration(resume.position)}${resume.duration ? ` sur ${formatDuration(resume.duration)}` : ""}`
-                      : `Page ${Math.min(resume.page + 1, pagesOf(resume.word_count))} sur ${pagesOf(resume.word_count)}`}{" "}
-                    · {resume.new_words} mots nouveaux
+                      ? t(
+                          `Reprise à ${formatDuration(resume.position)}${resume.duration ? ` sur ${formatDuration(resume.duration)}` : ""}`,
+                          `Resume at ${formatDuration(resume.position)}${resume.duration ? ` of ${formatDuration(resume.duration)}` : ""}`,
+                        )
+                      : t(
+                          `Page ${Math.min(resume.page + 1, pagesOf(resume.word_count))} sur ${pagesOf(resume.word_count)}`,
+                          `Page ${Math.min(resume.page + 1, pagesOf(resume.word_count))} of ${pagesOf(resume.word_count)}`,
+                        )}{" "}
+                    · {count(resume.new_words, "mot nouveau", "mots nouveaux", "new word", "new words")}
                   </span>
                 </div>
               </div>
@@ -220,15 +232,15 @@ export function Library() {
             <div className="lib-toolbar">
               <Segmented
                 id="lib-filter"
-                label="Filtrer"
+                label={t("Filtrer", "Filter")}
                 value={filter}
                 onChange={(v) => setFilter(v as Filter)}
                 options={[
-                  { value: "all", label: "Tout" },
-                  { value: "text", label: "Textes" },
-                  { value: "audio", label: "Audio et vidéo" },
-                  { value: "book", label: "Livres" },
-                  { value: "done", label: "Terminées" },
+                  { value: "all", label: t("Tout", "All") },
+                  { value: "text", label: t("Textes", "Texts") },
+                  { value: "audio", label: t("Audio et vidéo", "Audio and video") },
+                  { value: "book", label: t("Livres", "Books") },
+                  { value: "done", label: t("Terminées", "Finished") },
                 ]}
               />
             </div>
@@ -237,14 +249,19 @@ export function Library() {
           {lessons && lessons.length === 0 && (
             <div className="empty">
               <Orb size={48} />
-              <h3>Votre bibliothèque attend sa première lumière</h3>
-              <p>Importez un article, un livre, un podcast ou une vidéo, ou commencez par une courte histoire écrite pour vous.</p>
+              <h3>{t("Votre bibliothèque attend sa première lumière", "Your library is waiting for its first light")}</h3>
+              <p>
+                {t(
+                  "Importez un article, un livre, un podcast ou une vidéo, ou commencez par une courte histoire écrite pour vous.",
+                  "Import an article, a book, a podcast or a video, or start with a short story written for you.",
+                )}
+              </p>
               <div style={{ display: "flex", gap: 10, marginTop: 8 }}>
                 <button className="btn primary lg glow" onClick={addStarter}>
-                  Lire « {STARTERS[lang].title} »
+                  {t(`Lire « ${STARTERS[lang].title} »`, `Read “${STARTERS[lang].title}”`)}
                 </button>
                 <button className="btn outline lg" onClick={() => openImport()}>
-                  <Icon name="import" size={16} /> Importer
+                  <Icon name="import" size={16} /> {t("Importer", "Import")}
                 </button>
               </div>
             </div>
@@ -257,22 +274,26 @@ export function Library() {
               ))}
             </AnimatePresence>
           </motion.div>
-          {lessons && lessons.length > 0 && shown.length === 0 && <p className="muted" style={{ padding: "40px 0", textAlign: "center" }}>Aucune leçon ne correspond.</p>}
+          {lessons && lessons.length > 0 && shown.length === 0 && <p className="muted" style={{ padding: "40px 0", textAlign: "center" }}>{t("Aucune leçon ne correspond.", "No lesson matches.")}</p>}
         </div>
       </div>
       <Sheet
         open={!!renaming}
         onClose={() => setRenaming(null)}
-        title="Renommer la leçon"
+        title={t("Renommer la leçon", "Rename the lesson")}
         width={520}
         footer={
           <>
-            <button className="btn ghost" onClick={() => setRenaming(null)}>Annuler</button>
-            <button className="btn primary" onClick={saveRename} disabled={!newTitle.trim()}>Enregistrer</button>
+            <button className="btn ghost" onClick={() => setRenaming(null)}>
+              {t("Annuler", "Cancel")}
+            </button>
+            <button className="btn primary" onClick={saveRename} disabled={!newTitle.trim()}>
+              {t("Enregistrer", "Save")}
+            </button>
           </>
         }
       >
-        <input className="input" autoFocus value={newTitle} onChange={(e) => setNewTitle(e.target.value)} onKeyDown={(e) => e.key === "Enter" && saveRename()} aria-label="Titre" />
+        <input className="input" autoFocus value={newTitle} onChange={(e) => setNewTitle(e.target.value)} onKeyDown={(e) => e.key === "Enter" && saveRename()} aria-label={t("Titre", "Title")} />
       </Sheet>
       <AddToPlaylist lesson={adding} all={lessons ?? []} onClose={() => setAdding(null)} />
     </>

@@ -6,6 +6,7 @@ import { Orb, Toasts } from "./components/ui";
 import { isTauri } from "./lib/api";
 import { MEDIA_EXT, TEXT_EXT, extOf } from "./lib/importers";
 import { startBackupEvents } from "./lib/backup";
+import { setUiLang, t, type UiLang } from "./lib/i18n";
 import { useApp } from "./lib/store";
 import { startUpdateChecks } from "./lib/updater";
 import { ImportSheet } from "./views/ImportSheet";
@@ -53,7 +54,7 @@ function useFileDrop(enabled: boolean) {
           setOver(false);
           const ok = p.paths.filter((f) => [...MEDIA_EXT, ...TEXT_EXT].includes(extOf(f)));
           if (ok.length) openImport(ok);
-          else toast("Ce type de fichier n'est pas encore pris en charge.", "error");
+          else toast(t("Ce type de fichier n'est pas encore pris en charge.", "This type of file isn't supported yet."), "error");
         }
       });
     });
@@ -68,6 +69,9 @@ export function App() {
   const view = useApp((s) => s.view);
   const onboarded = useApp((s) => s.settings.onboarded);
   const replay = useApp((s) => s.replay);
+  // langue de l'interface : appliquée avant le rendu des vues (t() la lit au rendu)
+  const ui = useApp((s) => s.settings.ui_lang) as UiLang;
+  if (ui) setUiLang(ui);
   const [failed, setFailed] = useState<string | null>(null);
   // barre latérale repliée dans une leçon (réglage reader_sidebar), visible partout ailleurs
   const sideHidden = useApp((s) => s.view === "reader" && s.settings.reader_sidebar === "0");
@@ -112,7 +116,7 @@ export function App() {
     return (
       <div className="empty" style={{ height: "100%", justifyContent: "center" }}>
         <Orb size={40} />
-        <h3>Lumen n'a pas pu démarrer</h3>
+        <h3>{t("Lumen n'a pas pu démarrer", "Lumen couldn't start")}</h3>
         <p>{failed}</p>
       </div>
     );
@@ -128,8 +132,9 @@ export function App() {
 
   if (!onboarded || replay) return <Onboarding />;
 
+  // changer de langue remonte toute l'interface : chaque texte se recalcule
   return (
-    <div className={`app ${sideHidden ? "side-hidden" : ""}`}>
+    <div key={ui} className={`app ${sideHidden ? "side-hidden" : ""}`}>
       <div className={`sidebar-shell ${sideHidden || sliding ? "clip" : ""}`} inert={sideHidden}>
         <Sidebar />
       </div>
@@ -160,8 +165,8 @@ export function App() {
           <motion.div className="dropzone-overlay" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
             <motion.div className="dropzone-card" initial={{ scale: 0.94 }} animate={{ scale: 1 }} transition={{ type: "spring", stiffness: 300, damping: 22 }}>
               <Orb size={44} />
-              <h3>Déposez pour importer</h3>
-              <p className="muted">Livres, articles, PDF, sous-titres, audio et vidéo</p>
+              <h3>{t("Déposez pour importer", "Drop to import")}</h3>
+              <p className="muted">{t("Livres, articles, PDF, sous-titres, audio et vidéo", "Books, articles, PDFs, subtitles, audio and video")}</p>
               <Icon name="import" size={22} />
             </motion.div>
           </motion.div>

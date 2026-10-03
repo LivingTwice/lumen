@@ -26,6 +26,9 @@ pub struct ModelInfo {
     pub kind: &'static str,
     pub name: &'static str,
     pub detail: &'static str,
+    /// la même description, pour l'interface en anglais
+    #[serde(skip)]
+    pub detail_en: &'static str,
     pub size: u64,
     pub url: &'static str,
     /// fichier du modèle, ou dossier une fois l'archive (.tar.bz2) décompressée
@@ -42,6 +45,7 @@ pub const CATALOG: &[ModelInfo] = &[
         kind: "llm",
         name: "Qwen3.5 0.8B",
         detail: "Très rapide, pour les Mac avec 8 Go de mémoire",
+        detail_en: "Very fast, for Macs with 8 GB of memory",
         size: 533_000_000,
         url: "https://huggingface.co/unsloth/Qwen3.5-0.8B-GGUF/resolve/main/Qwen3.5-0.8B-Q4_K_M.gguf",
         file: "Qwen3.5-0.8B-Q4_K_M.gguf",
@@ -53,6 +57,7 @@ pub const CATALOG: &[ModelInfo] = &[
         kind: "llm",
         name: "Qwen3.5 2B",
         detail: "L'équilibre idéal entre qualité et vitesse",
+        detail_en: "The ideal balance between quality and speed",
         size: 1_281_000_000,
         url: "https://huggingface.co/unsloth/Qwen3.5-2B-GGUF/resolve/main/Qwen3.5-2B-Q4_K_M.gguf",
         file: "Qwen3.5-2B-Q4_K_M.gguf",
@@ -64,6 +69,7 @@ pub const CATALOG: &[ModelInfo] = &[
         kind: "llm",
         name: "Qwen3.5 4B",
         detail: "Les traductions les plus fines, à partir de 16 Go",
+        detail_en: "The finest translations, 16 GB of memory or more",
         size: 2_741_000_000,
         url: "https://huggingface.co/unsloth/Qwen3.5-4B-GGUF/resolve/main/Qwen3.5-4B-Q4_K_M.gguf",
         file: "Qwen3.5-4B-Q4_K_M.gguf",
@@ -75,6 +81,7 @@ pub const CATALOG: &[ModelInfo] = &[
         kind: "asr",
         name: "Whisper Small",
         detail: "Transcription légère et rapide",
+        detail_en: "Light and fast transcription",
         size: 190_000_000,
         url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small-q5_1.bin",
         file: "ggml-small-q5_1.bin",
@@ -86,6 +93,7 @@ pub const CATALOG: &[ModelInfo] = &[
         kind: "asr",
         name: "Whisper Large v3 Turbo",
         detail: "Transcription et minutage des mots, très précis, 99 langues",
+        detail_en: "Transcription and word timing, very precise, 99 languages",
         size: 574_000_000,
         url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo-q5_0.bin",
         file: "ggml-large-v3-turbo-q5_0.bin",
@@ -97,6 +105,7 @@ pub const CATALOG: &[ModelInfo] = &[
         kind: "asrtext",
         name: "Qwen3-ASR 1.7B",
         detail: "Texte des transcriptions plus juste que Whisper, sans phrase sautée, dans 23 langues ; Whisper garde le minutage des mots",
+        detail_en: "More accurate transcripts than Whisper, with no skipped sentences, in 23 languages; Whisper still times the words",
         // modèle (2 165 Mo) + partie audio (356 Mo), téléchargés ensemble
         size: 2_165_034_944 + 355_709_344,
         url: "https://huggingface.co/ggml-org/Qwen3-ASR-1.7B-GGUF/resolve/main/Qwen3-ASR-1.7B-Q8_0.gguf",
@@ -113,6 +122,7 @@ pub const CATALOG: &[ModelInfo] = &[
         kind: "tts",
         name: "Supertonic 3",
         detail: "Voix naturelle pour les mots, les expressions et l'audio des leçons, dans les 31 langues",
+        detail_en: "Natural voice for words, phrases and lesson audio, in all 31 languages",
         // modèle (128,8 Mo) + moteur sherpa-onnx (20,3 Mo), téléchargés ensemble
         size: 128_774_318 + crate::voice::ENGINE_SIZE,
         url: "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/sherpa-onnx-supertonic-3-tts-int8-2026-05-11.tar.bz2",
@@ -241,7 +251,7 @@ pub async fn fetch_resumable(
         return Ok(()); // déjà complet
     }
     if !(status.is_success()) {
-        return Err(anyhow!("téléchargement refusé ({status})"));
+        return Err(anyhow!(crate::tr!("téléchargement refusé ({status})", "download refused ({status})")));
     }
     if start > 0 && status != reqwest::StatusCode::PARTIAL_CONTENT {
         start = 0; // le serveur ne gère pas la reprise : on recommence
@@ -278,7 +288,7 @@ pub async fn fetch_resumable(
     file.flush().await?;
     drop(file);
     if received < total.saturating_sub(1024) {
-        return Err(anyhow!("téléchargement incomplet, réessayez pour reprendre"));
+        return Err(anyhow!(crate::i18n::t("téléchargement incomplet, réessayez pour reprendre", "incomplete download, try again to resume")));
     }
     on_event(DownloadEvent::Progress { received, total, speed });
     Ok(())
@@ -294,7 +304,7 @@ async fn extract_archive(archive: &Path, dir: &Path, final_path: &Path) -> Resul
     if !out.status.success() {
         let _ = tokio::fs::remove_dir_all(&tmp).await;
         let _ = tokio::fs::remove_file(archive).await;
-        return Err(anyhow!("archive illisible, réessayez le téléchargement"));
+        return Err(anyhow!(crate::i18n::t("archive illisible, réessayez le téléchargement", "unreadable archive, try the download again")));
     }
     let name = final_path.file_name().ok_or_else(|| anyhow!("chemin invalide"))?;
     let inner = tmp.join(name);

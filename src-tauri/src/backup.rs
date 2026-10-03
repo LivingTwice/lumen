@@ -47,10 +47,12 @@ const HISTORY_DAYS: usize = 14;
 /// Réglages qui ne quittent pas ce Mac : la clé LingQ (promis : « elle reste
 /// sur ce Mac ») et l'emplacement de la sauvegarde, propre à ce disque.
 const LOCAL_ONLY: [&str; 2] = ["lingq_key", "backup_dir"];
-/// Réglages de ce Mac conservés quand on restaure une sauvegarde.
-const KEEP_ON_RESTORE: [&str; 6] = ["lingq_key", "backup_dir", "backup_on", "backup_audio", "backup_video", "backup_snooze"];
+/// Réglages de ce Mac conservés quand on restaure une sauvegarde (la langue de
+/// l'interface aussi : celle qu'on vient de choisir à l'accueil reste).
+const KEEP_ON_RESTORE: [&str; 7] = ["lingq_key", "backup_dir", "backup_on", "backup_audio", "backup_video", "backup_snooze", "ui_lang"];
 /// Leçons d'accueil : un profil qui n'a qu'elles n'a encore rien à sauvegarder.
-const STARTER_COLLECTION: &str = "Pour commencer";
+/// Leur collection dépend de la langue de l'interface au premier lancement.
+const STARTER_COLLECTIONS: [&str; 2] = ["Pour commencer", "Getting started"];
 /// Écart minimal entre deux sauvegardes automatiques (secondes).
 const AUTO_EVERY: i64 = 10 * 60;
 
@@ -257,7 +259,7 @@ fn device_name() -> String {
                 }
             }
         }
-        std::env::var("COMPUTERNAME").unwrap_or_else(|_| "Ce Mac".into())
+        std::env::var("COMPUTERNAME").unwrap_or_else(|_| crate::i18n::t("Ce Mac", "This Mac").into())
     })
     .clone()
 }
@@ -335,7 +337,7 @@ fn ensure_local(p: &Path, wait: Duration) -> Result<()> {
     }
     let ph = placeholder(p);
     if !ph.exists() {
-        bail!("« {} » est introuvable dans la sauvegarde.", file_name(p));
+        bail!(crate::tr!("« {} » est introuvable dans la sauvegarde.", "\"{}\" can't be found in the backup.", file_name(p)));
     }
     if cfg!(target_os = "macos") {
         let _ = std::process::Command::new("/usr/bin/brctl").arg("download").arg(&ph).status();
@@ -347,7 +349,7 @@ fn ensure_local(p: &Path, wait: Duration) -> Result<()> {
         }
         std::thread::sleep(Duration::from_millis(400));
     }
-    bail!("« {} » n'est pas encore descendu d'iCloud. Vérifiez la connexion à Internet, puis réessayez.", file_name(p))
+    bail!(crate::tr!("« {} » n'est pas encore descendu d'iCloud. Vérifiez la connexion à Internet, puis réessayez.", "\"{}\" hasn't come down from iCloud yet. Check the Internet connection, then try again.", file_name(p)))
 }
 
 /// Copie ordinaire, avec repli sur une copie octet par octet quand le système
@@ -429,8 +431,8 @@ fn counts(c: &Connection) -> Result<Counts> {
 /// une installation fraîche ne crée pas de sauvegarde vide.
 fn has_progress(c: &Connection) -> Result<bool> {
     Ok(c.query_row(
-        "SELECT EXISTS(SELECT 1 FROM terms) OR EXISTS(SELECT 1 FROM lessons WHERE collection<>?1)",
-        [STARTER_COLLECTION],
+        "SELECT EXISTS(SELECT 1 FROM terms) OR EXISTS(SELECT 1 FROM lessons WHERE collection NOT IN (?1, ?2))",
+        STARTER_COLLECTIONS,
         |r| r.get(0),
     )?)
 }
@@ -722,17 +724,17 @@ pub fn list(data_dir: &Path, root: &Path, profile: Option<&str>) -> Result<Vec<I
 /// (`lumen.avant-restauration.db`).
 pub fn restore(live: &Mutex<Connection>, data_dir: &Path, root: &Path, key: &str, day: Option<&str>, on: impl Fn(ImportEvent)) -> Result<Restored> {
     let stage = |s: &str| on(ImportEvent::Stage { stage: s.into() });
-    let folder = find_folder(root, key).ok_or_else(|| anyhow!("Cette sauvegarde est introuvable."))?;
+    let folder = find_folder(root, key).ok_or_else(|| anyhow!(crate::i18n::t("Cette sauvegarde est introuvable.", "This backup can't be found.")))?;
     let (snap, mf) = match day {
         None => (folder.join(SNAPSHOT), folder.join(MANIFEST)),
         Some(d) if is_day(d) => (folder.join(HISTORY).join(format!("{d}.lumen")), folder.join(HISTORY).join(format!("{d}.json"))),
-        Some(_) => bail!("Cette version de la sauvegarde est introuvable."),
+        Some(_) => bail!(crate::i18n::t("Cette version de la sauvegarde est introuvable.", "This version of the backup can't be found.")),
     };
     stage("download");
     ensure_local(&mf, Duration::from_secs(30))?;
-    let manifest = read_manifest(&mf).ok_or_else(|| anyhow!("Les informations de cette sauvegarde sont illisibles."))?;
+    let manifest = read_manifest(&mf).ok_or_else(|| anyhow!(crate::i18n::t("Les informations de cette sauvegarde sont illisibles.", "The details of this backup are unreadable.")))?;
     if manifest.format > FORMAT {
-        bail!("Cette sauvegarde vient d'une version plus récente de Lumen. Mettez Lumen à jour, puis réessayez.");
+        bail!(crate::i18n::t("Cette sauvegarde vient d'une version plus récente de Lumen. Mettez Lumen à jour, puis réessayez.", "This backup comes from a newer version of Lumen. Update Lumen, then try again."));
     }
     ensure_local(&snap, Duration::from_secs(600))?;
     let scratch = data_dir.join("restauration.tmp");
@@ -747,10 +749,10 @@ fn restore_in(live: &Mutex<Connection>, data_dir: &Path, root: &Path, snap: &Pat
     let stage = |s: &str| on(ImportEvent::Stage { stage: s.into() });
     let tmp = scratch.join("base.db");
     gunzip(snap, &tmp).map_err(|e| match e.kind() {
-        io::ErrorKind::InvalidData | io::ErrorKind::InvalidInput | io::ErrorKind::UnexpectedEof => anyhow!("Le fichier de sauvegarde est abîmé ou incomplet."),
+        io::ErrorKind::InvalidData | io::ErrorKind::InvalidInput | io::ErrorKind::UnexpectedEof => anyhow!(crate::i18n::t("Le fichier de sauvegarde est abîmé ou incomplet.", "The backup file is damaged or incomplete.")),
         _ => anyhow!(e),
     })?;
-    let bad = || anyhow!("Le fichier de sauvegarde est abîmé ou incomplet.");
+    let bad = || anyhow!(crate::i18n::t("Le fichier de sauvegarde est abîmé ou incomplet.", "The backup file is damaged or incomplete."));
     // remise à niveau d'une base plus ancienne (migrations additives)
     let c = db::open(&tmp).map_err(|_| bad())?;
     let check: String = c.query_row("PRAGMA quick_check", [], |r| r.get(0)).map_err(|_| bad())?;
@@ -897,32 +899,41 @@ fn prefs(c: &Connection) -> Prefs {
 }
 
 fn no_place() -> String {
-    "iCloud Drive n'est pas activé sur ce Mac. Activez-le dans Réglages Système › votre nom › iCloud, ou choisissez un autre dossier.".into()
+    crate::i18n::t(
+        "iCloud Drive n'est pas activé sur ce Mac. Activez-le dans Réglages Système › votre nom › iCloud, ou choisissez un autre dossier.",
+        "iCloud Drive isn't turned on on this Mac. Turn it on in System Settings › your name › iCloud, or choose another folder.",
+    )
+    .into()
 }
 
 /// Message compréhensible pour les erreurs de fichier les plus courantes.
 fn io_message(io: &io::Error, icloud: bool) -> Option<String> {
     if matches!(io.raw_os_error(), Some(28) | Some(112)) {
-        return Some("Il n'y a plus assez d'espace disque sur ce Mac.".into());
+        return Some(crate::i18n::t("Il n'y a plus assez d'espace disque sur ce Mac.", "There isn't enough disk space left on this Mac.").into());
     }
     match io.kind() {
         io::ErrorKind::PermissionDenied if icloud => Some(
-            "Lumen n'a pas accès à iCloud Drive. Autorisez-le dans Réglages Système › Confidentialité et sécurité › Fichiers et dossiers, puis réessayez.".into(),
+            crate::i18n::t(
+                "Lumen n'a pas accès à iCloud Drive. Autorisez-le dans Réglages Système › Confidentialité et sécurité › Fichiers et dossiers, puis réessayez.",
+                "Lumen has no access to iCloud Drive. Allow it in System Settings › Privacy & Security › Files and Folders, then try again.",
+            )
+            .into(),
         ),
-        io::ErrorKind::PermissionDenied => Some("Lumen ne peut pas écrire dans ce dossier. Choisissez-en un autre.".into()),
-        io::ErrorKind::NotFound if !icloud => Some("Le dossier de sauvegarde est introuvable. Le disque est-il branché ?".into()),
+        io::ErrorKind::PermissionDenied => Some(crate::i18n::t("Lumen ne peut pas écrire dans ce dossier. Choisissez-en un autre.", "Lumen can't write to this folder. Choose another one.").into()),
+        io::ErrorKind::NotFound if !icloud => Some(crate::i18n::t("Le dossier de sauvegarde est introuvable. Le disque est-il branché ?", "The backup folder can't be found. Is the drive connected?").into()),
         _ => None,
     }
 }
 
-/// Message d'erreur lisible ; `what` : « Sauvegarde », « Restauration »…
+/// Message d'erreur lisible ; `what` : (« Sauvegarde impossible », « Backup failed »)…
 /// Les messages écrits pour l'utilisateur (`bail!`) passent tels quels.
-fn friendly(e: &anyhow::Error, icloud: bool, what: &str) -> String {
+fn friendly(e: &anyhow::Error, icloud: bool, what: (&'static str, &'static str)) -> String {
+    let what = crate::i18n::t(what.0, what.1);
     if let Some(io) = e.chain().find_map(|c| c.downcast_ref::<io::Error>()) {
-        return io_message(io, icloud).unwrap_or_else(|| format!("{what} impossible : {io}"));
+        return io_message(io, icloud).unwrap_or_else(|| crate::tr!("{what} : {io}", "{what}: {io}"));
     }
     if let Some(sql) = e.chain().find_map(|c| c.downcast_ref::<rusqlite::Error>()) {
-        return format!("{what} impossible : {sql}");
+        return crate::tr!("{what} : {sql}", "{what}: {sql}");
     }
     e.to_string()
 }
@@ -938,14 +949,18 @@ pub fn run_now(state: &AppState) -> Result<(), String> {
     let icloud = p.dir.trim().is_empty();
     let res = match root(&p.dir) {
         None => Err(no_place()),
-        Some(root) => run(&state.data_dir, &Options { root, audio: p.audio, video: p.video }).map_err(|e| friendly(&e, icloud, "Sauvegarde")),
+        Some(root) => run(&state.data_dir, &Options { root, audio: p.audio, video: p.video }).map_err(|e| friendly(&e, icloud, ("Sauvegarde impossible", "Backup failed"))),
     };
     let mut error = state.backup.error.lock();
     match res {
         Ok(out) => {
             state.backup.seen.store(changes, Ordering::SeqCst);
             *error = out.and_then(|(_, w)| w).map(|w| {
-                format!("La progression est sauvegardée, mais un média n'a pas pu être copié : {}", io_message(&w, icloud).unwrap_or_else(|| w.to_string()))
+                let why = io_message(&w, icloud).unwrap_or_else(|| w.to_string());
+                crate::tr!(
+                    "La progression est sauvegardée, mais un média n'a pas pu être copié : {why}",
+                    "Your progress is backed up, but a media file couldn't be copied: {why}"
+                )
             });
             Ok(())
         }
@@ -1065,14 +1080,14 @@ pub fn status(state: &AppState) -> Status {
 pub fn list_for(state: &AppState) -> Result<Vec<Info>, String> {
     let p = prefs(&state.db.lock());
     let root = root(&p.dir).ok_or_else(no_place)?;
-    list(&state.data_dir, &root, p.profile.as_deref()).map_err(|e| friendly(&e, p.dir.trim().is_empty(), "Lecture des sauvegardes"))
+    list(&state.data_dir, &root, p.profile.as_deref()).map_err(|e| friendly(&e, p.dir.trim().is_empty(), ("Lecture des sauvegardes impossible", "Couldn't read the backups")))
 }
 
 pub fn restore_for(state: &AppState, key: &str, day: Option<&str>, on: impl Fn(ImportEvent)) -> Result<Restored, String> {
     let _running = state.backup.wait();
     let p = prefs(&state.db.lock());
     let root = root(&p.dir).ok_or_else(no_place)?;
-    let out = restore(&state.db, &state.data_dir, &root, key, day, on).map_err(|e| friendly(&e, p.dir.trim().is_empty(), "Restauration"))?;
+    let out = restore(&state.db, &state.data_dir, &root, key, day, on).map_err(|e| friendly(&e, p.dir.trim().is_empty(), ("Restauration impossible", "Restore failed")))?;
     // la progression restaurée rejoint la sauvegarde de ce Mac à la prochaine occasion
     state.backup.seen.store(u64::MAX, Ordering::SeqCst);
     state.backup.last_try.store(0, Ordering::SeqCst);
@@ -1121,7 +1136,7 @@ mod tests {
         let data = temp("fresh");
         let root = data.join("cloud").join(ROOT_NAME);
         let c = db::open(&db::path(&data)).unwrap();
-        lesson(&c, "Il faro", STARTER_COLLECTION, None, None, None);
+        lesson(&c, "Il faro", STARTER_COLLECTIONS[0], None, None, None);
         assert!(run(&data, &Options { root: root.clone(), audio: true, video: true }).unwrap().is_none());
         // le dossier existe (accès demandé), mais aucune sauvegarde n'y est
         assert!(root.is_dir());
