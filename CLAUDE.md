@@ -311,6 +311,7 @@ Si la commande demande une nouvelle permission (plugin, fenêtre), l'ajouter à 
 - La **clé privée** des mises à jour est `~/.tauri/lumen-updater.key` : ne jamais la copier dans le projet, ne jamais la committer, ne jamais la régénérer (les Lumen installés refuseraient toutes les mises à jour suivantes).
 - `plugins.updater.pubkey` dans `tauri.conf.json` est inscrite par `mac-env.sh` : ne pas la remplacer.
 - Mises à jour publiées sur `LivingTwice/lumen-releases` (public), code source sur `LivingTwice/lumen` (privé). URL lue par l'app : `https://github.com/LivingTwice/lumen-releases/releases/latest/download/latest.json`, plateforme `darwin-aarch64`.
+- **Dictionnaires anglais** : version à part `dictionaries-en-1` de `lumen-releases` (les six `<langue>.db.gz`), créée avec `--latest=false` ; elle ne doit **jamais** devenir « latest », sinon les Lumen installés ne trouvent plus `latest.json`. Le script de publication passe `--latest` à chaque version de Lumen. Pour les refaire : nouvelle version `dictionaries-en-2` et `EN_URL`, `EN_VERSION` dans `dict.rs`.
 - Signature ad hoc (`signingIdentity: "-"`), pas encore de Developer ID : sur un autre Mac, premier lancement via Réglages Système › Confidentialité et sécurité › Ouvrir quand même.
 
 ### Prudence

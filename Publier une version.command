@@ -55,7 +55,7 @@ git push -q -u origin main || echo "  (envoi du code impossible, la publication 
 step "Publication sur GitHub"
 ASSETS=("$BUNDLE/release/Lumen_${VERSION}_${ARCH}.app.tar.gz" "$BUNDLE/release/latest.json")
 for d in "$BUNDLE"/dmg/Lumen_${VERSION}_*.dmg; do [ -f "$d" ] && ASSETS+=("$d"); done
-gh release create "v$VERSION" "${ASSETS[@]}" --repo "$RELEASES" --title "Lumen $VERSION" --notes "$NOTES" || fail "La publication a échoué."
+gh release create "v$VERSION" "${ASSETS[@]}" --repo "$RELEASES" --title "Lumen $VERSION" --notes "$NOTES" --latest || fail "La publication a échoué."
 
 mkdir -p Distribution
 cp "$BUNDLE"/dmg/Lumen_${VERSION}_*.dmg Distribution/ 2>/dev/null
