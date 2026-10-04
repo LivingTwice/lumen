@@ -5,6 +5,7 @@ import { Segmented } from "../../components/ui";
 import { api, errorText, isNoModel, isTauri } from "../../lib/api";
 import { confirmAsk } from "../../lib/dialogs";
 import { t } from "../../lib/i18n";
+import { stopPronunciation } from "../../lib/pronounce";
 import { formatDuration, useApp } from "../../lib/store";
 import type { PageRange } from "../../lib/tokenize";
 import { loadVoices, speak, ttsAvailable, voicesFor, type SpeakHandle } from "../../lib/tts";
@@ -351,6 +352,8 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player({ lesson, 
   const speakFrom = useCallback(
     (start: number) => {
       speakRef.current?.stop();
+      // le mot touché se tait : la leçon reprend la parole
+      stopPronunciation();
       const p = pageOf(start);
       const range = pages[p];
       let a = start;
@@ -550,7 +553,11 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player({ lesson, 
   const rates = hasMedia ? ["0.75", "0.9", "1", "1.25"] : ["0.75", "0.85", "0.95", "1.1"];
 
   const masterEvents = {
-    onPlay: () => setPlaying(true),
+    onPlay: () => {
+      // le mot touché se tait : la leçon reprend la parole (bouton, Espace ou touches du Mac)
+      stopPronunciation();
+      setPlaying(true);
+    },
     onPause: (e: React.SyntheticEvent<HTMLMediaElement>) => {
       setPlaying(false);
       if (dual) videoRef.current?.pause();

@@ -135,7 +135,7 @@ pub fn is_youtube(url: &str) -> bool {
 }
 
 /// Extension du fichier visé : `Some(true)` vidéo, `Some(false)` son.
-fn ext_kind(u: &Url) -> Option<bool> {
+pub(crate) fn ext_kind(u: &Url) -> Option<bool> {
     let last = u.path_segments()?.next_back()?.to_lowercase();
     let ext = last.rsplit_once('.')?.1;
     if AUDIO_EXT.contains(&ext) {
@@ -214,7 +214,7 @@ fn file_title(u: &Url) -> String {
 
 // ---------- réseau ----------
 
-fn client() -> Result<reqwest::Client> {
+pub(crate) fn client() -> Result<reqwest::Client> {
     Ok(reqwest::Client::builder().user_agent(UA).connect_timeout(Duration::from_secs(15)).timeout(Duration::from_secs(45)).build()?)
 }
 
@@ -258,7 +258,7 @@ async fn body_text(resp: reqwest::Response) -> Result<String> {
     Ok(decode_bytes(out))
 }
 
-async fn get_text(c: &reqwest::Client, url: &str) -> Result<String> {
+pub(crate) async fn get_text(c: &reqwest::Client, url: &str) -> Result<String> {
     let resp = c.get(url).header(ACCEPT_LANGUAGE, accept_language()).send().await?;
     if !resp.status().is_success() {
         return Err(anyhow!(crate::tr!("La page a répondu {}.", "The page answered {}.", resp.status())));
@@ -606,7 +606,7 @@ pub fn decode_entities(s: &str) -> String {
 }
 
 /// Position de `needle` (en ASCII, sans tenir compte de la casse) à partir de `from`.
-fn find_ci(hay: &str, needle: &str, from: usize) -> Option<usize> {
+pub(crate) fn find_ci(hay: &str, needle: &str, from: usize) -> Option<usize> {
     let h = hay.as_bytes();
     let n = needle.as_bytes();
     if n.is_empty() || from >= h.len() {
@@ -616,14 +616,14 @@ fn find_ci(hay: &str, needle: &str, from: usize) -> Option<usize> {
 }
 
 /// Balise ouvrante : nom en minuscules, attributs, fin (après le « > »).
-struct Tag {
-    name: String,
-    attrs: Vec<(String, String)>,
-    end: usize,
+pub(crate) struct Tag {
+    pub(crate) name: String,
+    pub(crate) attrs: Vec<(String, String)>,
+    pub(crate) end: usize,
 }
 
 impl Tag {
-    fn attr(&self, k: &str) -> Option<&str> {
+    pub(crate) fn attr(&self, k: &str) -> Option<&str> {
         self.attrs.iter().find(|(a, _)| a == k).map(|(_, v)| v.as_str())
     }
 }
@@ -631,12 +631,12 @@ impl Tag {
 /// Parcourt les balises ouvrantes d'un HTML ou d'un XML, sans se soucier de
 /// leur imbrication (assez pour y repérer médias et métadonnées). Le contenu
 /// des scripts, des styles, des commentaires et des CDATA est sauté.
-struct Tags<'a> {
+pub(crate) struct Tags<'a> {
     s: &'a str,
     pos: usize,
 }
 
-fn tags(s: &str) -> Tags<'_> {
+pub(crate) fn tags(s: &str) -> Tags<'_> {
     Tags { s, pos: 0 }
 }
 
@@ -722,7 +722,7 @@ impl Iterator for Tags<'_> {
 
 /// Texte d'un élément (CDATA et balises internes retirées), à partir de la fin
 /// de sa balise ouvrante.
-fn inner_text(s: &str, tag: &Tag) -> String {
+pub(crate) fn inner_text(s: &str, tag: &Tag) -> String {
     let close = find_ci(s, &format!("</{}", tag.name), tag.end).unwrap_or(s.len());
     let raw = &s[tag.end..close];
     let raw = raw.replace("<![CDATA[", "").replace("]]>", "");
@@ -740,7 +740,7 @@ fn inner_text(s: &str, tag: &Tag) -> String {
 }
 
 /// Texte du premier élément `name`.
-fn tag_text(s: &str, name: &str) -> Option<String> {
+pub(crate) fn tag_text(s: &str, name: &str) -> Option<String> {
     tags(s).find(|t| t.name == name).map(|t| inner_text(s, &t)).filter(|x| !x.is_empty())
 }
 
@@ -958,7 +958,7 @@ fn is_feed(ctype: &str, body: &str) -> bool {
     xmlish && (head.contains("<rss") || head.contains("<feed") || head.contains("<channel"))
 }
 
-fn parse_duration(s: &str) -> f64 {
+pub(crate) fn parse_duration(s: &str) -> f64 {
     let parts: Option<Vec<f64>> = s.trim().split(':').map(|p| p.trim().parse::<f64>().ok()).collect();
     parts.map(|p| p.iter().fold(0.0, |acc, x| acc * 60.0 + x)).unwrap_or(0.0)
 }

@@ -3,7 +3,9 @@ import { useEffect, useState } from "react";
 import { Icon, type IconName } from "../components/Icon";
 import { Sheet } from "../components/ui";
 import { api, errorText, isTauri } from "../lib/api";
+import { youtubeId } from "../lib/covers";
 import { pickFiles } from "../lib/dialogs";
+import { cleanTitle, useDiscover } from "../lib/discover";
 import {
   MEDIA_EXT,
   baseName,
@@ -19,7 +21,7 @@ import {
 import { count, formatNumber, locale, pick, t } from "../lib/i18n";
 import { inLang } from "../lib/langs";
 import { formatBytes, formatDuration, useApp } from "../lib/store";
-import type { ImportEvent, LinkInfo, LinkMedia, NewLesson } from "../lib/types";
+import type { DiscoverItem, ImportEvent, LinkInfo, LinkMedia, NewLesson } from "../lib/types";
 
 type Tab = "text" | "link" | "file" | "media";
 
@@ -106,6 +108,23 @@ function shortDate(d: string) {
   return date.toLocaleDateString(locale(), { day: "numeric", month: "short", year });
 }
 
+/** Le son ou la vidéo d'un élément de Découvrir, prêt pour `importLink`. */
+function itemMedia(item: DiscoverItem): LinkMedia {
+  const date = item.published ? new Date(item.published * 1000).toISOString().slice(0, 10) : "";
+  return {
+    url: item.url,
+    title: cleanTitle(item.title),
+    duration: item.duration,
+    video: item.kind === "video",
+    // une vidéo YouTube passe par yt-dlp ; un épisode de podcast se télécharge tel quel
+    direct: !youtubeId(item.url),
+    image: item.image,
+    date,
+    page: item.page || item.url,
+    collection: item.source_name,
+  };
+}
+
 /** Vignette du lien : l'image trouvée, sinon une icône dans un halo. */
 function LinkThumb({ src, icon }: { src: string; icon: IconName }) {
   const [failed, setFailed] = useState(false);
@@ -119,6 +138,7 @@ function LinkThumb({ src, icon }: { src: string; icon: IconName }) {
 export function ImportSheet() {
   const open = useApp((s) => s.importOpen);
   const files = useApp((s) => s.importFiles);
+  const item = useApp((s) => s.importItem);
   const close = useApp((s) => s.closeImport);
   const lang = useApp((s) => s.lang)();
   const info = useApp((s) => s.info);
@@ -161,6 +181,22 @@ export function ImportSheet() {
   useEffect(() => {
     if (!open) return;
     reset();
+    if (item) {
+      // depuis Découvrir : la vidéo ou l'épisode est déjà connu ; un article (ou un
+      // épisode dont la page porte le texte) se lit d'abord sur sa page
+      const address = item.page || item.url;
+      setTab("link");
+      setUrl(address);
+      if (item.kind === "text" || item.page_text) void probeLink(address, item);
+      else
+        setFound({
+          info: { url: address, title: cleanTitle(item.title), site: item.source_name, image: item.image, html: "", media: [itemMedia(item)], list: false, via: "", note: "" },
+          article: null,
+          choice: "media",
+          picked: [0],
+        });
+      return;
+    }
     if (files && files.length) {
       const media = files.filter((f) => MEDIA_EXT.includes(extOf(f)));
       const docs = files.filter((f) => !MEDIA_EXT.includes(extOf(f)));
@@ -173,9 +209,11 @@ export function ImportSheet() {
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, files]);
+  }, [open, files, item]);
 
   const finish = (ids: number[], label: string) => {
+    // la carte de Découvrir mène désormais à la leçon
+    if (item && ids.length) void useDiscover.getState().mark(lang, item.id, ids[0]);
     bump();
     toast(label, "light");
     close();
@@ -224,9 +262,13 @@ export function ImportSheet() {
     });
 
   // ---------- lien : article, vidéo, podcast, Spotify ----------
-  const probeLink = () =>
+  /** `hint` : l'élément de Découvrir derrière ce lien (son, collection, texte de la page) */
+  const probeLink = (address = url, hint?: DiscoverItem) =>
     run(t("Lecture du lien", "Reading the link"), async () => {
-      const info = await api().linkProbe(url.trim(), onImportEvent(""));
+      const info = await api().linkProbe(address.trim(), onImportEvent(""));
+      // la page d'un épisode ne montre pas toujours son lecteur : le son du flux le remplace
+      if (hint && hint.kind !== "text" && !info.media.length) info.media = [itemMedia(hint)];
+      if (hint && !info.site) info.site = hint.source_name;
       let article: Found["article"] = null;
       if (info.html) {
         try {
@@ -237,13 +279,15 @@ export function ImportSheet() {
           // pas d'article lisible : le son ou la vidéo seulement
         }
       }
-      if (!info.media.length) {
+      if (!info.media.length || hint?.kind === "text") {
         if (!article) throw info.note || t("Lumen n'a trouvé ni texte ni son à importer à cette adresse.", "Lumen found no text or sound to import at this address.");
-        setPreview({ title: article.title, text: article.text, kind: "web", source: info.url });
+        // le titre donné par la source est plus sûr que celui que Readability devine (« … – ANSA.it »)
+        setPreview({ title: hint ? cleanTitle(hint.title) : article.title || info.title, text: article.text, kind: "web", source: info.url, collection: hint?.source_name });
         return;
       }
-      // un long article accompagné d'un son : le texte d'abord ; un texte court : le son, recalé sur le texte s'il le suit
-      const choice: Choice = !article ? "media" : article.words >= 150 ? "article" : info.list ? "media" : "both";
+      // un long article accompagné d'un son : le texte d'abord ; un texte court : le son, recalé sur le texte s'il le suit.
+      // Un épisode dont la page porte le texte (DW, RFI…) : le son avec ce texte, la lanterne calée dessus.
+      const choice: Choice = !article ? "media" : hint?.page_text && !info.list ? "both" : article.words >= 150 ? "article" : info.list ? "media" : "both";
       setFound({ info, article, choice, picked: [0] });
     });
 
@@ -391,7 +435,7 @@ export function ImportSheet() {
       );
     if (tab === "link" && !preview && !found)
       footer = (
-        <button className="btn primary" disabled={url.trim().length < 4} onClick={probeLink}>
+        <button className="btn primary" disabled={url.trim().length < 4} onClick={() => probeLink()}>
           {t("Ouvrir le lien", "Open the link")}
         </button>
       );

@@ -1168,7 +1168,7 @@ span.player-voice .icon-btn {
 }
 .complete-stats {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(4, 1fr);
   gap: 10px;
   width: 100%;
   margin: 8px 0;
@@ -1183,13 +1183,33 @@ span.player-voice .icon-btn {
 }
 .complete-stats strong {
   font-family: var(--font-display);
-  font-size: 30px;
+  font-size: 27px;
+  white-space: nowrap;
   font-weight: 500;
   font-variant-numeric: tabular-nums;
 }
-.complete-stats span {
+.complete-stats div > span {
   font-size: 12px;
   color: var(--muted);
+}
+/* série du jour : la flamme s'allume quand l'objectif est atteint */
+.complete-streak {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: -4px;
+  font-size: 13px;
+  color: var(--muted);
+}
+.complete-streak svg {
+  color: var(--faint);
+}
+.complete-streak.lit {
+  color: var(--text);
+}
+.complete-streak.lit svg {
+  color: var(--light-strong);
+  filter: drop-shadow(0 0 6px var(--light));
 }
 .burst {
   position: relative;

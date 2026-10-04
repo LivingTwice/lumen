@@ -59,6 +59,12 @@
   --light-soft: rgba(255, 180, 94, 0.32);
   --light-veil: rgba(255, 196, 120, 0.16);
   --lantern: radial-gradient(closest-side, rgba(255, 196, 110, 0.55), rgba(255, 180, 94, 0.22) 60%, rgba(255, 180, 94, 0));
+  /* flamme de la série (Progrès), et texte posé sur la lumière */
+  --flame-top: #ffc56e;
+  --flame-base: #ee7a30;
+  --flame-core-top: #fff8e6;
+  --flame-core: #ffd383;
+  --on-light: #4a2a0c;
 
   --shadow-s: 0 1px 2px rgba(17, 18, 24, 0.06), 0 1px 1px rgba(17, 18, 24, 0.04);
   --shadow-m: 0 6px 20px rgba(17, 18, 24, 0.08), 0 1px 3px rgba(17, 18, 24, 0.06);
@@ -105,6 +111,11 @@
   --light-soft: rgba(255, 190, 110, 0.26);
   --light-veil: rgba(255, 190, 110, 0.1);
   --lantern: radial-gradient(closest-side, rgba(255, 190, 110, 0.42), rgba(255, 180, 94, 0.16) 60%, rgba(255, 180, 94, 0));
+  --flame-top: #ffd08a;
+  --flame-base: #f2853c;
+  --flame-core-top: #fffaf0;
+  --flame-core: #ffdd9a;
+  --on-light: #3d2208;
 
   --shadow-s: 0 1px 2px rgba(0, 0, 0, 0.3);
   --shadow-m: 0 8px 24px rgba(0, 0, 0, 0.35), 0 1px 3px rgba(0, 0, 0, 0.3);
@@ -462,6 +473,33 @@ p {
   font-size: 12px;
   color: var(--muted);
   font-variant-numeric: tabular-nums;
+}
+/* série du jour : flamme éteinte tant que l'objectif n'est pas atteint */
+.nav-streak {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 7px 2px 5px;
+  border-radius: 999px;
+  font-size: 11.5px;
+  font-weight: 600;
+  line-height: 1.3;
+  color: var(--muted);
+  background: var(--chip);
+  font-variant-numeric: tabular-nums;
+}
+.nav-item .nav-streak .icon {
+  color: var(--faint);
+}
+.nav-streak.lit {
+  color: color-mix(in srgb, var(--light-strong) 55%, var(--text));
+  background: var(--light-veil);
+  box-shadow: inset 0 0 0 1px var(--light-soft);
+}
+.nav-item .nav-streak.lit .icon {
+  color: var(--light-strong);
+  filter: drop-shadow(0 0 4px var(--light));
 }
 
 .side-section {
@@ -921,6 +959,19 @@ button.chip.on {
 .glow-surface > * {
   position: relative;
   z-index: 1;
+}
+
+/* durée : unités en petit à côté des chiffres */
+.dur {
+  white-space: nowrap;
+}
+.dur small {
+  font-family: var(--font-ui);
+  font-size: 0.46em;
+  font-weight: 500;
+  letter-spacing: 0;
+  margin-left: 0.14em;
+  color: var(--muted);
 }
 
 /* barre de progression avec reflet lumineux */

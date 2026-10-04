@@ -644,15 +644,20 @@ def write_v2(dst, lang, native, entries, forms, source, extra_meta=None):
     db.executemany("INSERT INTO meta VALUES(?,?)", meta.items())
     finish(db, tmp, dst, source, len(entries), len(rows), forms_index=False, meta_table=False)
 
-def finish_forms(forms, entries, lang):
-    """Grec : l'accent manque dans les textes en capitales ; la clé sans accent mène au mot."""
-    if lang != "el":
+CEDILLA = str.maketrans("șțȘȚ", "şţŞŢ")
+
+def finish_forms(forms, entries, lang, native):
+    """Autres graphies courantes, comme des formes : grec sans accent (textes en capitales),
+    roumain à cédille (« şi », de vieux claviers, pour « și »)."""
+    if lang not in ("el", "ro"):
         return
     keys = {e[0] for e in entries}
     for k, w in [(e[0], e[1]) for e in entries] + [(k, l) for (k, l) in list(forms)]:
-        lk = loose(k)
-        if lk != k and lk not in keys and (lk, w) not in forms:
-            forms[(lk, w)] = forms.get((k, w), "")
+        other = loose(k) if lang == "el" else k.translate(CEDILLA)
+        if other != k and other not in keys and (other, w) not in forms:
+            # une forme fléchie garde sa description ; le mot lui-même dit sa graphie
+            note = forms.get((k, w)) or ("" if lang == "el" else "cedilla spelling" if native == "en" else "Graphie à cédille")
+            forms[(other, w)] = note
 
 # auxiliaires et pronoms réfléchis des formes composées des tableaux (« mȉslio sam »,
 # « θα δω », « heb gezien ») : le mot qui reste est une forme du verbe
@@ -697,7 +702,8 @@ class Forms(dict):
 # mal les formes les plus courantes (participes slovènes « rekel », impératifs lettons…)
 UD_TREEBANKS = {"sl": ["Slovenian-SSJ", "Slovenian-SST"], "lt": ["Lithuanian-ALKSNIS", "Lithuanian-HSE"],
                 "lv": ["Latvian-LVTB"], "et": ["Estonian-EWT"], "hr": ["Croatian-SET"],
-                "ko": ["Korean-Kaist", "Korean-GSD"], "id": ["Indonesian-GSD"], "tr": ["Turkish-BOUN"]}
+                "ko": ["Korean-Kaist", "Korean-GSD"], "id": ["Indonesian-GSD"], "tr": ["Turkish-BOUN"],
+                "sk": ["Slovak-SNK"], "ro": ["Romanian-RRT", "Romanian-Nonstandard"], "da": ["Danish-DDT"]}
 UD_TAGS = {
     "Case=Nom": "nominative", "Case=Gen": "genitive", "Case=Dat": "dative", "Case=Acc": "accusative",
     "Case=Ins": "instrumental", "Case=Loc": "locative", "Case=Voc": "vocative", "Case=Abl": "ablative",
@@ -836,7 +842,7 @@ def build_en2(src, lang, dst, pairs=None):
                 forms.add(fm.get("form"), word, describe(tags, "en"), 2, len(tags))
     ud_forms(src, lang, forms, "en")
     forms = resolve_lemmas(forms, [(e[0], e[1]) for e in entries], lang)
-    finish_forms(forms, entries, lang)
+    finish_forms(forms, entries, lang, "en")
     write_v2(dst, lang, "en", entries, forms, "English Wiktionary via kaikki.org (CC BY-SA 4.0)"
              + (", Universal Dependencies (CC BY-SA 4.0)" if lang in UD_TREEBANKS else ""))
 
@@ -942,7 +948,7 @@ def build_fr2(src, lang, dst, pairs):
                 entries.append((k, h["word"], titles.get((k, pos)) or POS_FR.get(pos, (pos or "").capitalize()), h["ipa"], glosses))
     ud_forms(src, lang, forms, "fr")
     forms = resolve_lemmas(forms, [(e[0], e[1]) for e in entries], lang)
-    finish_forms(forms, entries, lang)
+    finish_forms(forms, entries, lang, "fr")
     write_v2(dst, lang, "fr", entries, forms, "Wiktionnaire et English Wiktionary via kaikki.org (CC BY-SA 4.0)"
              + (", Universal Dependencies (CC BY-SA 4.0)" if lang in UD_TREEBANKS else ""))
 

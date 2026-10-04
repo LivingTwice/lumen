@@ -11,7 +11,8 @@ import { CountUp, Menu, Orb } from "./ui";
 import { BackupCard } from "./BackupCard";
 import { LingqCard } from "./LingqCard";
 import { UpdateCard } from "./UpdateCard";
-import { t } from "../lib/i18n";
+import { count, formatNumber, t } from "../lib/i18n";
+import { studyTime } from "../lib/progress";
 
 const nav = (): { view: View; label: string; icon: IconName }[] => [
   { view: "library", label: t("Bibliothèque", "Library"), icon: "library" },
@@ -30,6 +31,7 @@ export function Sidebar() {
   const openPlaylist = useApp((s) => s.openPlaylist);
   const openImport = useApp((s) => s.openImport);
   const known = useApp((s) => s.knownCount);
+  const streak = useApp((s) => s.streak);
   const models = useApp((s) => s.models);
   const downloads = useApp((s) => s.downloads);
   const libraryVersion = useApp((s) => s.libraryVersion);
@@ -140,6 +142,22 @@ export function Sidebar() {
               <Icon name={n.icon} />
               <span>{n.label}</span>
               {n.view === "chat" && chatBusy && view !== "chat" && <span className="nav-live" aria-label={t("Réponse en cours", "Answer in progress")} />}
+              {n.view === "progress" && streak && streak.current > 0 && (
+                <span
+                  className={`nav-streak num ${streak.today_done ? "lit" : ""}`}
+                  title={
+                    streak.today_done
+                      ? t(`Série de ${count(streak.current, "jour", "jours", "", "")} · objectif du jour atteint`, `${formatNumber(streak.current)}-day streak · daily goal reached`)
+                      : t(
+                          `Série de ${count(streak.current, "jour", "jours", "", "")} · encore ${studyTime(Math.max(60, streak.goal_min * 60 - streak.today_secs))} dans une leçon aujourd'hui pour la garder`,
+                          `${formatNumber(streak.current)}-day streak · ${studyTime(Math.max(60, streak.goal_min * 60 - streak.today_secs))} more in a lesson today to keep it`,
+                        )
+                  }
+                >
+                  <Icon name="flame" size={12} stroke={2} />
+                  {formatNumber(streak.current)}
+                </span>
+              )}
             </button>
           );
         })}

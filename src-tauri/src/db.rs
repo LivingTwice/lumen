@@ -4,6 +4,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use anyhow::Result;
+use chrono::{Datelike, Months, NaiveDate};
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 
@@ -126,17 +127,25 @@ pub fn open(path: &Path) -> Result<Connection> {
         CREATE INDEX IF NOT EXISTS chat_messages_chat ON chat_messages(chat_id, id);
         "#,
     )?;
+    // progrès : temps actif passé dans les leçons, et jours où l'objectif est atteint (série)
+    add_column(&conn, "activity", "learn_secs", "INTEGER NOT NULL DEFAULT 0")?;
+    if add_column(&conn, "activity", "goal_met", "INTEGER NOT NULL DEFAULT 0")? {
+        // avant le temps actif, un jour de lecture ou d'écoute compte dans la série :
+        // personne ne perd la série qu'il avait déjà
+        conn.execute_batch("UPDATE activity SET goal_met=1 WHERE words_read>0 OR listen_secs>=60;")?;
+    }
     Ok(conn)
 }
 
-fn add_column(conn: &Connection, table: &str, column: &str, decl: &str) -> Result<()> {
+/// Ajoute une colonne si elle manque. Renvoie `true` si elle vient d'être créée.
+fn add_column(conn: &Connection, table: &str, column: &str, decl: &str) -> Result<bool> {
     let exists: bool = conn
         .prepare(&format!("SELECT 1 FROM pragma_table_info('{table}') WHERE name=?1"))?
         .exists([column])?;
     if !exists {
         conn.execute_batch(&format!("ALTER TABLE {table} ADD COLUMN {column} {decl};"))?;
     }
-    Ok(())
+    Ok(!exists)
 }
 
 pub fn now() -> i64 {
@@ -145,6 +154,10 @@ pub fn now() -> i64 {
 
 pub fn today() -> String {
     chrono::Local::now().format("%Y-%m-%d").to_string()
+}
+
+fn today_date() -> NaiveDate {
+    chrono::Local::now().date_naive()
 }
 
 // ---------- réglages ----------
@@ -440,6 +453,13 @@ pub fn lesson_set_cover(c: &Connection, id: i64, path: Option<&str>) -> Result<O
     let old: Option<String> = c.query_row("SELECT cover_path FROM lessons WHERE id=?1", [id], |r| r.get(0))?;
     c.execute("UPDATE lessons SET cover_path=?1 WHERE id=?2", params![path, id])?;
     Ok(old)
+}
+
+/// (identifiant, source) des leçons d'une langue : Découvrir y reconnaît ce qui est déjà importé.
+pub fn lesson_sources(c: &Connection, lang: &str) -> Result<Vec<(i64, String)>> {
+    let mut st = c.prepare("SELECT id, source FROM lessons WHERE lang=?1")?;
+    let rows = st.query_map([lang], |r| Ok((r.get(0)?, r.get(1)?)))?;
+    Ok(rows.filter_map(|r| r.ok()).collect())
 }
 
 /// Leçon déjà importée depuis cette origine ?
@@ -901,13 +921,91 @@ pub fn terms_list(c: &Connection, q: &TermQuery) -> Result<(Vec<Term>, i64)> {
 
 // ---------- statistiques ----------
 
-#[derive(Serialize, Debug)]
+/// Objectif du jour par défaut : minutes de temps actif dans les leçons.
+pub const GOAL_MIN_DEFAULT: i64 = 10;
+
+/// Objectif du jour (réglage `daily_goal`, en minutes).
+pub fn goal_min(c: &Connection) -> i64 {
+    setting(c, "daily_goal").and_then(|v| v.trim().parse().ok()).filter(|m| (1..=600).contains(m)).unwrap_or(GOAL_MIN_DEFAULT)
+}
+
+#[derive(Serialize, Debug, Clone, Default)]
 pub struct DayStat {
     pub day: String,
     pub words_read: i64,
     pub known_added: i64,
     pub lingqs: i64,
     pub listen_secs: i64,
+    /// temps actif passé dans les leçons
+    pub learn_secs: i64,
+    /// objectif du jour atteint : la journée compte dans la série
+    pub goal_met: bool,
+}
+
+impl DayStat {
+    fn active(&self) -> bool {
+        self.learn_secs > 0 || self.words_read > 0 || self.listen_secs > 0 || self.lingqs > 0 || self.known_added > 0
+    }
+}
+
+/// Activité cumulée sur une période (jour, semaine, mois, tout).
+#[derive(Serialize, Debug, Clone, Default)]
+pub struct Span {
+    /// premier jour de la période
+    pub start: String,
+    pub words_read: i64,
+    pub known_added: i64,
+    pub lingqs: i64,
+    pub listen_secs: i64,
+    pub learn_secs: i64,
+    pub active_days: i64,
+    pub goal_days: i64,
+}
+
+impl Span {
+    fn at(start: NaiveDate) -> Span {
+        Span { start: start.format("%Y-%m-%d").to_string(), ..Default::default() }
+    }
+    fn add(&mut self, d: &DayStat) {
+        self.words_read += d.words_read;
+        self.known_added += d.known_added;
+        self.lingqs += d.lingqs;
+        self.listen_secs += d.listen_secs;
+        self.learn_secs += d.learn_secs;
+        self.active_days += d.active() as i64;
+        self.goal_days += d.goal_met as i64;
+    }
+}
+
+#[derive(Serialize, Debug, Default)]
+pub struct Periods {
+    pub today: Span,
+    pub yesterday: Span,
+    /// semaine en cours, depuis lundi
+    pub week: Span,
+    pub last_week: Span,
+    /// mois en cours, depuis le 1er
+    pub month: Span,
+    pub last_month: Span,
+    pub total: Span,
+}
+
+#[derive(Serialize, Debug, Default, PartialEq)]
+pub struct Streak {
+    /// jours de suite où l'objectif est atteint (aujourd'hui compris s'il l'est déjà)
+    pub current: i64,
+    pub best: i64,
+    pub today_done: bool,
+    pub goal_min: i64,
+    pub today_secs: i64,
+}
+
+#[derive(Serialize, Debug, Default)]
+pub struct Records {
+    pub words_read: i64,
+    pub words_day: String,
+    pub learn_secs: i64,
+    pub learn_day: String,
 }
 
 #[derive(Serialize, Debug)]
@@ -916,48 +1014,233 @@ pub struct Stats {
     pub learning: i64,
     pub phrases: i64,
     pub lessons: i64,
-    pub words_read_total: i64,
-    pub listen_secs_total: i64,
-    pub today: DayStat,
+    /// 26 semaines entières (depuis un lundi) jusqu'à aujourd'hui, jour par jour
     pub days: Vec<DayStat>,
+    /// 12 dernières semaines
+    pub weeks: Vec<Span>,
+    /// mois par mois depuis le début (12 au moins, 36 au plus)
+    pub months: Vec<Span>,
+    pub periods: Periods,
+    pub streak: Streak,
+    pub records: Records,
+    /// premier jour d'activité
+    pub first_day: Option<String>,
+}
+
+fn ymd(d: NaiveDate) -> String {
+    d.format("%Y-%m-%d").to_string()
+}
+
+fn monday(d: NaiveDate) -> NaiveDate {
+    d - chrono::Duration::days(d.weekday().num_days_from_monday() as i64)
+}
+
+fn first_of_month(d: NaiveDate) -> NaiveDate {
+    d.with_day(1).unwrap_or(d)
+}
+
+/// Activité de la langue, jour par jour (l'objectif d'aujourd'hui relu avec le réglage actuel).
+fn activity_days(c: &Connection, lang: &str, today: NaiveDate, goal: i64) -> Result<Vec<(NaiveDate, DayStat)>> {
+    let mut st = c.prepare(
+        "SELECT day,words_read,known_added,lingqs,listen_secs,learn_secs,goal_met FROM activity WHERE lang=?1 ORDER BY day",
+    )?;
+    let rows = st.query_map([lang], |r| {
+        Ok(DayStat {
+            day: r.get(0)?,
+            words_read: r.get(1)?,
+            known_added: r.get(2)?,
+            lingqs: r.get(3)?,
+            listen_secs: r.get(4)?,
+            learn_secs: r.get(5)?,
+            goal_met: r.get::<_, i64>(6)? != 0,
+        })
+    })?;
+    Ok(rows
+        .filter_map(|r| r.ok())
+        .filter_map(|mut d| {
+            let date = NaiveDate::parse_from_str(&d.day, "%Y-%m-%d").ok()?;
+            // l'objectif a pu baisser depuis la dernière écriture
+            if date == today && d.learn_secs >= goal * 60 {
+                d.goal_met = true;
+            }
+            Some((date, d))
+        })
+        .collect())
+}
+
+/// Série en cours et record. La série d'hier tient encore tant que la journée n'est pas finie.
+fn streak_of(days: &[(NaiveDate, DayStat)], today: NaiveDate, goal: i64) -> Streak {
+    let met: std::collections::BTreeSet<NaiveDate> = days.iter().filter(|(_, d)| d.goal_met).map(|(n, _)| *n).collect();
+    let today_done = met.contains(&today);
+    let mut current = 0;
+    let mut day = if today_done { Some(today) } else { today.pred_opt() };
+    while let Some(d) = day.filter(|d| met.contains(d)) {
+        current += 1;
+        day = d.pred_opt();
+    }
+    let (mut best, mut run, mut prev) = (0, 0, None::<NaiveDate>);
+    for &d in &met {
+        run = if prev.and_then(|p| p.succ_opt()) == Some(d) { run + 1 } else { 1 };
+        best = best.max(run);
+        prev = Some(d);
+    }
+    let today_secs = days.iter().find(|(n, _)| *n == today).map(|(_, d)| d.learn_secs).unwrap_or(0);
+    Streak { current, best: best.max(current), today_done, goal_min: goal, today_secs }
 }
 
 pub fn stats(c: &Connection, lang: &str) -> Result<Stats> {
+    stats_at(c, lang, today_date())
+}
+
+fn stats_at(c: &Connection, lang: &str, today: NaiveDate) -> Result<Stats> {
     let known: i64 = c.query_row("SELECT COUNT(*) FROM terms WHERE lang=?1 AND status=4 AND instr(term,' ')=0", [lang], |r| r.get(0))?;
     let learning: i64 = c.query_row("SELECT COUNT(*) FROM terms WHERE lang=?1 AND status BETWEEN 1 AND 3", [lang], |r| r.get(0))?;
     let phrases: i64 = c.query_row("SELECT COUNT(*) FROM terms WHERE lang=?1 AND instr(term,' ')>0 AND status<>5", [lang], |r| r.get(0))?;
     let lessons: i64 = c.query_row("SELECT COUNT(*) FROM lessons WHERE lang=?1", [lang], |r| r.get(0))?;
-    let (wr, ls): (i64, i64) = c.query_row(
-        "SELECT COALESCE(SUM(words_read),0), COALESCE(SUM(listen_secs),0) FROM activity WHERE lang=?1",
-        [lang],
-        |r| Ok((r.get(0)?, r.get(1)?)),
-    )?;
-    let mut st = c.prepare(
-        "SELECT day,words_read,known_added,lingqs,listen_secs FROM activity WHERE lang=?1 AND day>=?2 ORDER BY day",
-    )?;
-    let since = (chrono::Local::now() - chrono::Duration::days(29)).format("%Y-%m-%d").to_string();
-    let found: HashMap<String, DayStat> = st
-        .query_map(params![lang, since], |r| {
-            Ok(DayStat { day: r.get(0)?, words_read: r.get(1)?, known_added: r.get(2)?, lingqs: r.get(3)?, listen_secs: r.get(4)? })
-        })?
-        .filter_map(|r| r.ok())
-        .map(|d| (d.day.clone(), d))
-        .collect();
-    let mut days = Vec::new();
-    for i in (0..30).rev() {
-        let d = (chrono::Local::now() - chrono::Duration::days(i)).format("%Y-%m-%d").to_string();
-        days.push(match found.get(&d) {
-            Some(x) => DayStat { day: d, words_read: x.words_read, known_added: x.known_added, lingqs: x.lingqs, listen_secs: x.listen_secs },
-            None => DayStat { day: d, words_read: 0, known_added: 0, lingqs: 0, listen_secs: 0 },
-        });
+    let goal = goal_min(c);
+    let all = activity_days(c, lang, today, goal)?;
+
+    // bornes des périodes
+    let yesterday = today.pred_opt().unwrap_or(today);
+    let week = monday(today);
+    let last_week = week - chrono::Duration::days(7);
+    let month = first_of_month(today);
+    let last_month = month.checked_sub_months(Months::new(1)).unwrap_or(month);
+    let mut p = Periods {
+        today: Span::at(today),
+        yesterday: Span::at(yesterday),
+        week: Span::at(week),
+        last_week: Span::at(last_week),
+        month: Span::at(month),
+        last_month: Span::at(last_month),
+        total: Span::default(),
+    };
+    let first = all.iter().find(|(_, d)| d.active()).map(|(n, _)| *n);
+    p.total.start = first.map(ymd).unwrap_or_else(|| ymd(today));
+
+    // 12 semaines, et les mois depuis le début (12 au moins, 36 au plus)
+    let weeks_from = week - chrono::Duration::days(7 * 11);
+    let mut weeks: Vec<Span> = (0..12).map(|i| Span::at(weeks_from + chrono::Duration::days(7 * i))).collect();
+    let min_from = month.checked_sub_months(Months::new(11)).unwrap_or(month);
+    let max_from = month.checked_sub_months(Months::new(35)).unwrap_or(month);
+    let months_from = first.map(first_of_month).unwrap_or(min_from).clamp(max_from, min_from);
+    let mut months = Vec::new();
+    let mut m = months_from;
+    while m <= month {
+        months.push(Span::at(m));
+        m = match m.checked_add_months(Months::new(1)) {
+            Some(n) => n,
+            None => break,
+        };
     }
-    let t = days.last().map(|d| DayStat { day: d.day.clone(), words_read: d.words_read, known_added: d.known_added, lingqs: d.lingqs, listen_secs: d.listen_secs }).unwrap();
-    Ok(Stats { known, learning, phrases, lessons, words_read_total: wr, listen_secs_total: ls, today: t, days })
+
+    // jour par jour : 26 semaines entières jusqu'à aujourd'hui
+    let days_from = week - chrono::Duration::days(7 * 25);
+    let found: HashMap<NaiveDate, &DayStat> = all.iter().map(|(n, d)| (*n, d)).collect();
+    let mut days = Vec::new();
+    let mut d = days_from;
+    while d <= today {
+        days.push(found.get(&d).map(|x| (*x).clone()).unwrap_or_else(|| DayStat { day: ymd(d), ..Default::default() }));
+        d = match d.succ_opt() {
+            Some(n) => n,
+            None => break,
+        };
+    }
+
+    let mut records = Records::default();
+    for (n, d) in &all {
+        let n = *n;
+        p.total.add(d);
+        if n == today {
+            p.today.add(d);
+        }
+        if n == yesterday {
+            p.yesterday.add(d);
+        }
+        if n >= week && n <= today {
+            p.week.add(d);
+        }
+        if n >= last_week && n < week {
+            p.last_week.add(d);
+        }
+        if n >= month && n <= today {
+            p.month.add(d);
+        }
+        if n >= last_month && n < month {
+            p.last_month.add(d);
+        }
+        if n >= weeks_from && n <= today {
+            let i = ((monday(n) - weeks_from).num_days() / 7) as usize;
+            if let Some(w) = weeks.get_mut(i) {
+                w.add(d);
+            }
+        }
+        if n >= months_from && n <= today {
+            let i = ((n.year() - months_from.year()) * 12 + n.month() as i32 - months_from.month() as i32) as usize;
+            if let Some(m) = months.get_mut(i) {
+                m.add(d);
+            }
+        }
+        if d.words_read > records.words_read {
+            records.words_read = d.words_read;
+            records.words_day = d.day.clone();
+        }
+        if d.learn_secs > records.learn_secs {
+            records.learn_secs = d.learn_secs;
+            records.learn_day = d.day.clone();
+        }
+    }
+
+    Ok(Stats {
+        known,
+        learning,
+        phrases,
+        lessons,
+        days,
+        weeks,
+        months,
+        periods: p,
+        streak: streak_of(&all, today, goal),
+        records,
+        first_day: first.map(ymd),
+    })
 }
 
-pub fn activity_add(c: &Connection, lang: &str, words_read: i64, listen_secs: i64) -> Result<()> {
-    bump(c, lang, "words_read", words_read)?;
-    bump(c, lang, "listen_secs", listen_secs)?;
+/// Série atteinte quand un temps d'apprentissage fait passer l'objectif du jour.
+#[derive(Serialize, Debug)]
+pub struct GoalReached {
+    pub streak: i64,
+    pub goal_min: i64,
+}
+
+/// Ajoute à l'activité du jour : mots lus, écoute, temps actif dans les leçons.
+/// Renvoie la série si ce temps vient de faire atteindre l'objectif du jour.
+pub fn activity_add(c: &Connection, lang: &str, words_read: i64, listen_secs: i64, learn_secs: i64) -> Result<Option<GoalReached>> {
+    bump(c, lang, "words_read", words_read.max(0))?;
+    bump(c, lang, "listen_secs", listen_secs.max(0))?;
+    bump(c, lang, "learn_secs", learn_secs.max(0))?;
+    if learn_secs <= 0 {
+        return Ok(None);
+    }
+    let goal = goal_min(c);
+    let reached = c.execute(
+        "UPDATE activity SET goal_met=1 WHERE day=?1 AND lang=?2 AND goal_met=0 AND learn_secs>=?3",
+        params![today(), lang, goal * 60],
+    )?;
+    if reached == 0 {
+        return Ok(None);
+    }
+    let today = today_date();
+    let streak = streak_of(&activity_days(c, lang, today, goal)?, today, goal).current;
+    Ok(Some(GoalReached { streak, goal_min: goal }))
+}
+
+/// L'objectif a changé : une journée déjà au-dessus du nouvel objectif est acquise.
+pub fn goal_refresh(c: &Connection) -> Result<()> {
+    c.execute(
+        "UPDATE activity SET goal_met=1 WHERE day=?1 AND goal_met=0 AND learn_secs>=?2",
+        params![today(), goal_min(c) * 60],
+    )?;
     Ok(())
 }
 
@@ -1005,8 +1288,8 @@ mod tests {
         let s = stats(&c, "en").unwrap();
         assert_eq!(s.known, 2);
         assert_eq!(s.learning, 1);
-        assert_eq!(s.today.words_read, 6);
-        assert_eq!(s.today.lingqs, 1);
+        assert_eq!(s.periods.today.words_read, 6);
+        assert_eq!(s.periods.today.lingqs, 1);
         let l = lessons_list(&c, "en").unwrap();
         assert_eq!(l[0].new_words, 2);
         let lesson = lesson_get(&c, id).unwrap();
@@ -1015,6 +1298,103 @@ mod tests {
         assert_eq!(total, 1);
         assert_eq!(items[0].translation, "chat");
         assert!(export_csv(&c, "en").unwrap().contains("\"cat\",\"chat\""));
+        drop(c);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn progress_periods_and_streak() {
+        let path = std::env::temp_dir().join(format!("lumen-db-progress-{}.db", std::process::id()));
+        let _ = std::fs::remove_file(&path);
+        let c = open(&path).unwrap();
+        // mercredi 14 octobre 2026
+        let today = NaiveDate::from_ymd_opt(2026, 10, 14).unwrap();
+        let day = |n: i64| ymd(today - chrono::Duration::days(n));
+        let put = |n: i64, words: i64, learn: i64, met: bool| {
+            c.execute(
+                "INSERT INTO activity(day,lang,words_read,learn_secs,listen_secs,goal_met) VALUES(?1,'it',?2,?3,60,?4)",
+                params![day(n), words, learn, met as i64],
+            )
+            .unwrap();
+        };
+        // série de 3 jours jusqu'à hier (aujourd'hui pas encore atteint), puis un trou,
+        // et un ancien record de 5 jours le mois dernier
+        put(0, 100, 120, false);
+        for n in 1..=3 {
+            put(n, 200, 900, true);
+        }
+        for n in 20..=24 {
+            put(n, 50, 700, true);
+        }
+        let s = stats_at(&c, "it", today).unwrap();
+        assert_eq!(s.streak, Streak { current: 3, best: 5, today_done: false, goal_min: 10, today_secs: 120 });
+        assert_eq!(s.periods.today.words_read, 100);
+        assert_eq!(s.periods.yesterday.learn_secs, 900);
+        // semaine depuis lundi 12 : aujourd'hui, mardi, lundi
+        assert_eq!((s.periods.week.start.as_str(), s.periods.week.words_read, s.periods.week.active_days), ("2026-10-12", 500, 3));
+        assert_eq!(s.periods.last_week.words_read, 200);
+        assert_eq!((s.periods.month.start.as_str(), s.periods.month.words_read), ("2026-10-01", 700));
+        assert_eq!((s.periods.last_month.start.as_str(), s.periods.last_month.words_read), ("2026-09-01", 250));
+        assert_eq!((s.periods.total.words_read, s.periods.total.learn_secs, s.periods.total.goal_days), (950, 120 + 2700 + 3500, 8));
+        assert_eq!(s.first_day.as_deref(), Some("2026-09-20"));
+        assert_eq!(s.days.len(), 7 * 25 + 3);
+        assert_eq!(s.days.first().map(|d| d.day.as_str()), Some("2026-04-20"));
+        assert_eq!(s.weeks.len(), 12);
+        assert_eq!(s.weeks.last().map(|w| (w.start.as_str(), w.words_read)), Some(("2026-10-12", 500)));
+        assert_eq!(s.months.len(), 12);
+        assert_eq!(s.months.last().map(|m| (m.start.as_str(), m.words_read)), Some(("2026-10-01", 700)));
+        assert_eq!((s.records.words_read, s.records.learn_secs), (200, 900));
+        // un objectif plus bas compte tout de suite pour aujourd'hui
+        setting_set(&c, "daily_goal", "2").unwrap();
+        let s = stats_at(&c, "it", today).unwrap();
+        assert_eq!((s.streak.current, s.streak.today_done, s.streak.goal_min), (4, true, 2));
+        drop(c);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn goal_reached_once() {
+        let path = std::env::temp_dir().join(format!("lumen-db-goal-{}.db", std::process::id()));
+        let _ = std::fs::remove_file(&path);
+        let c = open(&path).unwrap();
+        setting_set(&c, "daily_goal", "1").unwrap();
+        assert!(activity_add(&c, "de", 0, 0, 30).unwrap().is_none());
+        let r = activity_add(&c, "de", 0, 0, 30).unwrap().expect("objectif atteint");
+        assert_eq!((r.streak, r.goal_min), (1, 1));
+        // une seule annonce par jour
+        assert!(activity_add(&c, "de", 0, 0, 30).unwrap().is_none());
+        assert!(activity_add(&c, "de", 120, 45, 0).unwrap().is_none());
+        let s = stats(&c, "de").unwrap();
+        assert_eq!((s.periods.today.learn_secs, s.periods.today.words_read, s.periods.today.listen_secs), (90, 120, 45));
+        drop(c);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn legacy_activity_keeps_its_streak() {
+        let path = std::env::temp_dir().join(format!("lumen-db-legacy-{}.db", std::process::id()));
+        let _ = std::fs::remove_file(&path);
+        // base d'avant le temps actif : un jour de lecture, un jour sans rien de notable
+        {
+            let old = Connection::open(&path).unwrap();
+            old.execute_batch(
+                "CREATE TABLE activity(day TEXT NOT NULL, lang TEXT NOT NULL, words_read INTEGER NOT NULL DEFAULT 0,
+                 known_added INTEGER NOT NULL DEFAULT 0, lingqs INTEGER NOT NULL DEFAULT 0,
+                 listen_secs INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(day, lang));
+                 INSERT INTO activity(day,lang,words_read) VALUES('2026-01-02','it',230);
+                 INSERT INTO activity(day,lang,lingqs) VALUES('2026-01-03','it',2);",
+            )
+            .unwrap();
+        }
+        let c = open(&path).unwrap();
+        let met: Vec<String> = c.prepare("SELECT day FROM activity WHERE goal_met=1").unwrap().query_map([], |r| r.get(0)).unwrap().flatten().collect();
+        assert_eq!(met, vec!["2026-01-02".to_string()]);
+        // rouvrir ne refait pas la reprise
+        c.execute("UPDATE activity SET goal_met=0", []).unwrap();
+        drop(c);
+        let c = open(&path).unwrap();
+        let n: i64 = c.query_row("SELECT COUNT(*) FROM activity WHERE goal_met=1", [], |r| r.get(0)).unwrap();
+        assert_eq!(n, 0);
         drop(c);
         let _ = std::fs::remove_file(path);
     }
@@ -1151,7 +1531,7 @@ mod tests {
         assert_eq!(all["bird"].status, 3);
         // un nouvel import identique ne change rien, et l'activité du jour reste vide
         assert_eq!(terms_import(&mut c, "en", &[it("bird", 3, "oiseau")]).unwrap(), 0);
-        assert_eq!(stats(&c, "en").unwrap().today.lingqs, 0);
+        assert_eq!(stats(&c, "en").unwrap().periods.today.lingqs, 0);
         // leçon importée retrouvée par son origine
         let id = lesson_create(&c, &NewLesson {
             lang: "en".into(), title: "L".into(), collection: "C".into(), kind: "text".into(),

@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import { api, errorText } from "./api";
 import { formatNumber as fmtNumber, locale, setUiLang, systemUiLang, t, type UiLang } from "./i18n";
-import type { AppInfo, DownloadEvent, LangCode, ModelRow } from "./types";
+import type { AppInfo, DiscoverItem, DownloadEvent, LangCode, ModelRow, Streak } from "./types";
 
 export type View = "library" | "playlists" | "reader" | "chat" | "vocab" | "progress" | "settings";
 
@@ -26,6 +26,8 @@ export const DEFAULTS: Record<string, string> = {
   line_height: "1.75",
   word_style: "tint",
   auto_sentence: "1",
+  // le mot touché ou le passage surligné se fait entendre (seulement leçon en pause)
+  auto_pronounce: "1",
   finish_marks_known: "1",
   reader_sidebar: "1",
   tts_voice: "0",
@@ -45,6 +47,10 @@ export const DEFAULTS: Record<string, string> = {
   backup_dir: "",
   backup_audio: "1",
   backup_video: "0",
+  // Découvrir : lecture quotidienne des sources ("0" : seulement sur demande)
+  discover_auto: "1",
+  // progrès : minutes de temps actif dans les leçons pour que la journée compte dans la série
+  daily_goal: "10",
 };
 
 interface AppStore {
@@ -61,11 +67,15 @@ interface AppStore {
   autoplay: boolean;
   importOpen: boolean;
   importFiles: string[] | null;
+  /** élément de Découvrir à importer (la feuille d'import s'ouvre dessus) */
+  importItem: DiscoverItem | null;
   toasts: Toast[];
   models: ModelRow[];
   downloads: Record<string, DownloadState>;
   libraryVersion: number;
   knownCount: number;
+  /** série de jours où l'objectif est atteint, dans la langue étudiée */
+  streak: Streak | null;
   /** rejoue l'écran d'accueil depuis les Réglages */
   replay: boolean;
   /** petit guide ouvert, sur cette carte (null : fermé) */
@@ -86,12 +96,15 @@ interface AppStore {
   /** oublie la leçon en cours si c'est celle-ci (supprimée) */
   forgetLesson(id: number): void;
   openImport(files?: string[] | null): void;
+  /** importe un élément de Découvrir : vidéo, épisode ou article */
+  openImportItem(item: DiscoverItem): void;
   closeImport(): void;
   toast(text: string, kind?: Toast["kind"]): void;
   refreshModels(): Promise<void>;
   download(id: string): Promise<void>;
   cancelDownload(id: string): Promise<void>;
   bumpLibrary(): void;
+  /** relit le nombre de mots connus et la série de la langue étudiée */
   refreshKnown(): Promise<void>;
 }
 
@@ -111,11 +124,13 @@ export const useApp = create<AppStore>((set, get) => ({
   autoplay: false,
   importOpen: false,
   importFiles: null,
+  importItem: null,
   toasts: [],
   models: [],
   downloads: {},
   libraryVersion: 0,
   knownCount: 0,
+  streak: null,
   replay: false,
   guide: null,
 
@@ -200,11 +215,15 @@ export const useApp = create<AppStore>((set, get) => ({
   },
 
   openImport(files = null) {
-    set({ importOpen: true, importFiles: files });
+    set({ importOpen: true, importFiles: files, importItem: null });
+  },
+
+  openImportItem(item) {
+    set({ importOpen: true, importFiles: null, importItem: item });
   },
 
   closeImport() {
-    set({ importOpen: false, importFiles: null });
+    set({ importOpen: false, importFiles: null, importItem: null });
   },
 
   toast(text, kind = "info") {
@@ -269,7 +288,7 @@ export const useApp = create<AppStore>((set, get) => ({
   async refreshKnown() {
     try {
       const st = await api().stats(get().lang());
-      set({ knownCount: st.known });
+      set({ knownCount: st.known, streak: st.streak });
     } catch {
       /* ignoré */
     }

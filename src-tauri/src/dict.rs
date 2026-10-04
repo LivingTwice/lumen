@@ -405,19 +405,22 @@ impl Dict {
             return Ok(res);
         }
         res.entries = self.entries(&key, false)?;
-        let forms = self.forms(&key)?;
-        // une forme décrite d'abord (« first-person singular imperfect indicative of andare »)
-        let described = forms.iter().find(|(l, n)| self.key(l, lang) != key && !n.is_empty());
-        if let Some((lemma, note)) = described.or_else(|| forms.iter().find(|(l, _)| self.key(l, lang) != key)).cloned() {
+        let mut forms: Vec<(String, String)> = self.forms(&key)?.into_iter().filter(|(l, _)| self.key(l, lang) != key).collect();
+        // une forme décrite d'abord, et la plus simple : « الكتاب », singulier défini de كتاب
+        // (le livre), avant le pluriel masculin défini de كاتب (les écrivains)
+        forms.sort_by_key(|(_, n)| (n.is_empty(), n.split_whitespace().count()));
+        if let Some((lemma, note)) = forms.first().cloned() {
             // « volt » (hongrois) : le volt, unité, puis « van », être, dont c'est le passé
             if res.entries.len() < 2 || res.entries.iter().all(|e| e.pos.starts_with("Forme")) {
-                let mut lemma_entries = entries_by(&self.conn, "word", &lemma)?;
-                if lemma_entries.is_empty() {
-                    lemma_entries = self.entries(&self.key(&lemma, lang), false)?;
-                }
-                for e in lemma_entries {
-                    if !res.entries.iter().any(|x| x.word == e.word && x.pos == e.pos) {
-                        res.entries.push(e);
+                for (l, _) in forms.iter().take(2) {
+                    let mut lemma_entries = entries_by(&self.conn, "word", l)?;
+                    if lemma_entries.is_empty() {
+                        lemma_entries = self.entries(&self.key(l, lang), false)?;
+                    }
+                    for e in lemma_entries {
+                        if !res.entries.iter().any(|x| x.word == e.word && x.pos == e.pos) {
+                            res.entries.push(e);
+                        }
                     }
                 }
             }
@@ -433,6 +436,27 @@ impl Dict {
     /// attachés (arabe, indonésien), ou sa conjugaison (japonais).
     fn find_with_variants(&self, native: &str, lang: &str, word: &str) -> Result<DictResult> {
         let res = self.find(lang, word)?;
+        // arabe sans voyelles : « والكتاب » est une forme de كاتب (et les écrivains), mais
+        // d'abord et + le + كتاب (le livre) ; les deux lectures, la plus courante en premier
+        if lang == "ar" && self.v2 && res.lemma.is_some() {
+            for (stem, _) in variants(lang, word) {
+                let r = self.find(lang, &stem)?;
+                if r.found() {
+                    // « الكتاب » mène encore aux écrivains : on retire aussi l'article
+                    if r.entries[0].word == *res.lemma.as_ref().unwrap() {
+                        continue;
+                    }
+                    let mut both = r;
+                    both.lemma = both.lemma.or_else(|| Some(both.entries[0].word.clone()));
+                    for e in res.entries {
+                        if !both.entries.iter().any(|x| x.word == e.word && x.pos == e.pos) {
+                            both.entries.push(e);
+                        }
+                    }
+                    return Ok(both);
+                }
+            }
+        }
         if res.found() || !self.v2 {
             return Ok(res);
         }
@@ -1047,6 +1071,7 @@ mod tests {
         let word = match lang {
             "pt" => "farol",
             "hu" => "házak",
+            "ja" => "家",
             _ => "a",
         };
         let r = d.lookup_in(native, lang, word).unwrap();
@@ -1103,7 +1128,7 @@ mod tests {
         // forme fléchie décrite, dans la langue de l'interface
         let r = d.lookup_in("fr", "hu", "házak").unwrap();
         assert_eq!(r.lemma.as_deref(), Some("ház"));
-        assert_eq!(r.form_note.as_deref(), Some("Pluriel"));
+        assert!(r.form_note.as_deref().unwrap_or("").contains("luriel"), "{r:?}");
         assert!(gloss(&r, "maison"), "{r:?}");
         let r = d.lookup_in("en", "hu", "házak").unwrap();
         assert!(gloss(&r, "house"), "{r:?}");

@@ -10,8 +10,9 @@ import { count, isEn, t } from "../lib/i18n";
 import { STARTERS, inLang, starterCollection } from "../lib/langs";
 import { formatDuration, formatNumber, useApp } from "../lib/store";
 import type { LessonSummary } from "../lib/types";
+import { Discover, DiscoverTab } from "./Discover";
 
-type Filter = "all" | "text" | "audio" | "book" | "done";
+type Filter = "all" | "text" | "audio" | "book" | "done" | "discover";
 
 function greeting() {
   const h = new Date().getHours();
@@ -135,6 +136,7 @@ export function Library() {
   const known = useApp((s) => s.knownCount);
   const [lessons, setLessons] = useState<LessonSummary[] | null>(null);
   const [filter, setFilter] = useState<Filter>("all");
+  const discovering = filter === "discover";
   const [query, setQuery] = useState("");
   const hero = useGlow<HTMLDivElement>();
   // l'entrée en cascade ne vaut que pour la première apparition des leçons ;
@@ -209,7 +211,12 @@ export function Library() {
         <div style={{ flex: 1 }} data-tauri-drag-region />
         <label className="search no-drag">
           <Icon name="search" size={16} />
-          <input placeholder={t("Rechercher une leçon", "Search lessons")} value={query} onChange={(e) => setQuery(e.target.value)} aria-label={t("Rechercher une leçon", "Search lessons")} />
+          <input
+            placeholder={discovering ? t("Rechercher dans Découvrir", "Search Discover") : t("Rechercher une leçon", "Search lessons")}
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            aria-label={discovering ? t("Rechercher dans Découvrir", "Search Discover") : t("Rechercher une leçon", "Search lessons")}
+          />
         </label>
       </div>
       <div className="view">
@@ -228,7 +235,7 @@ export function Library() {
             </button>
           </header>
 
-          {resume && (
+          {resume && !discovering && (
             <motion.div
               className="hero glow-surface"
               ref={hero.ref}
@@ -263,7 +270,7 @@ export function Library() {
             </motion.div>
           )}
 
-          {lessons && lessons.length > 0 && (
+          {lessons && (lessons.length > 0 || discovering) && (
             <div className="lib-toolbar">
               <Segmented
                 id="lib-filter"
@@ -276,12 +283,15 @@ export function Library() {
                   { value: "audio", label: t("Audio et vidéo", "Audio and video") },
                   { value: "book", label: t("Livres", "Books") },
                   { value: "done", label: t("Terminées", "Finished") },
+                  { value: "discover", label: <DiscoverTab lang={lang} /> },
                 ]}
               />
             </div>
           )}
 
-          {lessons && lessons.length === 0 && (
+          {discovering && <Discover lang={lang} query={query} />}
+
+          {lessons && lessons.length === 0 && !discovering && (
             <div className="empty">
               <Orb size={48} />
               <h3>{t("Votre bibliothèque attend sa première lumière", "Your library is waiting for its first light")}</h3>
@@ -299,18 +309,23 @@ export function Library() {
                   <Icon name="import" size={16} /> {t("Importer", "Import")}
                 </button>
               </div>
+              <button className="btn ghost disc-invite" onClick={() => setFilter("discover")}>
+                <Icon name="sparkle" size={15} /> {t("Ou découvrez des vidéos, des podcasts et des articles à votre niveau", "Or discover videos, podcasts and articles at your level")}
+              </button>
             </div>
           )}
 
           {/* « popLayout » : une carte qui s'en va quitte aussitôt la grille, les autres prennent sa place en glissant */}
-          <div className="lesson-grid">
-            <AnimatePresence mode="popLayout">
-              {shown.map((l, i) => (
-                <LessonCard key={l.id} l={l} index={i} intro={intro} onDelete={() => remove(l)} onRename={() => rename(l)} onPlaylist={() => setAdding(l)} />
-              ))}
-            </AnimatePresence>
-          </div>
-          {lessons && lessons.length > 0 && shown.length === 0 && <p className="muted" style={{ padding: "40px 0", textAlign: "center" }}>{t("Aucune leçon ne correspond.", "No lesson matches.")}</p>}
+          {!discovering && (
+            <div className="lesson-grid">
+              <AnimatePresence mode="popLayout">
+                {shown.map((l, i) => (
+                  <LessonCard key={l.id} l={l} index={i} intro={intro} onDelete={() => remove(l)} onRename={() => rename(l)} onPlaylist={() => setAdding(l)} />
+                ))}
+              </AnimatePresence>
+            </div>
+          )}
+          {!discovering && lessons && lessons.length > 0 && shown.length === 0 && <p className="muted" style={{ padding: "40px 0", textAlign: "center" }}>{t("Aucune leçon ne correspond.", "No lesson matches.")}</p>}
         </div>
       </div>
       <Sheet

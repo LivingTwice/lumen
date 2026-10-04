@@ -1,10 +1,12 @@
 import { AnimatePresence, motion, useAnimationControls } from "motion/react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Icon } from "../../components/Icon";
-import { Orb, Sheet } from "../../components/ui";
+import { Duration, Orb, Sheet } from "../../components/ui";
 import { api, errorText, isNoModel } from "../../lib/api";
 import { count, t } from "../../lib/i18n";
 import { LEVELS, langInfo } from "../../lib/langs";
+import { pronounce } from "../../lib/pronounce";
+import { studyTime, useStudyClock } from "../../lib/progress";
 import { formatNumber, useApp } from "../../lib/store";
 import { paginate, sentenceBounds } from "../../lib/tokenize";
 import type { LessonSummary, OpenedLesson, Term } from "../../lib/types";
@@ -61,6 +63,7 @@ export function Reader() {
   const openLesson = useApp((s) => s.openLesson);
   const openPlaylist = useApp((s) => s.openPlaylist);
   const autoplay = useApp((s) => s.autoplay);
+  const streak = useApp((s) => s.streak);
 
   const [data, setData] = useState<OpenedLesson | null>(null);
   const [terms, setTerms] = useState<Record<string, Term>>({});
@@ -68,7 +71,7 @@ export function Reader() {
   const [range, setRange] = useState<Range | null>(null);
   const [cursor, setCursor] = useState(-1);
   const [illum, setIllum] = useState(false);
-  const [complete, setComplete] = useState<null | { read: number; known: number; lingqs: number; next: number | null }>(null);
+  const [complete, setComplete] = useState<null | { read: number; known: number; lingqs: number; secs: number; next: number | null }>(null);
   const [scrolled, setScrolled] = useState(false);
   const [simplify, setSimplify] = useState(false);
   const [glowKeys, setGlowKeys] = useState<Set<string>>(new Set());
@@ -81,6 +84,10 @@ export function Reader() {
   const playerRef = useRef<PlayerHandle>(null);
   const drag = useRef<{ start: number; moved: boolean } | null>(null);
   const session = useRef({ read: 0, known: 0, lingqs: 0 });
+  // pages lues pendant cette ouverture : chacune ne compte qu'une fois dans les mots lus
+  const readPages = useRef(new Set<number>());
+  const pageShownAt = useRef(performance.now());
+  const pageNow = useRef(0);
   const lantern = useAnimationControls();
   const [lanternOn, setLanternOn] = useState(false);
   const [videoHost, setVideoHost] = useState<HTMLDivElement | null>(null);
@@ -109,6 +116,7 @@ export function Reader() {
     setUpNext(null);
     setCinema(false);
     session.current = { read: 0, known: 0, lingqs: 0 };
+    readPages.current = new Set();
     api()
       .lessonOpen(lessonId)
       .then((d) => {
@@ -137,6 +145,39 @@ export function Reader() {
   const pr = pages[page] ?? { start: 0, end: 0, words: 0 };
   const lang = lesson?.lang ?? "en";
   const pl = usePlaylist(lesson);
+  pageNow.current = page;
+
+  // temps actif passé dans la leçon (progrès, objectif du jour)
+  const clock = useStudyClock(lesson?.lang, mediaPlaying, lesson?.id);
+  useEffect(() => {
+    pageShownAt.current = performance.now();
+  }, [page, lessonId]);
+
+  /**
+   * Mots d'une page qu'on vient de lire, s'ils ne sont pas déjà comptés dans
+   * cette ouverture. Feuilleter n'est pas lire : une page quittée en quelques
+   * secondes ne compte pas, sauf « Terminer la page » (`sure`).
+   */
+  const creditPage = useCallback(
+    (p: number, sure: boolean) => {
+      const r = pages[p];
+      if (!r || !r.words || readPages.current.has(p)) return 0;
+      if (!sure && performance.now() - pageShownAt.current < Math.min(15, r.words / 4) * 1000) return 0;
+      readPages.current.add(p);
+      return r.words;
+    },
+    [pages],
+  );
+  const logRead = useCallback(
+    (words: number) => {
+      if (!lesson || !words) return;
+      session.current.read += words;
+      void api()
+        .activityAdd(lesson.lang, words, 0)
+        .catch(() => {});
+    },
+    [lesson],
+  );
 
   // la demande de lecture automatique ne vaut que pour cette ouverture
   useEffect(() => {
@@ -145,6 +186,8 @@ export function Reader() {
 
   // fin de l'écoute dans une playlist : la leçon suivante s'annonce
   const onFinished = useCallback(() => {
+    // écoutée jusqu'au bout : la dernière page est lue
+    if (pageNow.current === pages.length - 1) logRead(creditPage(pageNow.current, false));
     if (!pl || !lesson) return;
     const nextId = pl.lessons[pl.lessons.indexOf(lesson.id) + 1];
     if (!nextId) {
@@ -157,7 +200,7 @@ export function Reader() {
       .lessonsList(lesson.lang)
       .then((all) => setUpNext(all.find((l) => l.id === nextId) ?? null))
       .catch(() => {});
-  }, [pl, lesson, toast]);
+  }, [pl, lesson, toast, pages.length, logRead, creditPage]);
   // l'écoute reprend sur cette leçon : la suivante attendra
   useEffect(() => {
     if (mediaPlaying) setUpNext(null);
@@ -345,8 +388,36 @@ export function Reader() {
     [lesson, refreshKnown, toast],
   );
 
+  const rangeRef = useRef<Range | null>(null);
+  rangeRef.current = range;
+  const hearTimer = useRef(0);
+  useEffect(() => () => window.clearTimeout(hearTimer.current), []);
+
+  /**
+   * Le mot touché ou le passage surligné se fait entendre, seulement quand la
+   * leçon est en pause (jamais par-dessus l'audio). `delay` : au clavier, on
+   * attend que la flèche s'arrête sur un mot plutôt que d'en dire chaque étape.
+   */
+  const hear = useCallback(
+    (a: number, b: number, delay = 0) => {
+      window.clearTimeout(hearTimer.current);
+      if (!lesson || settings.auto_pronounce === "0") return;
+      const say = () => {
+        const r = rangeRef.current;
+        // sélection fermée ou changée entre-temps, ou leçon relancée : rien à dire
+        if (delay && (r?.a !== a || r?.b !== b)) return;
+        if (playerRef.current?.isPlaying()) return;
+        const text = lesson.text.slice(tokens[a].s, tokens[b].e).replace(/\s+/g, " ").trim();
+        if (text) void pronounce(text, lesson.lang, settings[`voice_${lesson.lang}`], true);
+      };
+      if (delay) hearTimer.current = window.setTimeout(say, delay);
+      else say();
+    },
+    [lesson, tokens, settings],
+  );
+
   const select = useCallback(
-    (a: number, b: number) => {
+    (a: number, b: number, sound: number | false = 0) => {
       if (a > b) [a, b] = [b, a];
       // retire la ponctuation aux extrémités
       while (a < b && !tokens[a].w) a++;
@@ -354,6 +425,7 @@ export function Reader() {
       if (!tokens[a]?.w) return;
       setRange({ a, b });
       setAside("word");
+      if (sound !== false) hear(a, b, sound);
       if (a === b) {
         const k = tokens[a].k;
         if (statusOf(k) === 0) {
@@ -364,7 +436,7 @@ export function Reader() {
         }
       }
     },
-    [tokens, statusOf, setStatus, lesson],
+    [tokens, statusOf, setStatus, lesson, hear],
   );
 
   const onTranslation = useCallback(
@@ -404,8 +476,6 @@ export function Reader() {
     const b = Math.max(drag.current.start, i);
     setRange({ a, b });
   };
-  const rangeRef = useRef<Range | null>(null);
-  rangeRef.current = range;
   useEffect(() => {
     const up = () => {
       if (!drag.current) return;
@@ -422,22 +492,26 @@ export function Reader() {
   const goPage = useCallback(
     (p: number) => {
       if (!lesson || p < 0 || p >= pages.length) return;
+      // en avançant, la page qu'on quitte est lue
+      if (p > pageNow.current) logRead(creditPage(pageNow.current, false));
       setPage(p);
       setRange(null);
       scrollRef.current?.scrollTo({ top: 0, behavior: "smooth" });
       anchorRef.current.want = pages[p].start;
       void api().lessonUpdate(lesson.id, { page: p });
     },
-    [lesson, pages],
+    [lesson, pages, logRead, creditPage],
   );
 
   const onPlayerPage = useCallback(
     (p: number) => {
+      // la lecture passe à la page suivante : celle qu'elle quitte est lue
+      if (p === pageNow.current + 1) logRead(creditPage(pageNow.current, false));
       setPage(p);
       setRange(null);
       if (lesson) void api().lessonUpdate(lesson.id, { page: p });
     },
-    [lesson],
+    [lesson, logRead, creditPage],
   );
 
   const findNext = async () => {
@@ -456,26 +530,29 @@ export function Reader() {
     const keys: string[] = [];
     for (let i = pr.start; i < pr.end; i++) if (tokens[i].w && statusOf(tokens[i].k) === 0) keys.push(tokens[i].k);
     let added = 0;
+    // une page déjà comptée (lue par l'audio, relue) ne compte pas deux fois
+    const words = creditPage(page, true);
     try {
       if (marks && keys.length) {
         setIllum(true);
         await sleep(1050);
-        added = await api().termsMarkKnown(lesson.lang, keys, pr.words);
+        added = await api().termsMarkKnown(lesson.lang, keys, words);
         setTerms((prev) => {
           const next = { ...prev };
           for (const k of keys) if (!next[k]) next[k] = { term: k, status: 4, translation: "", note: "", lemma: "", context: "", updated_at: Date.now() / 1000 };
           return next;
         });
         setIllum(false);
-      } else {
-        await api().activityAdd(lesson.lang, pr.words, 0);
+      } else if (words) {
+        await api().activityAdd(lesson.lang, words, 0);
       }
     } catch (e) {
+      if (words) readPages.current.delete(page);
       setIllum(false);
       toast(errorText(e), "error");
       return;
     }
-    session.current.read += pr.words;
+    session.current.read += words;
     session.current.known += added;
     void refreshKnown();
     if (page < pages.length - 1) {
@@ -488,8 +565,10 @@ export function Reader() {
       anchorRef.current = { id: lesson.id, want: 0, saved: 0 };
       await api().lessonUpdate(lesson.id, { completed: true, page: 0, position: 0, anchor: 0 });
       bump();
+      // le temps de la séance compte tout de suite (objectif du jour, série)
+      await clock.flush();
       const next = await findNext();
-      setComplete({ ...session.current, next });
+      setComplete({ ...session.current, secs: clock.session(), next });
     }
   };
 
@@ -510,14 +589,19 @@ export function Reader() {
         e.preventDefault();
         const end = words.indexOf(range.b);
         if (cur < 0 || end < 0) return;
+        let next: Range | null = null;
         if (e.key === "ArrowRight") {
-          if (end < words.length - 1) setRange({ a: range.a, b: words[end + 1] });
-        } else if (end > cur) setRange({ a: range.a, b: words[end - 1] });
-        else if (cur > 0) setRange({ a: words[cur - 1], b: range.b });
+          if (end < words.length - 1) next = { a: range.a, b: words[end + 1] };
+        } else if (end > cur) next = { a: range.a, b: words[end - 1] };
+        else if (cur > 0) next = { a: words[cur - 1], b: range.b };
+        if (next) {
+          setRange(next);
+          hear(next.a, next.b, 350);
+        }
       } else if (e.key === "ArrowRight" || e.key === "ArrowLeft") {
         e.preventDefault();
         const n = e.key === "ArrowRight" ? (cur < 0 ? 0 : Math.min(words.length - 1, cur + 1)) : cur < 0 ? words.length - 1 : Math.max(0, cur - 1);
-        if (words[n] !== undefined) select(words[n], words[n]);
+        if (words[n] !== undefined) select(words[n], words[n], 250);
       } else if (["1", "2", "3"].includes(key) && canStatus) {
         setStatus(selection.key, Number(key));
       } else if ((key === "k" || key === "4") && canStatus) {
@@ -759,8 +843,10 @@ export function Reader() {
             onHost={setVideoHost}
             onToggle={() => playerRef.current?.toggle()}
             onWord={(i) => {
+              // la vidéo s'arrête sur le mot touché ; il ne se fait entendre que si elle était déjà en pause
+              const wasPlaying = !!playerRef.current?.isPlaying();
               playerRef.current?.pause();
-              select(i, i);
+              select(i, i, wasPlaying ? false : 0);
             }}
             onVideoReady={(path) => setData((d) => (d ? { ...d, lesson: { ...d.lesson, video_path: path } } : d))}
             cinema={cinema}
@@ -919,7 +1005,27 @@ export function Reader() {
                     <strong>{formatNumber(complete.lingqs)}</strong>
                     <span>{t("mots étudiés", "words studied")}</span>
                   </div>
+                  <div>
+                    <strong>
+                      <Duration secs={complete.secs} />
+                    </strong>
+                    <span>{t("temps actif", "active time")}</span>
+                  </div>
                 </div>
+                {streak && streak.current > 0 && (
+                  <p className={`complete-streak ${streak.today_done ? "lit" : ""}`}>
+                    <Icon name="flame" size={15} />
+                    {streak.today_done
+                      ? t(
+                          `Objectif du jour atteint · ${count(streak.current, "jour", "jours", "", "")} de suite`,
+                          `Daily goal reached · ${formatNumber(streak.current)}-day streak`,
+                        )
+                      : t(
+                          `Série de ${count(streak.current, "jour", "jours", "", "")} · encore ${studyTime(Math.max(60, streak.goal_min * 60 - streak.today_secs))} aujourd'hui pour la prolonger`,
+                          `${formatNumber(streak.current)}-day streak · ${studyTime(Math.max(60, streak.goal_min * 60 - streak.today_secs))} more today to keep it going`,
+                        )}
+                  </p>
+                )}
                 <div style={{ display: "flex", gap: 10 }}>
                   <button className="btn outline lg" onClick={() => go("library")}>
                     {t("Bibliothèque", "Library")}
@@ -932,6 +1038,9 @@ export function Reader() {
                     <button
                       className="btn primary lg glow"
                       onClick={() => {
+                        // relire, c'est lire encore : les pages comptent de nouveau
+                        readPages.current = new Set();
+                        session.current = { read: 0, known: 0, lingqs: 0 };
                         setComplete(null);
                         goPage(0);
                       }}
@@ -966,7 +1075,7 @@ export function Reader() {
                 term={selection ? terms[selection.key] : undefined}
                 onStatus={(k, s) => setStatus(k, s)}
                 onTranslation={onTranslation}
-                onSelectPhrase={(a, b) => setRange({ a, b })}
+                onSelectPhrase={(a, b) => select(a, b)}
                 onAsk={(q) => {
                   setAside("chat");
                   void useChat.getState().ask({ id: lesson.id, title: lesson.title, lang }, q);

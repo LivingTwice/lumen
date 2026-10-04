@@ -612,6 +612,26 @@ pub async fn yt_info(data_dir: &Path, ytdlp: &Path, url: &str, browser: Option<&
     Ok(serde_json::from_str(json)?)
 }
 
+/// Les `max` dernières vidéos d'une chaîne (son onglet « Vidéos » : ni Shorts
+/// ni directs), sans rien télécharger. `lang` : titres dans cette langue (ceux de
+/// la chaîne, que YouTube traduirait sinon en anglais) ; sans elle, dates
+/// approximatives (« 3 days ago », que yt-dlp ne lit qu'en anglais).
+pub async fn yt_latest(data_dir: &Path, ytdlp: &Path, url: &str, max: usize, lang: Option<&str>) -> Result<serde_json::Value> {
+    let mut args: Vec<String> = vec!["-J".into(), "--flat-playlist".into(), "--playlist-items".into(), format!("1:{max}")];
+    match lang {
+        Some(l) => args.extend(["--extractor-args".into(), format!("youtube:lang={l}")]),
+        None => args.extend(["--extractor-args".into(), "youtubetab:approximate_date".into()]),
+    }
+    args.push(url.into());
+    let mut quiet = |_p: f64| {};
+    let out = run_ytdlp(data_dir, ytdlp, &args, None, &mut quiet).await?;
+    let json = out
+        .iter()
+        .find(|l| l.starts_with('{'))
+        .ok_or_else(|| anyhow!(crate::i18n::t("chaîne vide", "empty channel")))?;
+    Ok(serde_json::from_str(json)?)
+}
+
 /// Télécharge la piste audio d'une vidéo (YouTube et la plupart des sites
 /// vidéo). Renvoie le fichier et le titre.
 pub async fn yt_audio(

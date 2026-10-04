@@ -3,7 +3,7 @@
 // par le backend Rust.
 import type { Api, TermUpdate } from "./api";
 import { t } from "./i18n";
-import { LANGS, bundledDict } from "./langs";
+import { LANGS, STARTERS, bundledDict } from "./langs";
 import { tokenize, normalize } from "./tokenize";
 import type {
   BackupCounts,
@@ -12,6 +12,8 @@ import type {
   ChatMessage,
   ChatSummary,
   DayStat,
+  DiscoverItem,
+  GoalReached,
   LangCode,
   Lesson,
   LessonSummary,
@@ -20,6 +22,7 @@ import type {
   ModelRow,
   NewLesson,
   Playlist,
+  Span,
   Stats,
   Term,
 } from "./types";
@@ -56,7 +59,12 @@ function save(db: Db) {
   }
 }
 
-const today = () => new Date().toISOString().slice(0, 10);
+/** Jour local (AAAA-MM-JJ), comme le natif. */
+const ymd = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+const today = () => ymd(new Date());
+const addDays = (d: Date, n: number) => new Date(d.getFullYear(), d.getMonth(), d.getDate() + n);
+const parseDay = (s: string) => new Date(Number(s.slice(0, 4)), Number(s.slice(5, 7)) - 1, Number(s.slice(8, 10)));
+const emptyDay = (day: string): DayStat => ({ day, words_read: 0, known_added: 0, lingqs: 0, listen_secs: 0, learn_secs: 0, goal_met: false });
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 let lingqCancelled = false;
@@ -64,6 +72,93 @@ let lingqCancelled = false;
 const chatStops = new Map<number, boolean>();
 const STARTERS_MOCK =
   "Every morning, Martha climbed the narrow stairs of the old lighthouse. From the top, the sea looked endless and calm.\n\nOne day, she found a letter hidden between two stones. The paper was damp, but the words could still be read.";
+
+// Découvrir : un échantillon réel en italien (miniatures de YouTube et des
+// podcasts), des éléments à l'œuvre générée pour les autres langues
+type MockFind = Pick<DiscoverItem, "source" | "source_name" | "shelf" | "kind" | "title" | "lo" | "hi" | "duration"> & {
+  yt?: string;
+  image?: string;
+  /** âge en jours */
+  age: number;
+};
+const IT_FINDS: MockFind[] = [
+  ...(
+    [
+      ["uwSAbdqNa4U", "🖼️ #74 | An unusual picnic | Italian for Beginners (A2) 🔵", 2, 2, 823, 1],
+      ["IlK7I9UbCmc", "🖼️ #56 | Small Objects | Italian for Absolute Beginners (A0–A1) 🟢", 1, 1, 1109, 3],
+      ["gC8709ukvEk", "🎙️ Ep. 138 | Di sudore, puzza e brufoli", 1, 3, 1477, 4],
+      ["XtGHWl4dKhI", "🎮 A little to the left #7 | Cat toys | Italian for Absolute Beginners (A0–A1) 🟢", 1, 1, 857, 6],
+      ["dm5BGYkl9lE", "🖼️ #73 | Magnetic fish | Italian for Beginners (A2) 🔵", 2, 2, 650, 8],
+    ] as const
+  ).map(([yt, title, lo, hi, duration, age]) => ({ yt, title, lo, hi, duration, age, source: "it-si", source_name: "Italiano sì", shelf: "learn", kind: "video" }) as MockFind),
+  ...(
+    [
+      ["g-xVfw1MCdo", "Italians Disagree About What Retiring Here Costs | Easy Italian 275", 2, 3, 964, 2],
+      ["fr-aDyyZO4M", "DOVERE: The Verb Italians Use All Day | Super Easy Italian 94", 1, 1, 467, 5],
+      ["hfYubttHxfM", "What Italians Say You Must See - and How to Say It | Easy Italian 274", 2, 3, 792, 9],
+      ["1YMnHT8_TE4", "Essere and Stare: When Italians Use Each One | Easy Italian 273", 2, 3, 543, 12],
+      ["I30hFP22PyM", "Understand Spoken Italian With 4 Words in 20 | Super Easy Italian 93", 1, 1, 928, 15],
+    ] as const
+  ).map(([yt, title, lo, hi, duration, age]) => ({ yt, title, lo, hi, duration, age, source: "it-easy", source_name: "Easy Italian", shelf: "learn", kind: "video" }) as MockFind),
+  ...(
+    [
+      ["hPNPzNs4yzQ", "Come parlare italiano INFORMALE", 1915, 1],
+      ["Dq8ZuLSZzxw", "Perché gli italiani parlano così? Le frasi marcate", 1482, 6],
+      ["IVGn8R1V84c", "Sai usare il CONDIZIONALE in italiano?", 1076, 11],
+      ["oyPT-JXDOso", "MANZONI: l'uomo che cambiò l'italiano", 1563, 17],
+    ] as const
+  ).map(([yt, title, duration, age]) => ({ yt, title, lo: 3, hi: 5, duration, age, source: "it-podcast", source_name: "Podcast Italiano", shelf: "learn", kind: "video" }) as MockFind),
+  ...(
+    [
+      ["CS0WGcKoQ3M", "I lavori di rinnovo dell'Aeroporto di Firenze: il progetto per ruotare la pista di atterraggio", 513, 2],
+      ["SjWeqEoofJs", "La privacy non esiste più: come i social hanno cambiato la vita privata", 859, 4],
+      ["GmAKhMSDj3A", "Sta davvero tornando il nucleare in Italia? La spiegazione semplice della legge delega", 746, 7],
+      ["qbeXqZOrS80", "Donare il midollo osseo fa male? Come funzionano la donazione e il trapianto", 750, 10],
+    ] as const
+  ).map(([yt, title, duration, age]) => ({ yt, title, lo: 5, hi: 5, duration, age, source: "it-geopop", source_name: "Geopop", shelf: "culture", kind: "video" }) as MockFind),
+  ...(
+    [
+      ["2642580/c1a-oxz7k-xxmpxkzzb1kq-ifj4ja.jpg", "G7 Oil Release, Environment Ruling & More | News in Easy Italian", 217, 0],
+      ["2641660/c1a-oxz7k-kp5x4wwpcqk2-rkyvby.jpg", "Ethiopia-Eritrea Ties Cut, US Job Report & More | News in Easy Italian", 241, 1],
+      ["2640063/c1a-oxz7k-z3ojxx0jh7w3-inzq1z.jpg", "US Ends Iraq Withdrawal & More | News in Easy Italian", 230, 2],
+    ] as const
+  ).map(([img, title, duration, age]) => ({
+    image: `https://episodes.castos.com/69145abf642d78-65143310/images/${img}`,
+    title,
+    lo: 2,
+    hi: 3,
+    duration,
+    age,
+    source: "it-news-easy",
+    source_name: "News In Easy Italian",
+    shelf: "news",
+    kind: "audio",
+  }) as MockFind),
+  ...(
+    [
+      ["Otto secoli di San Francesco in mostra ad Arezzo", 0],
+      ["In Umbria nei luoghi di San Francesco a 800 anni dalla morte", 0],
+      ["Maltempo, allerta arancione in Liguria e Toscana", 1],
+    ] as const
+  ).map(([title, age]) => ({ title, lo: 5, hi: 5, duration: 0, age, source: "it-ansa", source_name: "ANSA", shelf: "news", kind: "text" }) as MockFind),
+];
+
+/** Éléments générés pour les autres langues : titres tirés du texte de départ. */
+function genericFinds(lang: LangCode): MockFind[] {
+  const words = STARTERS[lang].text.split(/(?<=[.!?。])\s+/).filter((s) => s.length > 12);
+  const pick = (i: number) => (words[i % words.length] ?? STARTERS[lang].title).replace(/[«»"“”]/g, "").slice(0, 80);
+  const rows: [string, string, MockFind["shelf"], MockFind["kind"], number, number, number][] = [
+    ["learn-ci", "Comprehensible Input", "learn", "video", 1, 2, 640],
+    ["learn-easy", `Easy ${LANGS.find((l) => l.code === lang)?.native ?? lang}`, "learn", "video", 2, 3, 910],
+    ["learn-pod", "Slow Stories", "learn", "audio", 2, 3, 1320],
+    ["news-easy", "News In Easy", "news", "audio", 2, 3, 236],
+    ["news", "BBC News", "news", "text", 5, 5, 0],
+    ["culture", "Kurzgesagt", "culture", "video", 4, 5, 610],
+  ];
+  return rows.flatMap(([id, name, shelf, kind, lo, hi, duration], r) =>
+    [0, 1, 2].map((i) => ({ source: `${lang}-${id}`, source_name: name, shelf, kind, lo, hi, duration: duration ? duration + i * 97 : 0, title: i ? pick(r * 3 + i) : STARTERS[lang].title, age: r + i * 3 })),
+  );
+}
 
 // nature et sens en français, puis en anglais (interface en anglais)
 const MOCK_DICT: Record<string, [string, string, string, string, string]> = {
@@ -95,11 +190,34 @@ export function createMockApi(): Api {
   /** mêmes règles que le natif : sans doublon, leçons de la langue de la playlist */
   const fill = (lang: string, ids: number[]) => [...new Set(ids)].filter((id) => db.lessons.some((l) => l.id === id && l.lang === lang));
 
-  const bump = (lang: string, field: keyof DayStat, n: number) => {
+  const bump = (lang: string, field: "words_read" | "known_added" | "lingqs" | "listen_secs" | "learn_secs", n: number) => {
     const k = `${today()}|${lang}`;
-    const a = db.activity[k] ?? { day: today(), lang, words_read: 0, known_added: 0, lingqs: 0, listen_secs: 0 };
-    (a[field] as number) += n;
+    const a = db.activity[k] ?? { ...emptyDay(today()), lang };
+    (a[field] as number) = ((a[field] as number) ?? 0) + n;
     db.activity[k] = a;
+  };
+
+  /** objectif du jour en minutes (réglage `daily_goal`) */
+  const goalMin = () => {
+    const m = Number(db.settings.daily_goal);
+    return m >= 1 && m <= 600 ? Math.round(m) : 10;
+  };
+  /** série en cours et record ; la série d'hier tient tant que la journée n'est pas finie */
+  const streakOf = (rows: DayStat[], goal: number): Stats["streak"] => {
+    const td = today();
+    const met = new Set(rows.filter((d) => d.goal_met || (d.day === td && (d.learn_secs ?? 0) >= goal * 60)).map((d) => d.day));
+    const done = met.has(td);
+    let current = 0;
+    for (let d = done ? new Date() : addDays(new Date(), -1); met.has(ymd(d)); d = addDays(d, -1)) current++;
+    let best = 0;
+    let run = 0;
+    let prev = "";
+    for (const d of [...met].sort()) {
+      run = prev && ymd(addDays(parseDay(prev), 1)) === d ? run + 1 : 1;
+      best = Math.max(best, run);
+      prev = d;
+    }
+    return { current, best: Math.max(best, current), today_done: done, goal_min: goal, today_secs: rows.find((d) => d.day === td)?.learn_secs ?? 0 };
   };
 
   const models: Omit<ModelRow, "installed" | "active" | "downloading" | "partial">[] = [
@@ -209,6 +327,34 @@ export function createMockApi(): Api {
     return text;
   };
 
+  // Découvrir : la première lecture « interroge les sources » deux secondes et demie
+  const discoverListeners = new Set<(lang: string) => void>();
+  const discover = new Map<string, { items: DiscoverItem[]; at: number; hidden: Set<string>; marks: Map<string, number> }>();
+  const discoverItems = (lang: LangCode, at: number): DiscoverItem[] =>
+    (lang === "it" ? IT_FINDS : genericFinds(lang)).map((f, i) => {
+      const id = `${f.source}-${i}`;
+      const url = f.yt ? `https://www.youtube.com/watch?v=${f.yt}` : `https://example.org/${lang}/${id}`;
+      return {
+        id,
+        source: f.source,
+        source_name: f.source_name,
+        shelf: f.shelf,
+        kind: f.kind,
+        title: f.title,
+        url: f.kind === "audio" ? `https://cdn.example/${id}.mp3` : url,
+        page: url,
+        image: f.yt ? `https://i.ytimg.com/vi/${f.yt}/hqdefault.jpg` : (f.image ?? ""),
+        summary: f.kind === "text" ? STARTERS[lang].text.slice(0, 180) + "…" : "",
+        duration: f.duration,
+        published: Math.round(Date.now() / 1000 - f.age * 86400 - i * 1800),
+        lo: f.lo,
+        hi: f.hi,
+        page_text: false,
+        fetched_at: at,
+        lesson_id: null,
+      };
+    });
+
   const mock: Api = {
     async appInfo() {
       return {
@@ -225,6 +371,8 @@ export function createMockApi(): Api {
     },
     async settingsSet(key, value) {
       db.settings[key] = value;
+      // nouvel objectif du jour : une journée déjà au-dessus est acquise
+      if (key === "daily_goal") for (const a of Object.values(db.activity)) if (a.day === today() && (a.learn_secs ?? 0) >= goalMin() * 60) a.goal_met = true;
       commit();
     },
     async lessonsList(lang) {
@@ -379,28 +527,99 @@ export function createMockApi(): Api {
     },
     async stats(lang): Promise<Stats> {
       const terms = Object.entries(db.terms).filter(([k]) => k.startsWith(lang + "|")).map(([, t]) => t);
-      const days: DayStat[] = [];
-      for (let i = 29; i >= 0; i--) {
-        const d = new Date(Date.now() - i * 86400000).toISOString().slice(0, 10);
-        const a = db.activity[`${d}|${lang}`];
-        days.push({ day: d, words_read: a?.words_read ?? 0, known_added: a?.known_added ?? 0, lingqs: a?.lingqs ?? 0, listen_secs: a?.listen_secs ?? 0 });
+      const goal = goalMin();
+      const now = new Date();
+      const td = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      const K = { td: ymd(td) } as Record<string, string>;
+      const rows: DayStat[] = Object.values(db.activity)
+        .filter((a) => a.lang === lang)
+        .map(({ lang: _l, ...a }) => {
+          const d = { ...emptyDay(a.day), ...a };
+          if (d.day === K.td && d.learn_secs >= goal * 60) d.goal_met = true;
+          return d;
+        })
+        .sort((a, b) => a.day.localeCompare(b.day));
+      const active = (d: DayStat) => d.learn_secs > 0 || d.words_read > 0 || d.listen_secs > 0 || d.lingqs > 0 || d.known_added > 0;
+      const span = (start: Date): Span => ({ start: ymd(start), words_read: 0, known_added: 0, lingqs: 0, listen_secs: 0, learn_secs: 0, active_days: 0, goal_days: 0 });
+      const add = (s: Span, d: DayStat) => {
+        s.words_read += d.words_read;
+        s.known_added += d.known_added;
+        s.lingqs += d.lingqs;
+        s.listen_secs += d.listen_secs;
+        s.learn_secs += d.learn_secs;
+        s.active_days += active(d) ? 1 : 0;
+        s.goal_days += d.goal_met ? 1 : 0;
+      };
+      // bornes des périodes (semaine depuis lundi, mois depuis le 1er)
+      const yesterday = addDays(td, -1);
+      const week = addDays(td, -((td.getDay() + 6) % 7));
+      const lastWeek = addDays(week, -7);
+      const month = new Date(td.getFullYear(), td.getMonth(), 1);
+      const lastMonth = new Date(td.getFullYear(), td.getMonth() - 1, 1);
+      const periods = { today: span(td), yesterday: span(yesterday), week: span(week), last_week: span(lastWeek), month: span(month), last_month: span(lastMonth), total: span(td) };
+      const first = rows.find(active)?.day ?? null;
+      if (first) periods.total.start = first;
+      const weeksFrom = addDays(week, -77);
+      const weeks = Array.from({ length: 12 }, (_, i) => span(addDays(weeksFrom, 7 * i)));
+      const minFrom = new Date(month.getFullYear(), month.getMonth() - 11, 1);
+      const maxFrom = new Date(month.getFullYear(), month.getMonth() - 35, 1);
+      let monthsFrom = first ? new Date(parseDay(first).getFullYear(), parseDay(first).getMonth(), 1) : minFrom;
+      if (monthsFrom > minFrom) monthsFrom = minFrom;
+      if (monthsFrom < maxFrom) monthsFrom = maxFrom;
+      const months: Span[] = [];
+      for (let m = monthsFrom; m <= month; m = new Date(m.getFullYear(), m.getMonth() + 1, 1)) months.push(span(m));
+      Object.assign(K, { y: ymd(yesterday), w: ymd(week), lw: ymd(lastWeek), m: ymd(month), lm: ymd(lastMonth), wf: ymd(weeksFrom), mf: ymd(monthsFrom) });
+      const records = { words_read: 0, words_day: "", learn_secs: 0, learn_day: "" };
+      for (const d of rows) {
+        add(periods.total, d);
+        if (d.day === K.td) add(periods.today, d);
+        if (d.day === K.y) add(periods.yesterday, d);
+        if (d.day >= K.w && d.day <= K.td) add(periods.week, d);
+        if (d.day >= K.lw && d.day < K.w) add(periods.last_week, d);
+        if (d.day >= K.m && d.day <= K.td) add(periods.month, d);
+        if (d.day >= K.lm && d.day < K.m) add(periods.last_month, d);
+        if (d.day >= K.wf && d.day <= K.td) {
+          const w = weeks[Math.floor(Math.round((parseDay(d.day).getTime() - weeksFrom.getTime()) / 86400000) / 7)];
+          if (w) add(w, d);
+        }
+        if (d.day >= K.mf && d.day <= K.td) {
+          const dd = parseDay(d.day);
+          const m = months[(dd.getFullYear() - monthsFrom.getFullYear()) * 12 + dd.getMonth() - monthsFrom.getMonth()];
+          if (m) add(m, d);
+        }
+        if (d.words_read > records.words_read) Object.assign(records, { words_read: d.words_read, words_day: d.day });
+        if (d.learn_secs > records.learn_secs) Object.assign(records, { learn_secs: d.learn_secs, learn_day: d.day });
       }
-      const all = Object.values(db.activity).filter((a) => a.lang === lang);
+      const byDay = new Map(rows.map((r) => [r.day, r]));
+      const days: DayStat[] = [];
+      for (let d = addDays(week, -175); d <= td; d = addDays(d, 1)) days.push(byDay.get(ymd(d)) ?? emptyDay(ymd(d)));
       return {
         known: terms.filter((t) => t.status === 4 && !t.term.includes(" ")).length,
         learning: terms.filter((t) => t.status <= 3).length,
         phrases: terms.filter((t) => t.term.includes(" ")).length,
         lessons: db.lessons.filter((l) => l.lang === lang).length,
-        words_read_total: all.reduce((s, a) => s + a.words_read, 0),
-        listen_secs_total: all.reduce((s, a) => s + a.listen_secs, 0),
-        today: days[days.length - 1],
         days,
+        weeks,
+        months,
+        periods,
+        streak: streakOf(rows, goal),
+        records,
+        first_day: first,
       };
     },
-    async activityAdd(lang, wordsRead, listenSecs) {
-      bump(lang, "words_read", wordsRead);
-      bump(lang, "listen_secs", listenSecs);
+    async activityAdd(lang, wordsRead, listenSecs, learnSecs = 0) {
+      bump(lang, "words_read", Math.max(0, wordsRead));
+      bump(lang, "listen_secs", Math.max(0, listenSecs));
+      bump(lang, "learn_secs", Math.max(0, learnSecs));
+      let reached: GoalReached | null = null;
+      const a = db.activity[`${today()}|${lang}`];
+      if (learnSecs > 0 && a && !a.goal_met && a.learn_secs >= goalMin() * 60) {
+        a.goal_met = true;
+        const rows = Object.values(db.activity).filter((x) => x.lang === lang);
+        reached = { streak: streakOf(rows, goalMin()).current, goal_min: goalMin() };
+      }
       commit();
+      return reached;
     },
     async exportVocab() {},
     async dictLookup(lang, word) {
@@ -742,6 +961,47 @@ export function createMockApi(): Api {
     async backupListen(onStatus) {
       backupListeners.add(onStatus);
       return () => backupListeners.delete(onStatus);
+    },
+    async discoverList(lang) {
+      const d = discover.get(lang);
+      const lessons = db.lessons.filter((l) => l.lang === lang);
+      const items = (d?.items ?? [])
+        .filter((it) => !d?.hidden.has(it.id))
+        .map((it) => {
+          // une leçon supprimée depuis ne compte plus
+          const marked = lessons.find((l) => l.id === d?.marks.get(it.id));
+          const same = lessons.find((l) => l.source && (l.source === it.page || l.source === it.url));
+          return { ...it, lesson_id: (marked ?? same)?.id ?? null };
+        });
+      return { items, refreshed_at: d?.at ?? 0, refreshing: false, sources: new Set(items.map((i) => i.source)).size || 6 };
+    },
+    async discoverRefresh(lang, onEvent) {
+      onEvent({ type: "stage", stage: "discover" });
+      for (let i = 1; i <= 10; i++) {
+        await sleep(250);
+        onEvent({ type: "progress", value: i * 10 });
+      }
+      const now = Math.round(Date.now() / 1000);
+      const old = discover.get(lang);
+      const items = discoverItems(lang as LangCode, old ? old.at : now);
+      // à chaque nouvelle lecture, un élément de plus apparaît (« Nouveau »)
+      if (old) {
+        const fresh = { ...items[0], id: `fresh-${now}`, title: `${items[0].title} · ${t("nouvel épisode", "new episode")}`, published: now, fetched_at: now };
+        items.unshift(...old.items.filter((it) => it.id.startsWith("fresh-")), fresh);
+      }
+      discover.set(lang, { items, at: now, hidden: old?.hidden ?? new Set(), marks: old?.marks ?? new Map() });
+      discoverListeners.forEach((f) => f(lang));
+      return { added: old ? 1 : items.length, sources: 6, failed: [], skipped: false };
+    },
+    async discoverMark(id, lesson) {
+      for (const d of discover.values()) if (d.items.some((it) => it.id === id)) d.marks.set(id, lesson);
+    },
+    async discoverHide(id) {
+      for (const d of discover.values()) d.hidden.add(id);
+    },
+    async discoverListen(onChange) {
+      discoverListeners.add(onChange);
+      return () => discoverListeners.delete(onChange);
     },
     mediaUrl(path) {
       return path;

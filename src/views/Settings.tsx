@@ -3,9 +3,10 @@ import { Icon } from "../components/Icon";
 import { Segmented, Switch } from "../components/ui";
 import { api, isTauri } from "../lib/api";
 import { confirmAsk } from "../lib/dialogs";
-import { t, type UiLang } from "../lib/i18n";
+import { count, t, type UiLang } from "../lib/i18n";
 import { LANGS, STARTERS, langInfo, langLower, starterCollection, theLang } from "../lib/langs";
 import { useDictStatus } from "../lib/dicts";
+import { LEVELS, levelName, useLevel } from "../lib/discover";
 import { PROFILES } from "../lib/profiles";
 import { formatBytes, useApp } from "../lib/store";
 import { naturalVoiceFor, naturalVoices, pronounce } from "../lib/pronounce";
@@ -325,6 +326,13 @@ export function Settings() {
                 </div>
                 <Switch on={settings.auto_sentence !== "0"} onChange={(v) => setSetting("auto_sentence", v ? "1" : "0")} label={t("Traduire la phrase", "Translate the sentence")} />
               </div>
+              <div className="set-row">
+                <div className="grow">
+                  <strong>{t("Prononcer le mot touché", "Pronounce the word you tap")}</strong>
+                  <span>{t("Et le passage surligné, seulement quand l'audio de la leçon est en pause", "And the highlighted passage, only while the lesson audio is paused")}</span>
+                </div>
+                <Switch on={settings.auto_pronounce !== "0"} onChange={(v) => setSetting("auto_pronounce", v ? "1" : "0")} label={t("Prononcer le mot touché", "Pronounce the word you tap")} />
+              </div>
             </div>
           </section>
 
@@ -437,6 +445,8 @@ export function Settings() {
               </div>
             </div>
           </section>
+
+          <DiscoverSection lang={lang} />
 
           <BackupSection />
 
@@ -559,4 +569,49 @@ function DictNote({ code }: { code: LangCode }) {
   if (d.ready) return <>{t(" · dictionnaire hors ligne prêt", " · offline dictionary ready")}</>;
   if (d.downloading) return <>{t(" · dictionnaire en téléchargement…", " · dictionary downloading…")}</>;
   return <>{t(" · dictionnaire hors ligne, téléchargé au premier usage", " · offline dictionary, downloaded on first use")}</>;
+}
+
+/** Réglages › Découvrir : la lecture quotidienne des sources, et le niveau de la langue active. */
+function DiscoverSection({ lang }: { lang: LangCode }) {
+  const auto = useApp((s) => s.settings.discover_auto) !== "0";
+  const setSetting = useApp((s) => s.setSetting);
+  const { level, auto: estimatedLevel, estimated, known, setLevel } = useLevel(lang);
+  const knownWords = count(known, "mot connu", "mots connus", "known word", "known words");
+  return (
+    <section className="set-section" id="set-discover">
+      <h2>{t("Découvrir", "Discover")}</h2>
+      <p>
+        {t(
+          "Chaque jour, Lumen regarde ce que publient des chaînes, des podcasts et des journaux choisis pour vos langues, et vous le propose dans la bibliothèque, rangé par niveau. Il lit seulement des listes publiques, sans rien envoyer de personnel ; une vidéo ou un épisode n'est téléchargé que si vous en faites une leçon.",
+          "Every day, Lumen looks at what channels, podcasts and newspapers chosen for your languages publish, and suggests it in the library, sorted by level. It only reads public lists and sends nothing personal; a video or an episode is downloaded only if you make it a lesson.",
+        )}
+      </p>
+      <div className="set-card">
+        <div className="set-row">
+          <div className="grow">
+            <strong>{t("Chercher de nouvelles leçons chaque jour", "Look for new lessons every day")}</strong>
+            <span>{t("Sinon, seulement quand vous touchez « Actualiser » dans Découvrir.", "Otherwise, only when you tap “Refresh” in Discover.")}</span>
+          </div>
+          <Switch on={auto} onChange={(v) => setSetting("discover_auto", v ? "1" : "0")} label={t("Chercher chaque jour", "Look every day")} />
+        </div>
+        <div className="set-row">
+          <div className="grow">
+            <strong>{t(`Votre niveau en ${langLower(lang)}`, `Your level in ${langLower(lang)}`)}</strong>
+            <span>
+              {estimatedLevel
+                ? t(`Estimé d'après vos ${knownWords}`, `Estimated from your ${knownWords}`)
+                : t(`Choisi par vous (estimé : ${levelName(estimated)})`, `Chosen by you (estimated: ${levelName(estimated)})`)}
+            </span>
+          </div>
+          <Segmented
+            id="set-level"
+            label={t("Niveau", "Level")}
+            value={String(level)}
+            onChange={(v) => setLevel(Number(v) === estimated ? null : Number(v))}
+            options={LEVELS.map((name, i) => ({ value: String(i + 1), label: name }))}
+          />
+        </div>
+      </div>
+    </section>
+  );
 }

@@ -14,6 +14,7 @@ use crate::ai::{self, Priority};
 use crate::backup;
 use crate::db::{self, LessonPatch, NewLesson, PlaylistPatch, TermQuery, TermUpdate};
 use crate::dict::DictResult;
+use crate::discover;
 use crate::link;
 use crate::lingq;
 use crate::media::{self, ImportEvent};
@@ -72,6 +73,10 @@ pub async fn settings_set(app: tauri::AppHandle, state: State<'_, AppState>, key
     db::setting_set(&state.db.lock(), &key, &value).map_err(err)?;
     if key == "ui_lang" {
         i18n::set(&value);
+    }
+    // nouvel objectif du jour : une journée déjà au-dessus est acquise
+    if key == "daily_goal" {
+        db::goal_refresh(&state.db.lock()).map_err(err)?;
     }
     // les dictionnaires des langues étudiées, dans la langue de l'interface, arrivent en arrière-plan
     if key == "ui_lang" || key == "langs" {
@@ -232,8 +237,8 @@ pub async fn stats(state: State<'_, AppState>, lang: String) -> R<db::Stats> {
 }
 
 #[tauri::command]
-pub async fn activity_add(state: State<'_, AppState>, lang: String, words_read: i64, listen_secs: i64) -> R<()> {
-    db::activity_add(&state.db.lock(), &lang, words_read, listen_secs).map_err(err)
+pub async fn activity_add(state: State<'_, AppState>, lang: String, words_read: i64, listen_secs: i64, learn_secs: Option<i64>) -> R<Option<db::GoalReached>> {
+    db::activity_add(&state.db.lock(), &lang, words_read, listen_secs, learn_secs.unwrap_or(0)).map_err(err)
 }
 
 #[tauri::command]
@@ -1152,4 +1157,36 @@ pub async fn backup_restore(state: State<'_, AppState>, key: String, day: Option
             let _ = on_event.send(e);
         })
     })
+}
+
+// ---------- Découvrir : leçons venues d'ailleurs ----------
+
+/// Ce que les sources d'une langue proposent (dernière lecture), avec les leçons déjà créées.
+#[tauri::command]
+pub async fn discover_list(state: State<'_, AppState>, lang: String) -> R<discover::Feed> {
+    let lessons = db::lesson_sources(&state.db.lock(), &lang).map_err(err)?;
+    state.discover.list(&lang, i18n::native(), &lessons).map_err(err)
+}
+
+/// Relit maintenant les sources d'une langue (sans attendre la lecture du jour).
+#[tauri::command]
+pub async fn discover_refresh(app: tauri::AppHandle, state: State<'_, AppState>, lang: String, on_event: Channel<ImportEvent>) -> R<discover::Report> {
+    let mut send = |e: ImportEvent| {
+        let _ = on_event.send(e);
+    };
+    let report = discover::refresh(&state.data_dir, &state.discover, &lang, i18n::native(), &mut send).await.map_err(err)?;
+    let _ = app.emit("discover", &lang);
+    Ok(report)
+}
+
+/// Relie un élément de Découvrir à la leçon créée à partir de lui.
+#[tauri::command]
+pub async fn discover_mark(state: State<'_, AppState>, id: String, lesson: i64) -> R<()> {
+    state.discover.mark(&id, lesson).map_err(err)
+}
+
+/// Écarte un élément de Découvrir (il ne revient pas).
+#[tauri::command]
+pub async fn discover_hide(state: State<'_, AppState>, id: String) -> R<()> {
+    state.discover.hide(&id).map_err(err)
 }

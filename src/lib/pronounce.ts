@@ -61,17 +61,36 @@ export function preparePronunciation(text: string, lang: LangCode) {
   request(lang, text, true).catch(() => {});
 }
 
-/** Prononce un mot ou une expression. */
-export async function pronounce(text: string, lang: LangCode, voiceURI?: string) {
+/** Tour de parole : un mot touché ensuite, ou la leçon qui reprend, fait taire le précédent. */
+let turn = 0;
+
+/** Fait taire la prononciation en cours et oublie celles qui se préparent : la leçon reprend la parole. */
+export function stopPronunciation() {
+  turn++;
+  player?.pause();
+  if (typeof speechSynthesis !== "undefined") speechSynthesis.cancel();
+}
+
+/**
+ * Prononce un mot ou une expression. `touched` : au toucher d'un mot (et non
+ * au clic sur le haut-parleur) ; la voix naturelle abandonne alors sa
+ * préparation si un autre mot est touché entre-temps.
+ */
+export async function pronounce(text: string, lang: LangCode, voiceURI?: string, touched = false) {
+  const my = ++turn;
   if (naturalVoiceReady()) {
     try {
       let path: string;
       try {
-        path = await request(lang, text, false);
-      } catch {
+        path = await request(lang, text, touched);
+      } catch (e) {
+        if (my !== turn) return;
         // une préparation abandonnée (nouveau mot touché entre-temps) : on la refait
+        if (!String(e).includes("interrompu")) throw e;
         path = await request(lang, text, false);
       }
+      // un autre mot a été touché, ou la leçon a repris : ce son n'a plus lieu d'être
+      if (my !== turn) return;
       if (typeof speechSynthesis !== "undefined") speechSynthesis.cancel();
       player?.pause();
       player = new Audio(api().mediaUrl(path));
@@ -79,6 +98,7 @@ export async function pronounce(text: string, lang: LangCode, voiceURI?: string)
       return;
     } catch {
       // en cas d'échec, la voix du système prend le relais
+      if (my !== turn) return;
     }
   }
   sayWord(text, lang, voiceURI);

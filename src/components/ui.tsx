@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 import { useApp } from "../lib/store";
 import { Icon } from "./Icon";
 import { formatNumber, t } from "../lib/i18n";
+import { timeParts } from "../lib/progress";
 
 export function Orb({ size = 22 }: { size?: number }) {
   return <span className="orb" style={{ width: size, height: size, ["--s" as string]: `${size}px` }} aria-hidden="true" />;
@@ -205,4 +206,19 @@ export function CountUp({ value, duration = 900 }: { value: number; duration?: n
     return () => cancelAnimationFrame(raf);
   }, [value, duration]);
   return <>{formatNumber(shown)}</>;
+}
+
+/** Durée mise en forme : chiffres en grand, unités en petit (« 1 h 24 min »). */
+export function Duration({ secs }: { secs: number }) {
+  return (
+    <span className="dur">
+      {timeParts(secs).map(([v, u], i) => (
+        <span key={i}>
+          {i > 0 && " "}
+          {v}
+          <small>{u}</small>
+        </span>
+      ))}
+    </span>
+  );
 }

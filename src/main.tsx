@@ -9,6 +9,7 @@ import "./styles/reader.css";
 import "./styles/onboarding.css";
 import "./styles/chat.css";
 import "./styles/guide.css";
+import "./styles/discover.css";
 
 import React from "react";
 import ReactDOM from "react-dom/client";

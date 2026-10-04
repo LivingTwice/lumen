@@ -1,4 +1,4 @@
-import type { AppInfo, BackupInfo, BackupRestored, BackupStatus, ChatEvent, ChatOptions, ChatPatch, ChatReply, ChatSummary, ChatThread, DictResult, DictStatus, DownloadEvent, ImportEvent, LangCode, LessonSummary, LinkInfo, LinkMedia, LingqEvent, LingqLang, LingqPlan, LingqReport, ModelRow, NewLesson, OpenedLesson, Playlist, PlaylistPatch, Stats, Term, TermQuery, WordAnswer, VoicedLesson } from "./types";
+import type { AppInfo, BackupInfo, BackupRestored, BackupStatus, ChatEvent, ChatOptions, ChatPatch, ChatReply, ChatSummary, ChatThread, DictResult, DictStatus, DiscoverFeed, DiscoverReport, DownloadEvent, GoalReached, ImportEvent, LangCode, LessonSummary, LinkInfo, LinkMedia, LingqEvent, LingqLang, LingqPlan, LingqReport, ModelRow, NewLesson, OpenedLesson, Playlist, PlaylistPatch, Stats, Term, TermQuery, WordAnswer, VoicedLesson } from "./types";
 
 export const isTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
@@ -42,7 +42,8 @@ export interface Api {
   termsMarkKnown(lang: LangCode, keys: string[], wordsRead: number): Promise<number>;
   termsList(query: TermQuery): Promise<{ items: Term[]; total: number }>;
   stats(lang: LangCode): Promise<Stats>;
-  activityAdd(lang: LangCode, wordsRead: number, listenSecs: number): Promise<void>;
+  /** mots lus, écoute et temps actif dans une leçon ; renvoie la série si l'objectif du jour vient d'être atteint */
+  activityAdd(lang: LangCode, wordsRead: number, listenSecs: number, learnSecs?: number): Promise<GoalReached | null>;
   exportVocab(lang: LangCode, path: string): Promise<void>;
   /** `after` : la suite de la phrase (japonais, vietnamien : mots de plusieurs jetons) */
   dictLookup(lang: LangCode, word: string, after?: string): Promise<DictResult>;
@@ -95,6 +96,16 @@ export interface Api {
   backupRestore(key: string, day: string | null, onEvent: (e: ImportEvent) => void): Promise<BackupRestored>;
   /** suit les sauvegardes automatiques ; renvoie de quoi arrêter l'écoute */
   backupListen(onStatus: (s: BackupStatus) => void): Promise<() => void>;
+  /** Découvrir : ce que les sources de la langue proposent (dernière lecture) */
+  discoverList(lang: LangCode): Promise<DiscoverFeed>;
+  /** relit maintenant les sources de la langue (étape « tools » si les composants vidéo s'installent) */
+  discoverRefresh(lang: LangCode, onEvent: (e: ImportEvent) => void): Promise<DiscoverReport>;
+  /** relie un élément de Découvrir à la leçon créée à partir de lui */
+  discoverMark(id: string, lesson: number): Promise<void>;
+  /** écarte un élément de Découvrir (il ne revient pas) */
+  discoverHide(id: string): Promise<void>;
+  /** une langue vient d'être relue (lecture du jour ou demandée) */
+  discoverListen(onChange: (lang: string) => void): Promise<() => void>;
   mediaUrl(path: string): string;
 }
 
@@ -124,7 +135,7 @@ async function createTauriApi(): Promise<Api> {
     termsMarkKnown: (lang, keys, wordsRead) => invoke("terms_mark_known", { lang, keys, wordsRead }),
     termsList: (query) => invoke("terms_list", { query }),
     stats: (lang) => invoke("stats", { lang }),
-    activityAdd: (lang, wordsRead, listenSecs) => invoke("activity_add", { lang, wordsRead, listenSecs }),
+    activityAdd: (lang, wordsRead, listenSecs, learnSecs = 0) => invoke("activity_add", { lang, wordsRead, listenSecs, learnSecs }),
     exportVocab: (lang, path) => invoke("export_vocab", { lang, path }),
     dictLookup: (lang, word, after) => invoke("dict_lookup", { lang, word, after: after ?? null }),
     dictStatus: (lang) => invoke("dict_status", { lang }),
@@ -170,6 +181,14 @@ async function createTauriApi(): Promise<Api> {
     backupListen: async (onStatus) => {
       const { listen } = await import("@tauri-apps/api/event");
       return listen<BackupStatus>("backup", (e) => onStatus(e.payload));
+    },
+    discoverList: (lang) => invoke("discover_list", { lang }),
+    discoverRefresh: (lang, onEvent) => invoke("discover_refresh", { lang, onEvent: ch<ImportEvent>(onEvent) }),
+    discoverMark: (id, lesson) => invoke("discover_mark", { id, lesson }),
+    discoverHide: (id) => invoke("discover_hide", { id }),
+    discoverListen: async (onChange) => {
+      const { listen } = await import("@tauri-apps/api/event");
+      return listen<string>("discover", (e) => onChange(e.payload));
     },
     mediaUrl: (path) => convertFileSrc(path),
   };

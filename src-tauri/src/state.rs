@@ -21,4 +21,6 @@ pub struct AppState {
     pub voice_epoch: AtomicU64,
     /// sauvegarde de la progression (iCloud Drive ou dossier choisi)
     pub backup: crate::backup::Tracker,
+    /// Découvrir : ce que les sources proposent (cache à part, `discover.db`)
+    pub discover: crate::discover::Store,
 }

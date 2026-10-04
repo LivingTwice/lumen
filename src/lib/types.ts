@@ -144,6 +144,32 @@ export interface DayStat {
   known_added: number;
   lingqs: number;
   listen_secs: number;
+  /** temps actif passé dans les leçons */
+  learn_secs: number;
+  /** objectif du jour atteint : la journée compte dans la série */
+  goal_met: boolean;
+}
+
+/** Activité cumulée sur une période (jour, semaine, mois, tout). */
+export interface Span {
+  /** premier jour de la période (AAAA-MM-JJ) */
+  start: string;
+  words_read: number;
+  known_added: number;
+  lingqs: number;
+  listen_secs: number;
+  learn_secs: number;
+  active_days: number;
+  goal_days: number;
+}
+
+export interface Streak {
+  /** jours de suite où l'objectif est atteint (aujourd'hui compris s'il l'est déjà) */
+  current: number;
+  best: number;
+  today_done: boolean;
+  goal_min: number;
+  today_secs: number;
 }
 
 export interface Stats {
@@ -151,10 +177,22 @@ export interface Stats {
   learning: number;
   phrases: number;
   lessons: number;
-  words_read_total: number;
-  listen_secs_total: number;
-  today: DayStat;
+  /** 26 semaines entières (depuis un lundi) jusqu'à aujourd'hui */
   days: DayStat[];
+  /** 12 dernières semaines */
+  weeks: Span[];
+  /** mois par mois depuis le début (12 au moins, 36 au plus) */
+  months: Span[];
+  periods: { today: Span; yesterday: Span; week: Span; last_week: Span; month: Span; last_month: Span; total: Span };
+  streak: Streak;
+  records: { words_read: number; words_day: string; learn_secs: number; learn_day: string };
+  first_day: string | null;
+}
+
+/** Le temps d'apprentissage vient de faire atteindre l'objectif du jour. */
+export interface GoalReached {
+  streak: number;
+  goal_min: number;
 }
 
 export interface ModelRow {
@@ -284,6 +322,55 @@ export interface LinkInfo {
   via: "" | "rss" | "youtube";
   /** à montrer si rien d'autre n'est trouvé */
   note: string;
+}
+
+/** Ce que propose Découvrir : une vidéo, un épisode ou un article d'une source
+ *  choisie pour la langue (miroir de `discover::Item`). */
+export interface DiscoverItem {
+  id: string;
+  source: string;
+  source_name: string;
+  /** rayon : pour apprenants, actualités, culture */
+  shelf: "learn" | "news" | "culture";
+  kind: "video" | "audio" | "text";
+  title: string;
+  /** vidéo YouTube, fichier son, ou article */
+  url: string;
+  /** page de l'épisode ou de l'article (vide si inconnue) */
+  page: string;
+  image: string;
+  summary: string;
+  /** secondes, 0 si inconnue */
+  duration: number;
+  /** secondes depuis 1970, 0 si inconnue */
+  published: number;
+  /** fourchette de niveaux, de 1 (A1) à 5 (C1) */
+  lo: number;
+  hi: number;
+  /** la page porte aussi le texte de l'épisode (l'import propose le son avec ce texte) */
+  page_text: boolean;
+  /** première apparition dans Lumen (secondes) */
+  fetched_at: number;
+  /** leçon déjà créée à partir de cet élément */
+  lesson_id: number | null;
+}
+
+export interface DiscoverFeed {
+  items: DiscoverItem[];
+  /** dernière lecture réussie des sources (secondes, 0 : jamais) */
+  refreshed_at: number;
+  refreshing: boolean;
+  /** nombre de sources de la langue */
+  sources: number;
+}
+
+export interface DiscoverReport {
+  added: number;
+  sources: number;
+  /** sources qui n'ont pas répondu */
+  failed: string[];
+  /** une lecture venait de se faire : rien n'a été relu */
+  skipped: boolean;
 }
 
 /** Nombres d'une sauvegarde : ce qui sera retrouvé en la restaurant. */

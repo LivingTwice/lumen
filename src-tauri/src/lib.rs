@@ -6,6 +6,7 @@ mod backup;
 mod commands;
 mod db;
 mod dict;
+mod discover;
 mod link;
 mod lingq;
 mod media;
@@ -34,6 +35,7 @@ pub fn run() {
             i18n::set(&db::setting(&conn, "ui_lang").unwrap_or_default());
             let resource_dir = app.path().resource_dir()?.join("dicts");
             let dicts = dict::Dicts::new(resource_dir, dict::dict_dir(&data_dir));
+            let discover = discover::Store::open(&data_dir);
             app.manage(state::AppState {
                 data_dir,
                 db: Mutex::new(conn),
@@ -43,9 +45,12 @@ pub fn run() {
                 voice_lock: tokio::sync::Mutex::new(()),
                 voice_epoch: std::sync::atomic::AtomicU64::new(0),
                 backup: backup::Tracker::default(),
+                discover,
             });
             // sauvegarde automatique, au plus toutes les 10 minutes
             tauri::async_runtime::spawn(backup::auto_loop(app.handle().clone()));
+            // Découvrir : les sources des langues étudiées, relues une fois par jour
+            tauri::async_runtime::spawn(discover::auto_loop(app.handle().clone()));
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -99,6 +104,10 @@ pub fn run() {
             commands::backup_run,
             commands::backup_list,
             commands::backup_restore,
+            commands::discover_list,
+            commands::discover_refresh,
+            commands::discover_mark,
+            commands::discover_hide,
         ])
         .build(tauri::generate_context!())
         .expect("Lumen couldn't start")
