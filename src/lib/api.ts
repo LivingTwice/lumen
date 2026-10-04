@@ -1,4 +1,4 @@
-import type { AppInfo, BackupInfo, BackupRestored, BackupStatus, ChatEvent, ChatOptions, ChatPatch, ChatReply, ChatSummary, ChatThread, DictResult, DictStatus, DiscoverFeed, DiscoverReport, DownloadEvent, GoalReached, ImportEvent, LangCode, LessonSummary, LinkInfo, LinkMedia, LingqEvent, LingqLang, LingqPlan, LingqReport, ModelRow, NewLesson, OpenedLesson, Playlist, PlaylistPatch, Stats, Term, TermQuery, WordAnswer, VoicedLesson } from "./types";
+import type { AppInfo, BackupInfo, BackupRestored, BackupStatus, ChatEvent, ChatOptions, ChatPatch, ChatReply, ChatSummary, ChatThread, DictResult, DictStatus, DiscoverFeed, DiscoverReport, DownloadEvent, GeminiModels, GoalReached, ImportEvent, LangCode, LessonSummary, LevelEstimate, LinkInfo, LinkMedia, LingqEvent, LingqLang, LingqPlan, LingqReport, Lyrics, MediaStream, ModelRow, NewLesson, OpenedLesson, Playlist, PlaylistPatch, PodcastRequest, SearchPage, SearchPlatform, SongItem, Stats, Term, TermQuery, TextStats, WordAnswer, VoicedLesson } from "./types";
 
 export const isTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
@@ -98,14 +98,32 @@ export interface Api {
   backupListen(onStatus: (s: BackupStatus) => void): Promise<() => void>;
   /** Découvrir : ce que les sources de la langue proposent (dernière lecture) */
   discoverList(lang: LangCode): Promise<DiscoverFeed>;
-  /** relit maintenant les sources de la langue (étape « tools » si les composants vidéo s'installent) */
-  discoverRefresh(lang: LangCode, onEvent: (e: ImportEvent) => void): Promise<DiscoverReport>;
+  /** relit les sources de la langue qui sont à relire (`force` : toutes, à la demande) ; étapes « tools » et « found » */
+  discoverRefresh(lang: LangCode, force: boolean, onEvent: (e: ImportEvent) => void): Promise<DiscoverReport>;
   /** relie un élément de Découvrir à la leçon créée à partir de lui */
   discoverMark(id: string, lesson: number): Promise<void>;
   /** écarte un élément de Découvrir (il ne revient pas) */
   discoverHide(id: string): Promise<void>;
   /** une langue vient d'être relue (lecture du jour ou demandée) */
   discoverListen(onChange: (lang: string) => void): Promise<() => void>;
+  /** cherche en ligne sur une plateforme, dans la langue étudiée (`filter` : durée des vidéos) */
+  searchOnline(lang: LangCode, platform: SearchPlatform, query: string, page: number, filter: string, onEvent: (e: ImportEvent) => void): Promise<SearchPage>;
+  /** adresses de lecture d'une vidéo (ou du seul son) pour l'aperçu */
+  mediaStream(url: string, audio: boolean): Promise<MediaStream>;
+  /** la vidéo YouTube d'une chanson (version de l'album de préférence) */
+  songFind(artist: string, title: string): Promise<string>;
+  /** paroles d'une chanson, ou null */
+  lyricsFind(artist: string, title: string, album: string, duration: number): Promise<Lyrics | null>;
+  /** fait une leçon d'une chanson (paroles, lanterne sur la chanson) */
+  importSong(lang: LangCode, song: SongItem, onEvent: (e: ImportEvent) => void): Promise<number>;
+  /** vérifie une clé Gemini ; renvoie les modèles qu'elle ouvre */
+  geminiCheck(key: string): Promise<GeminiModels>;
+  /** Gemini écrit et dit un podcast sur mesure, qui devient une leçon (étapes « script », « studio ») */
+  podcastCreate(lang: LangCode, request: PodcastRequest, onEvent: (e: ImportEvent) => void): Promise<number>;
+  /** niveau estimé d'après les mots connus regroupés par lemme */
+  levelEstimate(lang: LangCode): Promise<LevelEstimate>;
+  /** part des mots d'un texte déjà connus */
+  textStats(lang: LangCode, text: string): Promise<TextStats>;
   mediaUrl(path: string): string;
 }
 
@@ -183,13 +201,23 @@ async function createTauriApi(): Promise<Api> {
       return listen<BackupStatus>("backup", (e) => onStatus(e.payload));
     },
     discoverList: (lang) => invoke("discover_list", { lang }),
-    discoverRefresh: (lang, onEvent) => invoke("discover_refresh", { lang, onEvent: ch<ImportEvent>(onEvent) }),
+    discoverRefresh: (lang, force, onEvent) => invoke("discover_refresh", { lang, force, onEvent: ch<ImportEvent>(onEvent) }),
     discoverMark: (id, lesson) => invoke("discover_mark", { id, lesson }),
     discoverHide: (id) => invoke("discover_hide", { id }),
     discoverListen: async (onChange) => {
       const { listen } = await import("@tauri-apps/api/event");
       return listen<string>("discover", (e) => onChange(e.payload));
     },
+    searchOnline: (lang, platform, query, page, filter, onEvent) =>
+      invoke("search_online", { lang, platform, query, page, filter, onEvent: ch<ImportEvent>(onEvent) }),
+    mediaStream: (url, audio) => invoke("media_stream", { url, audio }),
+    songFind: (artist, title) => invoke("song_find", { artist, title }),
+    lyricsFind: (artist, title, album, duration) => invoke("lyrics_find", { artist, title, album, duration }),
+    importSong: (lang, song, onEvent) => invoke("import_song", { lang, song, onEvent: ch<ImportEvent>(onEvent) }),
+    geminiCheck: (key) => invoke("gemini_check", { key }),
+    podcastCreate: (lang, request, onEvent) => invoke("podcast_create", { lang, request, onEvent: ch<ImportEvent>(onEvent) }),
+    levelEstimate: (lang) => invoke("level_estimate", { lang }),
+    textStats: (lang, text) => invoke("text_stats", { lang, text }),
     mediaUrl: (path) => convertFileSrc(path),
   };
 }

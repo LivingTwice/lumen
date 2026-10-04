@@ -266,7 +266,7 @@ pub(crate) async fn get_text(c: &reqwest::Client, url: &str) -> Result<String> {
     body_text(resp).await
 }
 
-async fn get_json(c: &reqwest::Client, url: &str) -> Result<Value> {
+pub(crate) async fn get_json(c: &reqwest::Client, url: &str) -> Result<Value> {
     Ok(serde_json::from_str(&get_text(c, url).await?)?)
 }
 
@@ -285,6 +285,21 @@ pub async fn probe(data_dir: &Path, input: &str, browser: Option<&str>, on_event
     if on_site(&h, &["podcasts.apple.com", "itunes.apple.com"]) {
         if let Some(info) = apple(&c, &url).await? {
             return Ok(info);
+        }
+    }
+    // Wikipédia, Vikidia : le texte de l'article par leur API, sans tableaux ni références
+    if on_site(&h, &["wikipedia.org", "vikidia.org"]) {
+        if let Some((title, paras)) = crate::search::wiki_article(&url).await {
+            let esc = |s: &str| s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;");
+            let body: String = paras.iter().map(|p| format!("<p>{}</p>", esc(p))).collect();
+            let t = esc(&title);
+            return Ok(LinkInfo {
+                url: url.to_string(),
+                title,
+                site: if h.ends_with("vikidia.org") { "Vikidia" } else { "Wikipedia" }.into(),
+                html: format!("<!doctype html><html><head><title>{t}</title></head><body><article><h1>{t}</h1>{body}</article></body></html>"),
+                ..Default::default()
+            });
         }
     }
     let known = on_site(&h, VIDEO_SITES) || on_site(&h, AUDIO_SITES);

@@ -225,8 +225,8 @@
   inset: 0.02em -0.12em;
   z-index: -1;
   border-radius: 0.45em;
-  background: var(--light-soft);
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--light) 45%, transparent), 0 0 26px 6px var(--light-veil);
+  background: var(--lantern-fill);
+  box-shadow: 0 0 0 1px var(--lantern-ring), 0 0 26px 6px var(--light-veil);
 }
 
 .g-player {

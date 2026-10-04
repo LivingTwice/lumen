@@ -14,6 +14,8 @@ pub const STATUS_KNOWN: i64 = 4;
 pub const STATUS_IGNORED: i64 = 5;
 /// Minutage des mots au nouveau calage précis (0 : ancien Whisper ou LingQ, approximatif).
 pub const TIMING_PRECISE: i64 = 2;
+/// Minutage ligne par ligne (paroles minutées d'une chanson), réparti sur les mots.
+pub const TIMING_LINES: i64 = 1;
 
 /// Fichier de la base dans le dossier de données.
 pub fn path(data_dir: &Path) -> PathBuf {
@@ -221,7 +223,11 @@ pub struct LessonSummary {
     pub opened_at: Option<i64>,
     /// mots uniques jamais vus (ni appris ni connus)
     pub new_words: i64,
-    /// part (0-100) des occurrences reconnues (connues ou en apprentissage)
+    /// part (0-100) des mots différents encore nouveaux, comme sur LingQ
+    pub new_pct: i64,
+    /// part (0-100) des mots différents déjà rencontrés (connus, en apprentissage
+    /// ou ignorés) : le complément de `new_pct`, sur la même base, pour que la
+    /// carte ne montre pas « 51 % nouveaux » à côté d'une jauge à 65 %
     pub known_pct: i64,
     pub excerpt: String,
     /// seconde atteinte dans l'audio ou la vidéo, et durée totale
@@ -279,6 +285,15 @@ pub fn status_map(c: &Connection, lang: &str) -> Result<HashMap<String, i64>> {
     Ok(rows.filter_map(|r| r.ok()).collect())
 }
 
+/// Part arrondie des mots nouveaux : jamais 0 % s'il en reste un, jamais 100 % s'il en manque un.
+fn new_share(new: usize, distinct: usize) -> i64 {
+    if distinct == 0 {
+        return 0;
+    }
+    let p = ((new * 100 + distinct / 2) / distinct) as i64;
+    if new == 0 { 0 } else if new == distinct { 100 } else { p.clamp(1, 99) }
+}
+
 pub fn lessons_list(c: &Connection, lang: &str) -> Result<Vec<LessonSummary>> {
     let statuses = status_map(c, lang)?;
     let mut st = c.prepare(
@@ -303,6 +318,7 @@ pub fn lessons_list(c: &Connection, lang: &str) -> Result<Vec<LessonSummary>> {
                 created_at: r.get(11)?,
                 opened_at: r.get(12)?,
                 new_words: 0,
+                new_pct: 0,
                 known_pct: 0,
                 excerpt: String::new(),
                 position: r.get(14)?,
@@ -317,17 +333,16 @@ pub fn lessons_list(c: &Connection, lang: &str) -> Result<Vec<LessonSummary>> {
         let (mut s, text) = row?;
         let keys = text::word_keys(&text, &s.lang);
         let mut uniq = std::collections::HashSet::new();
-        let mut recognized = 0usize;
+        let mut distinct = std::collections::HashSet::new();
         for k in &keys {
-            match statuses.get(k) {
-                Some(_) => recognized += 1,
-                None => {
-                    uniq.insert(k.as_str());
-                }
+            distinct.insert(k.as_str());
+            if !statuses.contains_key(k) {
+                uniq.insert(k.as_str());
             }
         }
         s.new_words = uniq.len() as i64;
-        s.known_pct = if keys.is_empty() { 100 } else { (recognized * 100 / keys.len()) as i64 };
+        s.new_pct = new_share(uniq.len(), distinct.len());
+        s.known_pct = if distinct.is_empty() { 100 } else { 100 - s.new_pct };
         s.excerpt = text.chars().take(220).collect::<String>().replace('\n', " ");
         out.push(s);
     }
@@ -694,6 +709,70 @@ pub fn lesson_brief(c: &Connection, id: i64) -> Result<Option<(String, String)>>
 /// Mots connus (sans les expressions) : le chat s'adapte au niveau de l'apprenant.
 pub fn known_words(c: &Connection, lang: &str) -> Result<i64> {
     Ok(c.query_row("SELECT COUNT(*) FROM terms WHERE lang=?1 AND status=4 AND instr(term,' ')=0", [lang], |r| r.get(0))?)
+}
+
+/// Mots connus (sans les expressions), avec le lemme enregistré s'il y en a un.
+pub fn known_terms(c: &Connection, lang: &str) -> Result<Vec<(String, String)>> {
+    let mut st = c.prepare("SELECT term, lemma FROM terms WHERE lang=?1 AND status=4 AND instr(term,' ')=0")?;
+    let rows = st.query_map([lang], |r| Ok((r.get(0)?, r.get(1)?)))?;
+    Ok(rows.filter_map(|r| r.ok()).collect())
+}
+
+/// Mots et expressions en apprentissage (niveaux 1 à 3), les plus récents d'abord :
+/// un podcast sur mesure les fait revenir.
+pub fn learning_terms(c: &Connection, lang: &str, limit: usize) -> Result<Vec<String>> {
+    let mut st = c.prepare("SELECT term FROM terms WHERE lang=?1 AND status BETWEEN 1 AND 3 ORDER BY updated_at DESC LIMIT ?2")?;
+    let rows = st.query_map(params![lang, limit as i64], |r| r.get(0))?;
+    Ok(rows.filter_map(|r| r.ok()).collect())
+}
+
+/// Empreinte des mots connus d'une langue : change dès qu'un mot change de statut.
+pub fn known_stamp(c: &Connection, lang: &str) -> Result<String> {
+    let (n, at): (i64, i64) = c.query_row(
+        "SELECT COUNT(*), IFNULL(MAX(updated_at), 0) FROM terms WHERE lang=?1 AND status=4",
+        [lang],
+        |r| Ok((r.get(0)?, r.get(1)?)),
+    )?;
+    Ok(format!("{n}-{at}"))
+}
+
+#[derive(Serialize, Clone, Debug, PartialEq)]
+pub struct TextStats {
+    pub words: i64,
+    /// mots différents
+    pub unique: i64,
+    /// mots différents jamais vus
+    pub new_words: i64,
+    /// part (0-100) des mots différents encore nouveaux
+    pub new_pct: i64,
+    /// part (0-100) des occurrences reconnues (connues ou en apprentissage)
+    pub known_pct: i64,
+}
+
+/// Ce qu'un texte a de nouveau pour l'apprenant. Mots nouveaux comme la bibliothèque ;
+/// `known_pct` compte ici les occurrences : la part du texte que l'apprenant comprend déjà (aperçu).
+pub fn text_stats(c: &Connection, lang: &str, text: &str) -> Result<TextStats> {
+    let statuses = status_map(c, lang)?;
+    let keys = text::word_keys(text, lang);
+    let mut distinct = std::collections::HashSet::new();
+    let mut fresh = std::collections::HashSet::new();
+    let mut recognized = 0usize;
+    for k in &keys {
+        distinct.insert(k.as_str());
+        match statuses.get(k) {
+            Some(_) => recognized += 1,
+            None => {
+                fresh.insert(k.as_str());
+            }
+        }
+    }
+    Ok(TextStats {
+        words: keys.len() as i64,
+        unique: distinct.len() as i64,
+        new_words: fresh.len() as i64,
+        new_pct: new_share(fresh.len(), distinct.len()),
+        known_pct: if keys.is_empty() { 100 } else { (recognized * 100 / keys.len()) as i64 },
+    })
 }
 
 // ---------- termes (mots et expressions) ----------
@@ -1282,6 +1361,7 @@ mod tests {
         }).unwrap();
         let l = lessons_list(&c, "en").unwrap();
         assert_eq!(l[0].new_words, 5);
+        assert_eq!(l[0].new_pct, 100);
         term_set(&c, &TermUpdate { lang: "en".into(), term: "Cat".into(), status: 1, translation: Some("chat".into()), note: None, lemma: None, context: Some("The cat sat.".into()) }).unwrap();
         let added = terms_mark_known(&mut c, "en", &["the".into(), "sat".into(), "cat".into()], 6).unwrap();
         assert_eq!(added, 2);
@@ -1292,6 +1372,11 @@ mod tests {
         assert_eq!(s.periods.today.lingqs, 1);
         let l = lessons_list(&c, "en").unwrap();
         assert_eq!(l[0].new_words, 2);
+        assert_eq!(l[0].new_pct, 40);
+        // la jauge de la carte compte sur la même base : les mots différents
+        assert_eq!(l[0].known_pct, 60);
+        assert_eq!(new_share(1, 400), 1);
+        assert_eq!(new_share(399, 400), 99);
         let lesson = lesson_get(&c, id).unwrap();
         assert_eq!(lesson.word_count, 6);
         let (items, total) = terms_list(&c, &TermQuery { lang: "en".into(), filter: "learning".into(), search: Some("chat".into()), limit: 10, offset: 0 }).unwrap();

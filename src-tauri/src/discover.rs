@@ -1,15 +1,19 @@
-//! Découvrir : des leçons venues d'ailleurs. Une fois par jour, Lumen lit
-//! quelques sources choisies pour chaque langue (chaînes YouTube pour
-//! apprenants, podcasts, actualités faciles ou ordinaires, vulgarisation) et
-//! range leurs nouveautés par niveau, de A1 à C1. Rien n'est téléchargé avant
-//! que l'apprenant choisisse : la vidéo, l'épisode ou l'article devient une
-//! leçon par l'import habituel (`import_link`, ou l'article lu par Readability).
+//! Découvrir : des leçons venues d'ailleurs. Tout au long de la journée, Lumen
+//! lit les sources choisies pour chaque langue (chaînes YouTube pour apprenants,
+//! podcasts, actualités faciles ou ordinaires, vulgarisation, classements des
+//! chansons) et range leurs nouveautés par niveau, de A1 à C1. Chaque source a son
+//! rythme (les actualités toutes les 3 h, les chaînes deux fois par jour, les
+//! classements chaque jour) ; un flux qui n'a pas changé n'est pas relu (ETag).
+//! Rien n'est téléchargé avant que l'apprenant choisisse : la vidéo, l'épisode,
+//! la chanson ou l'article devient une leçon par l'import habituel.
 //!
 //! Le catalogue est écrit ici, source par source, avec sa fourchette de
 //! niveaux ; les titres des contenus pour apprenants l'affinent (« for
 //! Beginners (A1-A2) », « Intermediate »). Les éléments trouvés vivent dans
 //! `discover.db`, à part de la progression : un simple cache, ni sauvegardé ni
 //! compté comme un changement de la base (la sauvegarde suit `total_changes`).
+//! Ce qu'une source ne liste plus reste un moment (une leçon pour apprenants ne
+//! vieillit pas, une actualité si) : les rayons s'étoffent au fil des jours.
 
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
@@ -25,8 +29,8 @@ use serde_json::Value;
 use sha2::{Digest, Sha256};
 
 use crate::i18n::t;
-use crate::link;
 use crate::media::{self, ImportEvent};
+use crate::{langid, link, lyrics};
 
 // ---------- niveaux ----------
 
@@ -36,14 +40,16 @@ pub const B1: u8 = 3;
 pub const B2: u8 = 4;
 pub const C1: u8 = 5;
 
-/// Éléments gardés par source à chaque lecture (les plus récents).
-const PER_SOURCE: usize = 12;
-/// Une langue est relue une fois par jour (un peu moins de 24 h, pour suivre l'heure du lancement).
-const EVERY: i64 = 20 * 3600;
-/// Après une lecture où rien n'a répondu (hors ligne), nouvel essai au plus tôt…
-const RETRY: i64 = 50 * 60;
-/// Une actualisation demandée juste après une autre ne relit rien.
-const FRESH: i64 = 90;
+/// Éléments lus par source à chaque lecture (les plus récents).
+const PER_SOURCE: usize = 16;
+/// Première lecture d'une chaîne : de quoi garnir les rayons d'emblée.
+const FIRST_READ: usize = 30;
+/// Chansons lues dans un classement.
+const CHART_ITEMS: usize = 40;
+/// Paroles vérifiées au plus par classement et par lecture (LRCLIB est un service bénévole).
+const LYRICS_CHECKS: usize = 40;
+/// Une actualisation demandée juste après une autre ne relit pas les mêmes sources.
+const FRESH: i64 = 5 * 60;
 /// Vidéos gardées : ni bandes-annonces ni directs de plusieurs heures.
 const MIN_SECS: f64 = 90.0;
 const MAX_SECS: f64 = 2.0 * 3600.0;
@@ -55,6 +61,8 @@ pub enum Kind {
     YouTube,
     Podcast,
     Articles,
+    /// classement des chansons d'un pays (playlist de YouTube Music Charts)
+    Chart,
 }
 
 /// Rayon de la vue Découvrir.
@@ -66,6 +74,8 @@ pub enum Shelf {
     News,
     /// vulgarisation, documentaires, récits
     Culture,
+    /// chansons du moment, avec leurs paroles
+    Music,
 }
 
 impl Shelf {
@@ -74,6 +84,26 @@ impl Shelf {
             Shelf::Learn => "learn",
             Shelf::News => "news",
             Shelf::Culture => "culture",
+            Shelf::Music => "music",
+        }
+    }
+
+    /// Une source se relit au plus souvent… (les actualités vieillissent vite)
+    fn every(self) -> i64 {
+        match self {
+            Shelf::News => 3 * 3600,
+            Shelf::Music => 24 * 3600,
+            _ => 10 * 3600,
+        }
+    }
+
+    /// Ce qu'on garde : (jours, éléments au plus par source). Une leçon pour
+    /// apprenants ou un documentaire ne vieillit pas ; les actualités, si.
+    fn keep(self) -> (i64, usize) {
+        match self {
+            Shelf::News => (5, 24),
+            Shelf::Music => (60, 40),
+            _ => (150, 60),
         }
     }
 }
@@ -129,6 +159,12 @@ const fn pod(id: &'static str, lang: &'static str, name: &'static str, feed: &'s
     src(id, lang, name, Kind::Podcast, feed, lo, hi, shelf)
 }
 
+/// Classement des chansons d'un pays (YouTube Music Charts) : seules celles dont
+/// les paroles sont dans la langue étudiée sont proposées.
+const fn chart(id: &'static str, lang: &'static str, name: &'static str, playlist: &'static str) -> Source {
+    Source { id, lang, name, kind: Kind::Chart, url: playlist, lo: A2, hi: C1, shelf: Shelf::Music, grade: Grade::Source, page_text: false, via: None }
+}
+
 #[allow(clippy::too_many_arguments)]
 const fn art(id: &'static str, lang: &'static str, name: &'static str, feed: &'static str, lo: u8, hi: u8, shelf: Shelf) -> Source {
     src(id, lang, name, Kind::Articles, feed, lo, hi, shelf)
@@ -164,6 +200,11 @@ pub static SOURCES: &[Source] = &[
     pod("en-luke", "en", "Luke's English Podcast", "https://feeds.acast.com/public/shows/62b0ada25c7ea10012f541cb", B2, C1, Learn),
     art("en-levels", "en", "News in Levels", "https://www.newsinlevels.com/feed/", A1, B1, News).levels(),
     art("en-bbc-art", "en", "BBC News", "https://feeds.bbci.co.uk/news/world/rss.xml", C1, C1, News),
+    pod("en-lw-a1", "en", "LinguaWire · English A1", "https://feeds.acast.com/public/shows/6a203ce23d098b7011022fcb", A1, A1, News),
+    pod("en-lw-a2", "en", "LinguaWire · English A2", "https://feeds.acast.com/public/shows/6a29bcc43f4eb34728ccd5e7", A2, A2, News),
+    pod("en-lw-b1", "en", "LinguaWire · English B1+", "https://feeds.acast.com/public/shows/6a29bd4132e30dceaf22a1db", B1, B2, News),
+    pod("en-news-easy", "en", "News in Easy English", "https://anchor.fm/s/10409f880/podcast/rss", A2, B1, News),
+    pod("en-sbs-easy", "en", "SBS News in Easy English", "https://sbs-ondemand.streamguys1.com/sbs-news-easy-english/", A2, B1, News),
     // ----- espagnol -----
     yt("es-dreaming", "es", "Dreaming Spanish", "UCouyFdE9-Lrjo3M_2idKq1A", A1, B2, Learn),
     yt("es-easy", "es", "Easy Spanish", "UCAL4AMMMXKxHDu3FqZV6CbQ", A2, B1, Learn),
@@ -185,6 +226,13 @@ pub static SOURCES: &[Source] = &[
     ),
     art("es-bbc-art", "es", "BBC News Mundo", "https://www.bbc.com/mundo/index.xml", C1, C1, News),
     art("es-elpais", "es", "El País", "https://feeds.elpais.com/mrss-s/pages/ep/site/elpais.com/portada", C1, C1, News),
+    pod("es-lw-a2", "es", "LinguaWire · Spanish A2", "https://feeds.acast.com/public/shows/6a2aca9071d362181f88a91d", A2, A2, News),
+    pod("es-lw-b1", "es", "LinguaWire · Spanish B1+", "https://feeds.acast.com/public/shows/6a2ad0dc479dfe546fa3a017", B1, B2, News),
+    pod("es-nis", "es", "News in Slow Spanish Latino", "https://rss.libsyn.com/shows/45040/destinations/146316.xml", B1, B1, News),
+    pod("es-holaquepasa", "es", "Hola Qué Pasa", "https://holaquepasa.com/feed/podcast/", A2, B1, News),
+    pod("es-coffee", "es", "Coffee Break Spanish", "https://feeds.acast.com/public/shows/985e7c00-8945-4e0d-a4da-b93049180ce1", A1, B1, Learn).via("en"),
+    yt("es-quantum", "es", "QuantumFracture", "UCbdSYaPD-lr1kW27UJuk8Pw", C1, C1, Culture),
+    yt("es-academia", "es", "Academia Play", "UCv05qOuJ6Igbe-EyQibJgwQ", B2, C1, Culture),
     // ----- français -----
     yt("fr-dreaming", "fr", "Dreaming French", "UCG7lancLEOKXZ7lEEyzvwjA", A1, B1, Learn),
     yt("fr-easy", "fr", "Easy French", "UCoUWq2QawqdC3-nRXKk-JUw", A2, B1, Learn),
@@ -210,6 +258,14 @@ pub static SOURCES: &[Source] = &[
     art("fr-1j1a", "fr", "1jour1actu", "https://www.1jour1actu.com/feed/", B1, B1, News),
     art("fr-lemonde", "fr", "Le Monde", "https://www.lemonde.fr/rss/une.xml", C1, C1, News),
     art("fr-franceinfo", "fr", "franceinfo", "https://www.francetvinfo.fr/titres.rss", C1, C1, News),
+    pod("fr-lw-a1", "fr", "LinguaWire · French A1", "https://feeds.acast.com/public/shows/6a29a7413f4eb34728c4200e", A1, A1, News),
+    pod("fr-lw-a2", "fr", "LinguaWire · French A2", "https://feeds.acast.com/public/shows/6a2ae89472ff36e11a1955fc", A2, A2, News),
+    pod("fr-lw-b1", "fr", "LinguaWire · French B1+", "https://feeds.acast.com/public/shows/6a306ae5252d86e8466f67d0", B1, B2, News),
+    pod("fr-nis", "fr", "News in Slow French", "https://rss.libsyn.com/shows/30723/destinations/63713.xml", B1, B1, News),
+    pod("fr-coffee", "fr", "Coffee Break French", "https://feeds.acast.com/public/shows/47990e88-454b-4e3b-bf78-75a172c33184", A1, B1, Learn).via("en"),
+    yt("fr-notabene", "fr", "Nota Bene", "UCP46_MXP_WG_auH88FnfS1A", B2, C1, Culture),
+    yt("fr-science", "fr", "ScienceEtonnante", "UCaNlbnghtwlsGF-KzAFThqA", C1, C1, Culture),
+    yt("fr-franceinfo-yt", "fr", "franceinfo", "UCO6K_kkdP-lnSCiO3tPx7WA", C1, C1, News),
     // ----- allemand -----
     yt("de-ci", "de", "Comprehensible German", "UChyx8ibmFMTTe3aS_l_eaKA", A1, A2, Learn),
     yt("de-dw", "de", "Deutsch lernen mit der DW", "UCxUWIEL-USsiPak0Qy6_vVg", A1, B1, Learn),
@@ -233,6 +289,14 @@ pub static SOURCES: &[Source] = &[
     pod("de-easy-pod", "de", "Easy German", "https://proxyfeed.svmaudio.com/feeds/easygerman/feed.xml", B1, B2, Learn),
     art("de-tagesschau-art", "de", "tagesschau.de", "https://www.tagesschau.de/index~rss2.xml", C1, C1, News),
     art("de-dw-art", "de", "DW", "https://rss.dw.com/rdf/rss-de-all", B2, C1, News),
+    pod("de-news-easy", "de", "News In Easy German", "https://feeds.castos.com/x4pwm", A2, B1, News),
+    pod("de-lw-a1", "de", "LinguaWire · German A1", "https://feeds.acast.com/public/shows/6a2b43d5479dfe546fd07156", A1, A1, News),
+    pod("de-lw-a2", "de", "LinguaWire · German A2", "https://feeds.acast.com/public/shows/6a305c08cd02369494108cd9", A2, A2, News),
+    pod("de-lw-b1", "de", "LinguaWire · German B1+", "https://feeds.acast.com/public/shows/6a3068dca893cd95ca82b064", B1, B2, News),
+    pod("de-coffee", "de", "Coffee Break German", "https://feeds.acast.com/public/shows/0c3c53a1-180f-435a-9453-cec3883b4ada", A1, B1, Learn).via("en"),
+    yt("de-wissen", "de", "MrWissen2go", "UCZHpIFMfoJJ_1QxNGLJTzyA", C1, C1, Culture),
+    yt("de-terrax", "de", "Terra X History", "UCA3mpqm67CpJ13YfA8qAnow", B2, C1, Culture),
+    yt("de-simplicissimus", "de", "Simplicissimus", "UCKGMHVipEvuZudhHD05FOYA", B2, C1, Culture),
     // ----- italien -----
     yt("it-si", "it", "Italiano sì", "UCkQz9XgvKsE8V0CFpCXX6MQ", A1, B1, Learn),
     yt("it-easy", "it", "Easy Italian", "UChpDG_WQkf_2tgLUr9xTR0g", A2, B1, Learn),
@@ -244,6 +308,11 @@ pub static SOURCES: &[Source] = &[
     pod("it-podcast-pod", "it", "Podcast Italiano", "https://rss.buzzsprout.com/2413795.rss", B1, C1, Learn),
     pod("it-automatico-pod", "it", "Italiano Automatico", "https://italianoautomatico.podomatic.com/rss2.xml", B1, B2, Learn),
     art("it-ansa", "it", "ANSA", "https://www.ansa.it/sito/ansait_rss.xml", C1, C1, News),
+    pod("it-lw-a1", "it", "LinguaWire · Italian A1", "https://feeds.acast.com/public/shows/6a1eca9fd610a774037c9d02", A1, A1, News),
+    pod("it-nis", "it", "News in Slow Italian", "https://rss.libsyn.com/shows/41785/destinations/127311.xml", B1, B1, News),
+    pod("it-coffee", "it", "Coffee Break Italian", "https://feeds.acast.com/public/shows/86766c5f-1580-450f-9376-bd74b57fcfbb", A1, B1, Learn).via("en"),
+    yt("it-novalectio", "it", "Nova Lectio", "UCRCWJCFoZUvkkWzIqzfBy6g", C1, C1, Culture),
+    yt("it-barbero", "it", "Lezioni di Alessandro Barbero", "UCbViHPTqsPbHNZ095bJRxRg", C1, C1, Culture),
     // ----- portugais -----
     yt("pt-speaking", "pt", "Speaking Brazilian", "UCGs6EbIt75S4IMKPRUU0JNQ", A2, B1, Learn),
     yt("pt-practice", "pt", "Practice Portuguese", "UCRR8BOCXjSMU8O2TdzAFbww", A2, B1, Learn),
@@ -257,6 +326,9 @@ pub static SOURCES: &[Source] = &[
     pod("pt-speaking-pod", "pt", "Speaking Brazilian Podcast", "https://feed.podbean.com/speakingbrazilian/feed.xml", B1, B2, Learn),
     art("pt-bbc-art", "pt", "BBC News Brasil", "https://www.bbc.com/portuguese/index.xml", C1, C1, News),
     art("pt-g1", "pt", "g1", "https://g1.globo.com/rss/g1/", C1, C1, News),
+    pod("pt-lw-b1", "pt", "LinguaWire · Portuguese B1+", "https://feeds.acast.com/public/shows/6a71c167e9d2c023deb14860", B1, B2, News),
+    yt("pt-manual", "pt", "Manual do Mundo", "UCKHhA5hN2UohhFDfNXB_cvQ", B2, C1, Culture),
+    yt("pt-ciencia", "pt", "Ciência Todo Dia", "UCn9Erjy00mpnWeLnRqhsA1g", C1, C1, Culture),
     // ----- russe -----
     yt("ru-ci", "ru", "Comprehensible Russian", "UCDNbk-uX4D6nsthi8L03fng", A1, B1, Learn),
     yt("ru-easy", "ru", "Easy Russian", "UCxvt-g7JsPNnEn8tUtZZBBg", A2, B1, Learn),
@@ -268,6 +340,7 @@ pub static SOURCES: &[Source] = &[
     pod("ru-max-pod", "ru", "Russian With Max", "https://anchor.fm/s/6f65684/podcast/rss", B1, B2, Learn),
     art("ru-bbc-art", "ru", "Би-би-си", "https://www.bbc.com/russian/index.xml", C1, C1, News),
     art("ru-meduza", "ru", "Медуза", "https://meduza.io/rss/all", C1, C1, News),
+    yt("ru-arzamas", "ru", "Arzamas", "UCVgvnGSFU41kIhEc09aztEg", C1, C1, Culture),
     // ----- néerlandais -----
     yt("nl-dutchly", "nl", "Dutchly", "UC1UlyJen2hvHT6wt2X-dU1Q", A1, B1, Learn),
     yt("nl-easy", "nl", "Easy Dutch", "UC1x1Tso1WzjvU7GhcJBVQhg", A2, B1, Learn),
@@ -286,11 +359,13 @@ pub static SOURCES: &[Source] = &[
     pod("sv-simple", "sv", "Simple Swedish Podcast", "https://feed.podbean.com/arhus12/feed.xml", A2, B1, Learn),
     art("sv-8sidor", "sv", "8 Sidor", "https://8sidor.se/feed/", A2, B1, News),
     art("sv-svt", "sv", "SVT Nyheter", "https://www.svt.se/nyheter/rss.xml", C1, C1, News),
+    yt("sv-easyconv", "sv", "Easy Swedish Conversations", "UCCfH7zObgxSrjuKnxSJPZLg", A1, A2, Learn),
     // ----- danois -----
     yt("da-ci", "da", "Danish Comprehensible Input", "UCgDQm18b9DmEFJou0xLt6jg", A1, B1, Learn),
     yt("da-conv", "da", "Danish Conversations", "UCKWa0YHD4uXoG9_AXyB1CxQ", B1, B2, Learn),
     yt("da-essensen", "da", "P3 Essensen", "UC8tSbn8Q4rnsSQPY-1kzXuw", C1, C1, News),
     art("da-dr", "da", "DR Nyheder", "https://www.dr.dk/nyheder/service/feeds/allenyheder", C1, C1, News),
+    yt("da-simple", "da", "Simple Danish Podcast", "UCHb91IBGvNFHH-7T-5N51JA", A2, B1, Learn),
     // ----- finnois -----
     yt("fi-satu", "fi", "Helppoa suomea", "UCXtkoH6vbOihYtM54PMX6Eg", A2, B1, Learn),
     yt("fi-jarno", "fi", "Suomea Jarnon kanssa", "UCoDbIqejIAS9eZgYNzE2FCg", A2, B1, Learn),
@@ -302,6 +377,7 @@ pub static SOURCES: &[Source] = &[
     yt("et-lala", "et", "LÄLÄ", "UCcB-4wKX_hn9g6FnhGwluSA", A2, B1, Learn),
     yt("et-err", "et", "ERR", "UCYal7J64EbvvlygsfiFriIw", C1, C1, News),
     art("et-err-art", "et", "ERR uudised", "https://www.err.ee/rss", C1, C1, News),
+    pod("et-eli", "et", "Estonian with Eli", "https://media.rss.com/estonianwitheli/feed.xml", A2, B1, Learn).via("en"),
     // ----- letton -----
     yt("lv-lva", "lv", "Latviešu valodas aģentūra", "UC24idzqmWOwTIURmxnXXdsg", A2, B1, Learn),
     yt("lv-ltv", "lv", "LTV Ziņu dienests", "UCOSAAyJoybqsY5sZ76BaqFA", C1, C1, News),
@@ -311,6 +387,9 @@ pub static SOURCES: &[Source] = &[
     yt("lt-lrt", "lt", "LRT", "UC4KnMZaxcv1KZDAJsgHXcOA", C1, C1, News),
     art("lt-lrt-art", "lt", "LRT", "https://www.lrt.lt/?rss", C1, C1, News),
     art("lt-15min", "lt", "15min", "https://www.15min.lt/rss", C1, C1, News),
+    yt("lt-spoken", "lt", "Spoken Lithuanian", "UCHkglUChAgAcvocwpUHnoCQ", A1, A2, Learn).via("en"),
+    pod("lt-paulius-pod", "lt", "Lithuanian with Paulius", "https://anchor.fm/s/efb8393c/podcast/rss", A2, B1, Learn),
+    pod("lt-cup", "lt", "A Cup of Lithuanian", "https://anchor.fm/s/10cb2a090/podcast/rss", A2, B1, Learn),
     // ----- polonais -----
     yt("pl-lingoput", "pl", "LingoPut", "UCJgre6She3TQCVEXxk6kc8Q", A1, B1, Learn),
     yt("pl-easy", "pl", "Easy Polish", "UCPG9JpJITL7xETpVylMyrqA", A2, B1, Learn),
@@ -324,33 +403,47 @@ pub static SOURCES: &[Source] = &[
     yt("cs-easy", "cs", "Easy Czech", "UC-va43n42YE5sBAekuQX8qg", A2, B1, Learn),
     yt("cs-ct24", "cs", "ČT24", "UC0HQLHvU5_MMUJxLz6yl0GA", C1, C1, News),
     art("cs-irozhlas", "cs", "iROZHLAS", "https://www.irozhlas.cz/rss/irozhlas", C1, C1, News),
+    pod("cs-slowczech", "cs", "slowczech", "https://feeds.blubrry.com/feeds/slowczech.xml", A2, B1, Learn).via("en"),
+    pod("cs-michal", "cs", "Čeština s Michalem", "https://rss.buzzsprout.com/2566674.rss", A1, A2, Learn),
+    pod("cs-dread", "cs", "Slow Czech for beginners", "https://anchor.fm/s/11319b798/podcast/rss", A1, A2, Learn),
     // ----- slovaque -----
     yt("sk-stories", "sk", "Learn Slovak with Stories", "UCUPgmAhUy6NkMxzRTmks55w", A1, B1, Learn),
     yt("sk-aktuality", "sk", "Aktuality.sk", "UC2lCFhJIC4adt_oP1dwSOVg", C1, C1, News),
     art("sk-aktuality-art", "sk", "Aktuality.sk", "https://www.aktuality.sk/rss/", C1, C1, News),
+    yt("sk-filip", "sk", "Learn Slovak with Filip", "UCdVPMrIQmLFC-9yNrBS8Q_Q", A1, A2, Learn).via("en"),
     // ----- slovène -----
     yt("sl-dialog", "sl", "Slovenščina skozi dialog", "UCrUDbUp04kcr3rA1fwlP9dw", A2, B1, Learn),
     art("sl-rtv", "sl", "RTV SLO", "https://img.rtvslo.si/feeds/00.xml", C1, C1, News),
     // ----- croate -----
     yt("hr-hrt", "hr", "HRT vijesti", "UCSI1vb6CELskEFQpRceUj0g", C1, C1, News),
     art("hr-index", "hr", "Index.hr", "https://www.index.hr/rss", C1, C1, News),
+    pod("hr-lagani", "hr", "Lagani hrvatski · SBS", "https://sbs-ondemand.streamguys1.com/lagani-hrvatski/", A2, B1, Learn),
+    pod("hr-cakula", "hr", "Ćakula Café", "https://anchor.fm/s/10cf3f4c8/podcast/rss", A2, B1, Learn),
     // ----- hongrois -----
     yt("hu-heart", "hu", "Hungarian by Heart", "UCprH3w8hVn0aaAE6wGlXzUw", A2, B1, Learn),
     yt("hu-telex", "hu", "Telex", "UCM-1sd-cXSuCsfWp8QMY_OQ", C1, C1, News),
     art("hu-telex-art", "hu", "Telex", "https://telex.hu/rss", C1, C1, News),
+    yt("hu-easy", "hu", "Easy Hungarian", "UCA0lqVr47gnhS5_Bsghnbzg", A2, B1, Learn),
+    pod("hu-plain", "hu", "Plain Hungarian", "https://rss.buzzsprout.com/2138870.rss", B1, B2, Learn),
+    pod("hu-patrik", "hu", "Hungarian with Patrik", "https://media.rss.com/hungarianwithpatrik/feed.xml", A2, B1, Learn).via("en"),
     // ----- roumain -----
     yt("ro-digi", "ro", "Digi24", "UCbvKamSrJkwT6ed2BMMZXwg", C1, C1, News),
     art("ro-digi-art", "ro", "Digi24", "https://www.digi24.ro/rss", C1, C1, News),
+    pod("ro-acum", "ro", "Acum înțeleg!", "https://anchor.fm/s/d9aa65fc/podcast/rss", B1, B2, Learn),
+    pod("ro-weekly", "ro", "Romanian Weekly Podcast", "https://feed.podbean.com/romanianweekly/feed.xml", A2, B1, Learn),
     // ----- bulgare -----
     yt("bg-az", "bg", "Аз говоря български", "UC7R7TQDHdgPVnb0YxbPz1bA", A2, B1, Learn),
     yt("bg-bnt", "bg", "БНТ", "UC8jnuRbBzMICRHsC0qqVd9Q", C1, C1, News),
     art("bg-dnevnik", "bg", "Dnevnik", "https://www.dnevnik.bg/rss/", C1, C1, News),
+    yt("bg-bistra", "bg", "Learn Bulgarian with Bistra", "UCBTjB-a1MDXzbITxrCg86aQ", A1, A2, Learn).via("en"),
     // ----- ukrainien -----
     yt("uk-hanna", "uk", "Immersive Ukrainian with Hanna", "UCTJzD-YVoDGolkN7lQ4ZasQ", A2, B1, Learn),
     yt("uk-slow", "uk", "Slow Ukrainian", "UCqGyrVsLBUk2FcGWGfN14SQ", A2, B1, Learn),
     yt("uk-bbc", "uk", "BBC News Україна", "UCZctsW8Tpx8Tz9Ln4KUmR3g", C1, C1, News),
     yt("uk-suspilne", "uk", "Суспільне Новини", "UCPY6gj8G7dqwPxg9KwHrj5Q", C1, C1, News),
     art("uk-bbc-art", "uk", "BBC News Україна", "https://www.bbc.com/ukrainian/index.xml", C1, C1, News),
+    yt("uk-speak", "uk", "Speak Ukrainian", "UCSTYIEpLtn_dqY7mMBoF3kA", A1, B1, Learn).via("en"),
+    pod("uk-yevhen", "uk", "Slow Ukrainian with Yevhen", "https://anchor.fm/s/973b404c/podcast/rss", A2, B1, Learn),
     // ----- grec -----
     yt("el-ci", "el", "Greek Comprehensible Input", "UC99qhCTVJeZ_DCQkRLRm3Ew", A1, B1, Learn),
     yt("el-easy", "el", "Easy Greek", "UCoTlC0saIu6WNa5ttDDe6fQ", A2, B1, Learn),
@@ -382,12 +475,14 @@ pub static SOURCES: &[Source] = &[
     yt("id-simply", "id", "Simply Indonesian", "UCvJaMlS_vr28GX7jFcuJv8Q", A2, B1, Learn),
     yt("id-bbc", "id", "BBC News Indonesia", "UC46q-QSvoJz-1iSxPeuOqWA", C1, C1, News),
     art("id-bbc-art", "id", "BBC News Indonesia", "https://www.bbc.com/indonesia/index.xml", C1, C1, News),
+    pod("id-windah", "id", "Bahasa Indonesia Bersama Windah", "https://anchor.fm/s/520f510c/podcast/rss", B1, B2, Learn),
     // ----- vietnamien -----
     yt("vi-lilian", "vi", "Lilian Vietnamese", "UC4di2z7dbPra5xhp6BN7XwQ", A1, B1, Learn),
     yt("vi-understand", "vi", "Actually Understand Vietnamese", "UCiJJCAigdFRvR1CfH25IIbg", A2, B1, Learn),
     yt("vi-bbc", "vi", "BBC News Tiếng Việt", "UCpoNfKwZbecrcFpzm0ET4uw", C1, C1, News),
     art("vi-bbc-art", "vi", "BBC News Tiếng Việt", "https://www.bbc.com/vietnamese/index.xml", C1, C1, News),
     art("vi-vnexpress", "vi", "VnExpress", "https://vnexpress.net/rss/tin-moi-nhat.rss", C1, C1, News),
+    yt("vi-slow", "vi", "Slow Vietnamese", "UC3U2lryw5Hksu71fMwsGT9A", A2, B1, Learn),
     // ----- coréen -----
     yt("ko-ttmik", "ko", "Talk To Me In Korean", "UC5r3WHrX4Z7peSYpDlgktGw", A1, B1, Learn).via("en"),
     yt("ko-taewoong", "ko", "태웅쌤 Comprehensible Input Korean", "UC737T1zTN6MQ1uWorHVAXvA", A1, B1, Learn),
@@ -397,6 +492,7 @@ pub static SOURCES: &[Source] = &[
     yt("ko-bbc", "ko", "BBC News 코리아", "UCIDOGTbwTBHZ5YoR9Xjcp-w", C1, C1, News),
     art("ko-bbc-art", "ko", "BBC News 코리아", "https://feeds.bbci.co.uk/korean/rss.xml", C1, C1, News),
     art("ko-yonhap", "ko", "연합뉴스", "https://www.yna.co.kr/rss/news.xml", C1, C1, News),
+    yt("ko-easy", "ko", "Easy Korean!", "UCHxNPAnqTB4ohG5xl6MyuXg", A1, A2, Learn),
     // ----- japonais -----
     yt("ja-jikan", "ja", "にほんごのじかん", "UCdZHET-9_Comx6UaVTSETiQ", A1, B1, Learn),
     yt("ja-teppei", "ja", "Teppei", "UCH88l3_ltyJm67gAFzDFNRw", A2, B1, Learn),
@@ -406,6 +502,37 @@ pub static SOURCES: &[Source] = &[
     pod("ja-teppei-pod", "ja", "Nihongo con Teppei", "http://nihongoconteppei.com/feed/podcast", A2, B1, Learn),
     art("ja-nhk", "ja", "NHK ニュース", "https://news.web.nhk/n-data/conf/na/rss/cat0.xml", C1, C1, News),
     art("ja-bbc", "ja", "BBC News Japan", "https://feeds.bbci.co.uk/japanese/rss.xml", C1, C1, News),
+    yt("ja-easy", "ja", "Easy Japanese", "UCBet5Paucgz8feYQhVd0Y3A", B1, B2, Learn),
+    pod("ja-news-easy", "ja", "News In Easy Japanese", "https://feeds.castos.com/241n8", A2, B1, News),
+    // ----- musique : classements de YouTube Music Charts (pays où ils existent) -----
+    chart("en-chart-us", "en", "Top 100 · États-Unis", "PL4fGSI1pDJn6O1LS0XSdF3RyO0Rq_LDeI"),
+    chart("en-chart-uk", "en", "Top 100 · Royaume-Uni", "PL4fGSI1pDJn6_f5P3MnzXg9l3GDfnSlXa"),
+    chart("es-chart-es", "es", "Top 100 · Espagne", "PL4fGSI1pDJn6sMPCoD7PdSlEgyUylgxuT"),
+    chart("es-chart-mx", "es", "Top 100 · Mexique", "PL4fGSI1pDJn6fko1AmNa_pdGPZr5ROFvd"),
+    chart("fr-chart", "fr", "Top 100 · France", "PL4fGSI1pDJn7bK3y1Hx-qpHBqfr6cesNs"),
+    chart("de-chart", "de", "Top 100 · Allemagne", "PL4fGSI1pDJn6KpOXlp0MH8qA9tngXaUJ-"),
+    chart("it-chart", "it", "Top 100 · Italie", "PL4fGSI1pDJn5JiDypHxveEplQrd7XQMlX"),
+    chart("pt-chart-br", "pt", "Top 100 · Brésil", "PL4fGSI1pDJn7rGBE8kEC0CqTa1nMh9AKB"),
+    chart("pt-chart-pt", "pt", "Top 100 · Portugal", "PL4fGSI1pDJn7H0X0bZN4C-I6YeldOvPku"),
+    chart("ru-chart", "ru", "Top 100 · Russie", "PL4fGSI1pDJn5C8dBiYt0BTREyCHbZ47qc"),
+    chart("nl-chart", "nl", "Top 100 · Pays-Bas", "PL4fGSI1pDJn7CXu1B1U0lYQ0qfPB9TVfa"),
+    chart("sv-chart", "sv", "Top 100 · Suède", "PL4fGSI1pDJn7S_JFSuBHol2RH9WphaqzS"),
+    chart("da-chart", "da", "Top 100 · Danemark", "PL4fGSI1pDJn51jFsgXEIR7WdKBychJiMU"),
+    chart("fi-chart", "fi", "Top 100 · Finlande", "PL4fGSI1pDJn4T5TECl_90hfJsPUu1yi2y"),
+    chart("et-chart", "et", "Top 100 · Estonie", "PL4fGSI1pDJn4fpNbyI8YHStVF-wyzHJtd"),
+    chart("pl-chart", "pl", "Top 100 · Pologne", "PL4fGSI1pDJn68fmsRw9f6g-NzU5UA45v1"),
+    chart("cs-chart", "cs", "Top 100 · Tchéquie", "PL4fGSI1pDJn5wV1AgglmIN_8okwTkz9WT"),
+    chart("hu-chart", "hu", "Top 100 · Hongrie", "PL4fGSI1pDJn6K3QY1nHyhOGQqNCBGbMKi"),
+    chart("ro-chart", "ro", "Top 100 · Roumanie", "PL4fGSI1pDJn5G2T6hrqwSS7ajUA7y4S5l"),
+    chart("uk-chart", "uk", "Top 100 · Ukraine", "PL4fGSI1pDJn4E_HoW5HB-w5vFPkYfo3dB"),
+    chart("tr-chart", "tr", "Top 100 · Turquie", "PL4fGSI1pDJn5tdVDtIAZArERm_vv4uFCR"),
+    chart("ar-chart-eg", "ar", "Top 100 · Égypte", "PL4fGSI1pDJn510j-1L8bMgKTyeRwPrXWY"),
+    chart("ar-chart-sa", "ar", "Top 100 · Arabie saoudite", "PL4fGSI1pDJn7xNK-XdqvCsqa7I8Nx3IyW"),
+    chart("hi-chart", "hi", "Top 100 · Inde", "PL4fGSI1pDJn4pTWyM3t61lOyZ6_4jcNOw"),
+    chart("id-chart", "id", "Top 100 · Indonésie", "PL4fGSI1pDJn5QPpj0R4vVgRWk8sSq549G"),
+    chart("vi-chart", "vi", "Top 100 · Viêt Nam", "PL4fGSI1pDJn4bRKr6tjRWaGlqRg_zY_is"),
+    chart("ko-chart", "ko", "Top 100 · Corée du Sud", "PL4fGSI1pDJn5S09aId3dUGp40ygUqmPGc"),
+    chart("ja-chart", "ja", "Top 100 · Japon", "PL4fGSI1pDJn4-UIb6RKHdxam-oAUULIGB"),
 ];
 
 /// Les sources d'une langue pour un apprenant dont l'interface est en `ui`.
@@ -486,7 +613,7 @@ const ADVANCED: &[&str] = &[
 const SLOW: &[&str] = &["slow ", "lent ", "langsam", "lento", "lentamente", "despacio", "медленн", "powoli", "yavaş"];
 
 /// Niveau qu'un titre annonce : « (A1-A2) », « A0–A1 », « for Beginners », « Intermediate ».
-fn title_levels(title: &str) -> Option<(u8, u8)> {
+pub(crate) fn title_levels(title: &str) -> Option<(u8, u8)> {
     let low = title.to_lowercase();
     // niveaux du CECR écrits tels quels
     let ch: Vec<char> = low.chars().collect();
@@ -580,10 +707,21 @@ pub(crate) struct Found {
     /// secondes depuis 1970, 0 si inconnue
     published: i64,
     video: bool,
+    /// chaîne YouTube (pour lire l'artiste d'un clip)
+    channel: String,
+    /// chanson : artiste et titre (paroles vérifiées)
+    artist: String,
+    track: String,
 }
 
 /// Dernières vidéos d'une chaîne, telles que yt-dlp les liste (`media::yt_latest`).
-fn youtube_entries(v: &Value) -> Vec<Found> {
+fn youtube_entries(v: &Value, max: usize) -> Vec<Found> {
+    youtube_all(v).into_iter().filter(|f| (MIN_SECS..=MAX_SECS).contains(&f.duration)).take(max).collect()
+}
+
+/// Toutes les vidéos d'une liste, durée connue ou non (titres en danois, finnois,
+/// indonésien : yt-dlp lit mal les durées écrites à la façon du pays).
+fn youtube_all(v: &Value) -> Vec<Found> {
     let Some(entries) = v.get("entries").and_then(Value::as_array) else { return Vec::new() };
     entries
         .iter()
@@ -598,9 +736,6 @@ fn youtube_entries(v: &Value) -> Vec<Found> {
                 return None;
             }
             let duration = e.get("duration").and_then(Value::as_f64).unwrap_or(0.0);
-            if !(MIN_SECS..=MAX_SECS).contains(&duration) {
-                return None;
-            }
             let published = ["timestamp", "release_timestamp"].iter().find_map(|k| e.get(*k).and_then(Value::as_i64)).unwrap_or(0);
             // la plus grande miniature proposée, sinon celle qui existe toujours
             let image = e
@@ -615,6 +750,7 @@ fn youtube_entries(v: &Value) -> Vec<Found> {
                 .map(str::to_string)
                 .unwrap_or_else(|| format!("https://i.ytimg.com/vi/{id}/hqdefault.jpg"));
             let url = format!("https://www.youtube.com/watch?v={id}");
+            let channel = ["channel", "uploader"].iter().find_map(|k| e.get(*k).and_then(Value::as_str)).unwrap_or("").to_string();
             Some(Found {
                 key: id.into(),
                 title: title.into(),
@@ -624,10 +760,10 @@ fn youtube_entries(v: &Value) -> Vec<Found> {
                 duration,
                 published,
                 video: true,
+                channel,
                 ..Default::default()
             })
         })
-        .take(PER_SOURCE)
         .collect()
 }
 
@@ -796,6 +932,7 @@ pub(crate) fn parse_feed(xml: &str, feed_url: &str, podcast: bool) -> Vec<Found>
             duration: link::tag_text(block, "itunes:duration").map_or(0.0, |d| link::parse_duration(&d)),
             published,
             video,
+            ..Default::default()
         });
         if out.len() >= PER_SOURCE * 3 {
             break;
@@ -807,56 +944,180 @@ pub(crate) fn parse_feed(xml: &str, feed_url: &str, podcast: bool) -> Vec<Found>
     out
 }
 
-async fn channel(data_dir: &Path, ytdlp: &Path, url: &str, lang: Option<&str>) -> Result<Value> {
-    tokio::time::timeout(Duration::from_secs(60), media::yt_latest(data_dir, ytdlp, url, PER_SOURCE + 6, lang))
+async fn channel(data_dir: &Path, ytdlp: &Path, url: &str, max: usize, lang: Option<&str>) -> Result<Value> {
+    tokio::time::timeout(Duration::from_secs(60), media::yt_latest(data_dir, ytdlp, url, max + 6, lang))
         .await
         .map_err(|_| anyhow!(t("la chaîne ne répond pas", "the channel doesn't answer")))?
 }
 
+/// Ce qu'a donné la lecture d'une source.
+pub(crate) enum Fetched {
+    /// éléments, et de quoi demander au prochain passage « seulement si ça a changé » (ETag, date)
+    Items(Vec<Found>, Option<(String, String)>),
+    /// le flux n'a pas changé depuis la dernière lecture
+    Unchanged,
+}
+
+/// Où en est la lecture d'une source.
+#[derive(Debug, Default, Clone, PartialEq)]
+pub(crate) struct SrcState {
+    /// dernier essai, dernière réussite (secondes)
+    checked: i64,
+    ok: i64,
+    /// échecs d'affilée
+    fails: i64,
+    etag: String,
+    modified: String,
+}
+
+/// La source est à relire : son rythme est passé (plus tard après des échecs),
+/// ou l'apprenant l'a demandé et elle n'a pas été lue depuis quelques minutes.
+fn is_due(src: &Source, st: &SrcState, now: i64, force: bool) -> bool {
+    if force {
+        return now - st.checked >= FRESH;
+    }
+    let wait = if st.fails > 0 { (45 * 60 * (1i64 << (st.fails - 1).min(4))).min(12 * 3600) } else { src.shelf.every() };
+    now - st.checked >= wait
+}
+
+/// Flux RSS ou Atom, lu seulement s'il a changé depuis la dernière fois.
+async fn feed(client: &reqwest::Client, src: &Source, prev: &SrcState) -> Result<Fetched> {
+    use reqwest::header::{ETAG, IF_MODIFIED_SINCE, IF_NONE_MATCH, LAST_MODIFIED};
+    let mut req = client.get(src.url);
+    if !prev.etag.is_empty() {
+        req = req.header(IF_NONE_MATCH, &prev.etag);
+    }
+    if !prev.modified.is_empty() {
+        req = req.header(IF_MODIFIED_SINCE, &prev.modified);
+    }
+    let slow = || anyhow!(t("le flux ne répond pas", "the feed doesn't answer"));
+    let resp = tokio::time::timeout(Duration::from_secs(40), req.send()).await.map_err(|_| slow())??;
+    if resp.status() == reqwest::StatusCode::NOT_MODIFIED {
+        return Ok(Fetched::Unchanged);
+    }
+    if !resp.status().is_success() {
+        return Err(anyhow!(crate::tr!("le flux a répondu {}", "the feed answered {}", resp.status())));
+    }
+    let header = |h| resp.headers().get(h).and_then(|v: &reqwest::header::HeaderValue| v.to_str().ok()).unwrap_or("").to_string();
+    let tags = (header(ETAG), header(LAST_MODIFIED));
+    let bytes = tokio::time::timeout(Duration::from_secs(40), resp.bytes()).await.map_err(|_| slow())??;
+    let xml = String::from_utf8_lossy(&bytes);
+    Ok(Fetched::Items(parse_feed(&xml, src.url, src.kind == Kind::Podcast), Some(tags)))
+}
+
+/// Les chansons d'un classement dont les paroles existent et sont dans la langue
+/// de la source (un classement italien compte aussi des chansons espagnoles).
+async fn chart_songs(data_dir: &Path, ytdlp: &Path, store: &Store, src: &Source) -> Result<Vec<Found>> {
+    let url = format!("https://www.youtube.com/playlist?list={}", src.url);
+    let v = tokio::time::timeout(Duration::from_secs(60), media::yt_flat(data_dir, ytdlp, &url, 1, CHART_ITEMS, None))
+        .await
+        .map_err(|_| anyhow!(t("le classement ne répond pas", "the chart doesn't answer")))??;
+    let entries = youtube_entries(&v, CHART_ITEMS);
+    if entries.is_empty() {
+        return Err(anyhow!(t("classement vide", "empty chart")));
+    }
+    let mut todo = Vec::new();
+    for f in &entries {
+        if store.song(&f.key).is_none() {
+            todo.push(f.clone());
+        }
+    }
+    let lc = lyrics::client()?;
+    let lang = src.lang;
+    let checked: Vec<(String, bool, String, String)> = stream::iter(todo.into_iter().take(LYRICS_CHECKS))
+        .map(|f| {
+            let lc = lc.clone();
+            async move {
+                let (artist, track) = lyrics::split_title(&f.title, &f.channel);
+                let found = tokio::time::timeout(Duration::from_secs(15), lyrics::find(&lc, &artist, &track, "", f.duration)).await.ok().flatten();
+                let ok = found.is_some_and(|l| !l.is_empty() && lyrics::word_count(&l, lang) >= 30 && langid::matches(&l.text(), lang) == Some(true));
+                (f.key, ok, artist, track)
+            }
+        })
+        .buffered(4)
+        .collect()
+        .await;
+    for (video, ok, artist, track) in &checked {
+        store.set_song(video, *ok, artist, track)?;
+    }
+    // l'ordre du classement
+    Ok(entries
+        .into_iter()
+        .filter_map(|mut f| {
+            let (ok, artist, track) = store.song(&f.key)?;
+            if !ok {
+                return None;
+            }
+            f.artist = artist;
+            f.track = track;
+            Some(f)
+        })
+        .collect())
+}
+
 /// Ce qu'une source propose aujourd'hui. `first` : première lecture de cette source.
-async fn fetch(data_dir: &Path, ytdlp: Option<&Path>, client: &reqwest::Client, src: &Source, first: bool) -> Result<Vec<Found>> {
+async fn fetch(data_dir: &Path, ytdlp: Option<&Path>, client: &reqwest::Client, store: &Store, src: &Source, prev: &SrcState, first: bool) -> Result<Fetched> {
     match src.kind {
         Kind::YouTube => {
             let ytdlp = ytdlp.ok_or_else(|| anyhow!(t("composants vidéo indisponibles", "video components unavailable")))?;
             let url = format!("https://www.youtube.com/channel/{}/videos", src.url);
             let english = src.lang == "en";
-            let mut found = youtube_entries(&channel(data_dir, ytdlp, &url, (!english).then_some(src.lang)).await?);
-            // les titres dans la langue de la chaîne n'ont pas de date : à la première lecture, une
-            // seconde liste (en anglais) les date ; ensuite, une vidéo nouvelle date du jour où Lumen la voit
-            if first && !english && !found.is_empty() {
-                if let Ok(v) = channel(data_dir, ytdlp, &url, None).await {
-                    let dates: HashMap<String, i64> = youtube_entries(&v).into_iter().map(|f| (f.key, f.published)).collect();
+            let max = if first { FIRST_READ } else { PER_SOURCE };
+            let mut found = youtube_all(&channel(data_dir, ytdlp, &url, max, (!english).then_some(src.lang)).await?);
+            // les titres dans la langue de la chaîne n'ont pas de date (et parfois pas de durée lisible) :
+            // une seconde liste, en anglais, les complète à la première lecture ou s'il manque des durées ;
+            // ensuite, une vidéo nouvelle date du jour où Lumen la voit
+            let unknown = found.iter().filter(|f| !(MIN_SECS..=MAX_SECS).contains(&f.duration)).count();
+            if !english && !found.is_empty() && (first || unknown * 3 > found.len()) {
+                if let Ok(v) = channel(data_dir, ytdlp, &url, max, None).await {
+                    let known: HashMap<String, (f64, i64)> = youtube_all(&v).into_iter().map(|f| (f.key, (f.duration, f.published))).collect();
                     for f in &mut found {
-                        f.published = dates.get(&f.key).copied().unwrap_or(0);
+                        if let Some((d, p)) = known.get(&f.key) {
+                            if *d > 0.0 {
+                                f.duration = *d;
+                            }
+                            if first {
+                                f.published = *p;
+                            }
+                        }
                     }
                 }
             }
-            Ok(found)
+            found.retain(|f| (MIN_SECS..=MAX_SECS).contains(&f.duration));
+            found.truncate(max);
+            Ok(Fetched::Items(found, None))
         }
-        Kind::Podcast | Kind::Articles => {
-            let xml = tokio::time::timeout(Duration::from_secs(40), link::get_text(client, src.url))
-                .await
-                .map_err(|_| anyhow!(t("le flux ne répond pas", "the feed doesn't answer")))??;
-            Ok(parse_feed(&xml, src.url, src.kind == Kind::Podcast))
+        Kind::Chart => {
+            let ytdlp = ytdlp.ok_or_else(|| anyhow!(t("composants vidéo indisponibles", "video components unavailable")))?;
+            Ok(Fetched::Items(chart_songs(data_dir, ytdlp, store, src).await?, None))
         }
+        Kind::Podcast | Kind::Articles => feed(client, src, prev).await,
     }
+}
+
+/// YouTube refuse un moment les rafales : deux lectures à la fois au plus, toutes langues confondues.
+fn youtube_gate() -> &'static tokio::sync::Semaphore {
+    static GATE: std::sync::OnceLock<tokio::sync::Semaphore> = std::sync::OnceLock::new();
+    GATE.get_or_init(|| tokio::sync::Semaphore::new(2))
 }
 
 async fn fetch_one(
     data_dir: &Path,
     ytdlp: Option<&Path>,
     client: &reqwest::Client,
-    youtube: &tokio::sync::Semaphore,
+    store: &Store,
     src: &'static Source,
-    first: bool,
-) -> (&'static Source, Result<Vec<Found>>) {
-    if src.kind != Kind::YouTube {
-        return (src, fetch(data_dir, ytdlp, client, src, first).await);
+    prev: SrcState,
+) -> (&'static Source, SrcState, Result<Fetched>) {
+    let first = !store.has(src.id);
+    if !matches!(src.kind, Kind::YouTube | Kind::Chart) {
+        let r = fetch(data_dir, ytdlp, client, store, src, &prev, first).await;
+        return (src, prev, r);
     }
-    let _slot = youtube.acquire().await;
-    let r = fetch(data_dir, ytdlp, client, src, first).await;
-    tokio::time::sleep(Duration::from_millis(500)).await;
-    (src, r)
+    let _slot = youtube_gate().acquire().await;
+    let r = fetch(data_dir, ytdlp, client, store, src, &prev, first).await;
+    tokio::time::sleep(Duration::from_millis(400)).await;
+    (src, prev, r)
 }
 
 // ---------- cache ----------
@@ -867,7 +1128,7 @@ pub struct Item {
     pub id: String,
     pub source: String,
     pub source_name: String,
-    /// "learn", "news" ou "culture"
+    /// "learn", "news", "culture" ou "music"
     pub shelf: String,
     /// "video", "audio" ou "text"
     pub kind: String,
@@ -889,6 +1150,9 @@ pub struct Item {
     pub fetched_at: i64,
     /// leçon déjà créée à partir de cet élément
     pub lesson_id: Option<i64>,
+    /// chanson : artiste et titre (ses paroles existent, dans la langue étudiée)
+    pub artist: String,
+    pub track: String,
 }
 
 #[derive(Serialize, Debug)]
@@ -908,14 +1172,14 @@ pub struct Report {
     pub sources: usize,
     /// sources qui n'ont pas répondu
     pub failed: Vec<String>,
-    /// une lecture venait de se faire : rien n'a été relu
+    /// toutes les sources venaient d'être lues : rien n'a été relu
     pub skipped: bool,
 }
 
 pub struct Store {
     conn: Mutex<Connection>,
-    /// une lecture à la fois, toutes langues confondues (YouTube n'aime pas les rafales)
-    gate: tokio::sync::Mutex<()>,
+    /// une lecture à la fois par langue (une demande attend celle qui tourne)
+    turns: Mutex<HashMap<String, std::sync::Arc<tokio::sync::Mutex<()>>>>,
     /// langues en cours de lecture (ou qui attendent leur tour)
     running: Mutex<HashMap<String, usize>>,
 }
@@ -943,7 +1207,36 @@ const SCHEMA: &str = r#"
     );
     CREATE INDEX IF NOT EXISTS items_lang ON items(lang, source);
     CREATE TABLE IF NOT EXISTS runs(lang TEXT PRIMARY KEY, at INTEGER NOT NULL DEFAULT 0, tried INTEGER NOT NULL DEFAULT 0);
+    CREATE TABLE IF NOT EXISTS sources(
+        id TEXT PRIMARY KEY,
+        checked INTEGER NOT NULL DEFAULT 0,
+        ok INTEGER NOT NULL DEFAULT 0,
+        fails INTEGER NOT NULL DEFAULT 0,
+        etag TEXT NOT NULL DEFAULT '',
+        modified TEXT NOT NULL DEFAULT ''
+    );
+    CREATE TABLE IF NOT EXISTS songs(
+        video TEXT PRIMARY KEY,
+        ok INTEGER NOT NULL,
+        artist TEXT NOT NULL DEFAULT '',
+        track TEXT NOT NULL DEFAULT '',
+        checked INTEGER NOT NULL
+    );
 "#;
+
+/// Colonnes ajoutées depuis la première version du cache.
+fn upgrade(c: &Connection) -> Result<()> {
+    for (col, decl) in [("artist", "TEXT NOT NULL DEFAULT ''"), ("track", "TEXT NOT NULL DEFAULT ''")] {
+        let has = c.query_row("SELECT 1 FROM pragma_table_info('items') WHERE name=?1", [col], |_| Ok(())).optional()?.is_some();
+        if !has {
+            c.execute_batch(&format!("ALTER TABLE items ADD COLUMN {col} {decl}"))?;
+        }
+    }
+    Ok(())
+}
+
+/// Une chanson sans paroles trouvées est revérifiée au bout de deux semaines.
+const SONG_RETRY: i64 = 14 * 86400;
 
 /// Clé d'un élément : sa source et son identifiant dans la source.
 fn item_id(source: &str, key: &str) -> String {
@@ -1012,16 +1305,78 @@ impl Store {
             .or_else(|_| {
                 let c = Connection::open_in_memory()?;
                 c.execute_batch(SCHEMA)?;
+                upgrade(&c)?;
                 Ok::<_, anyhow::Error>(c)
             })
             .expect("base en mémoire");
-        Store { conn: Mutex::new(conn), gate: tokio::sync::Mutex::new(()), running: Mutex::new(HashMap::new()) }
+        Store { conn: Mutex::new(conn), turns: Mutex::new(HashMap::new()), running: Mutex::new(HashMap::new()) }
     }
 
     fn connect(path: &Path) -> Result<Connection> {
         let c = Connection::open(path)?;
         c.execute_batch(SCHEMA)?;
+        upgrade(&c)?;
         Ok(c)
+    }
+
+    fn turn(&self, lang: &str) -> std::sync::Arc<tokio::sync::Mutex<()>> {
+        self.turns.lock().entry(lang.to_string()).or_default().clone()
+    }
+
+    fn src_state(&self, id: &str) -> SrcState {
+        self.conn
+            .lock()
+            .query_row("SELECT checked, ok, fails, etag, modified FROM sources WHERE id=?1", [id], |r| {
+                Ok(SrcState { checked: r.get(0)?, ok: r.get(1)?, fails: r.get(2)?, etag: r.get(3)?, modified: r.get(4)? })
+            })
+            .optional()
+            .ok()
+            .flatten()
+            .unwrap_or_default()
+    }
+
+    fn set_state(&self, id: &str, st: &SrcState) -> Result<()> {
+        self.conn.lock().execute(
+            "INSERT INTO sources(id, checked, ok, fails, etag, modified) VALUES(?1,?2,?3,?4,?5,?6)
+             ON CONFLICT(id) DO UPDATE SET checked=excluded.checked, ok=excluded.ok, fails=excluded.fails, etag=excluded.etag, modified=excluded.modified",
+            params![id, st.checked, st.ok, st.fails, st.etag, st.modified],
+        )?;
+        Ok(())
+    }
+
+    /// Paroles d'un clip déjà vérifiées : (dans la bonne langue, artiste, titre).
+    fn song(&self, video: &str) -> Option<(bool, String, String)> {
+        let row: Option<(bool, String, String, i64)> = self
+            .conn
+            .lock()
+            .query_row("SELECT ok, artist, track, checked FROM songs WHERE video=?1", [video], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))
+            .optional()
+            .ok()
+            .flatten();
+        let (ok, artist, track, checked) = row?;
+        (ok || now() - checked < SONG_RETRY).then_some((ok, artist, track))
+    }
+
+    fn set_song(&self, video: &str, ok: bool, artist: &str, track: &str) -> Result<()> {
+        self.conn.lock().execute(
+            "INSERT INTO songs(video, ok, artist, track, checked) VALUES(?1,?2,?3,?4,?5)
+             ON CONFLICT(video) DO UPDATE SET ok=excluded.ok, artist=excluded.artist, track=excluded.track, checked=excluded.checked",
+            params![video, ok, artist, track, now()],
+        )?;
+        Ok(())
+    }
+
+    /// Dernière lecture réussie d'une des sources de la langue (0 : jamais).
+    fn refreshed_at(&self, lang: &str, ui: &str) -> i64 {
+        let ids: Vec<&str> = sources(lang, ui).map(|s| s.id).collect();
+        let c = self.conn.lock();
+        let best = ids
+            .iter()
+            .filter_map(|id| c.query_row("SELECT ok FROM sources WHERE id=?1", [id], |r| r.get::<_, i64>(0)).optional().ok().flatten())
+            .max()
+            .unwrap_or(0);
+        drop(c);
+        best.max(self.run(lang).0)
     }
 
     /// La source a déjà été lue (ses éléments sont en cache).
@@ -1052,24 +1407,24 @@ impl Store {
         Ok(())
     }
 
-    /// La langue attend sa lecture du jour.
-    pub fn due(&self, lang: &str) -> bool {
-        let (at, tried) = self.run(lang);
+    /// Une source au moins de la langue est à relire (lecture d'arrière-plan).
+    pub fn due(&self, lang: &str, ui: &str) -> bool {
         let n = now();
-        n - at >= EVERY && n - tried >= RETRY
+        sources(lang, ui).any(|s| is_due(s, &self.src_state(s.id), n, false))
     }
 
-    /// Range ce qu'une source propose aujourd'hui ; ce qu'elle ne propose plus
-    /// s'en va. Renvoie le nombre d'éléments nouveaux.
+    /// Range ce qu'une source propose aujourd'hui. Ce qu'elle ne propose plus reste
+    /// un moment (une leçon pour apprenants ne vieillit pas, une actualité si),
+    /// dans la limite d'un nombre d'éléments par source. Renvoie le nombre d'éléments nouveaux.
     fn save(&self, src: &Source, found: &[Found], at: i64) -> Result<usize> {
         let mut c = self.conn.lock();
         let tx = c.transaction()?;
         let known_source = tx.query_row("SELECT 1 FROM items WHERE source=?1 LIMIT 1", [src.id], |_| Ok(())).optional()?.is_some();
-        let mut keep = HashSet::new();
+        let mut listed = HashSet::new();
         let mut added = 0;
         for (rank, f) in found.iter().enumerate() {
             let id = item_id(src.id, &f.key);
-            if !keep.insert(id.clone()) {
+            if !listed.insert(id.clone()) {
                 continue;
             }
             let known = tx.query_row("SELECT 1 FROM items WHERE id=?1", [&id], |_| Ok(())).optional()?.is_some();
@@ -1077,32 +1432,51 @@ impl Store {
                 added += 1;
             }
             let (lo, hi) = grade(src, &f.title);
-            // sans date dans la source : un élément apparu depuis la dernière lecture (quotidienne) date d'aujourd'hui
+            // sans date dans la source : un élément apparu depuis la dernière lecture date d'aujourd'hui
             let published = if f.published == 0 && known_source && !known { at } else { f.published };
             let kind = match src.kind {
-                Kind::YouTube => "video",
+                Kind::YouTube | Kind::Chart => "video",
                 Kind::Podcast if f.video => "video",
                 Kind::Podcast => "audio",
                 Kind::Articles => "text",
             };
             // une date approximative (« il y a 3 jours ») est plus juste à la première lecture : on la garde
             tx.execute(
-                "INSERT INTO items(id,lang,source,kind,title,url,page,image,summary,duration,published,lo,hi,rank,fetched_at)
-                 VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15)
+                "INSERT INTO items(id,lang,source,kind,title,url,page,image,summary,duration,published,lo,hi,rank,fetched_at,artist,track)
+                 VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17)
                  ON CONFLICT(id) DO UPDATE SET kind=excluded.kind, title=excluded.title, url=excluded.url, page=excluded.page,
                    image=excluded.image, summary=excluded.summary, duration=excluded.duration,
                    published=CASE WHEN items.published > 0 THEN items.published ELSE excluded.published END,
-                   lo=excluded.lo, hi=excluded.hi, rank=excluded.rank",
-                params![id, src.lang, src.id, kind, f.title, f.url, f.page, f.image, f.summary, f.duration, published, lo, hi, rank as i64, at],
+                   lo=excluded.lo, hi=excluded.hi, rank=excluded.rank, artist=excluded.artist, track=excluded.track",
+                params![id, src.lang, src.id, kind, f.title, f.url, f.page, f.image, f.summary, f.duration, published, lo, hi, rank as i64, at, f.artist, f.track],
             )?;
         }
-        let old: Vec<String> = {
-            let mut st = tx.prepare("SELECT id FROM items WHERE source=?1")?;
-            let rows = st.query_map([src.id], |r| r.get::<_, String>(0))?;
-            rows.filter_map(|r| r.ok()).filter(|id| !keep.contains(id)).collect()
+        // ménage : trop ancien ou en trop (les plus récents restent) ; une leçon créée
+        // ou un élément masqué restent, celui-ci pour ne jamais revenir
+        let (days, cap) = src.shelf.keep();
+        let rows: Vec<(String, i64, bool, bool)> = {
+            let mut st = tx.prepare(
+                "SELECT id, CASE WHEN published > 0 THEN published ELSE fetched_at END AS t, lesson_id IS NOT NULL, hidden = 1
+                 FROM items WHERE source=?1 ORDER BY t DESC, rank",
+            )?;
+            let rows = st.query_map([src.id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))?;
+            rows.filter_map(|r| r.ok()).collect()
         };
-        for id in old {
-            tx.execute("DELETE FROM items WHERE id=?1", [id])?;
+        let mut kept = 0;
+        for (id, t, lesson, hidden) in rows {
+            let stay = if lesson {
+                true
+            } else if hidden {
+                at - t < 200 * 86400
+            } else if (listed.contains(&id) || at - t < days * 86400) && kept < cap {
+                kept += 1;
+                true
+            } else {
+                false
+            };
+            if !stay {
+                tx.execute("DELETE FROM items WHERE id=?1", [id])?;
+            }
         }
         tx.commit()?;
         Ok(added)
@@ -1115,7 +1489,7 @@ impl Store {
         let by_page: HashMap<String, i64> = lessons.iter().filter(|(_, s)| !s.is_empty()).map(|(id, s)| (same_page(s), *id)).collect();
         let c = self.conn.lock();
         let mut st = c.prepare(
-            "SELECT id,source,kind,title,url,page,image,summary,duration,published,lo,hi,fetched_at,lesson_id
+            "SELECT id,source,kind,title,url,page,image,summary,duration,published,lo,hi,fetched_at,lesson_id,artist,track
              FROM items WHERE lang=?1 AND hidden=0 ORDER BY published DESC, rank",
         )?;
         let rows = st.query_map([lang], |r| {
@@ -1134,11 +1508,13 @@ impl Store {
                 r.get::<_, u8>(11)?,
                 r.get::<_, i64>(12)?,
                 r.get::<_, Option<i64>>(13)?,
+                r.get::<_, String>(14)?,
+                r.get::<_, String>(15)?,
             ))
         })?;
         let mut items = Vec::new();
         for row in rows {
-            let (id, sid, kind, title, url, page, image, summary, duration, published, lo, hi, fetched_at, lesson) = row?;
+            let (id, sid, kind, title, url, page, image, summary, duration, published, lo, hi, fetched_at, lesson, artist, track) = row?;
             // source retirée du catalogue, ou réservée aux apprenants d'une autre langue d'interface
             let Some(src) = source(&sid).filter(|s| s.via.map_or(true, |v| v == ui)) else { continue };
             let lesson_id = lesson
@@ -1162,11 +1538,13 @@ impl Store {
                 page_text: src.page_text,
                 fetched_at,
                 lesson_id,
+                artist,
+                track,
             });
         }
         drop(st);
         drop(c);
-        Ok(Feed { items, refreshed_at: self.run(lang).0, refreshing: self.refreshing(lang), sources: sources(lang, ui).count() })
+        Ok(Feed { items, refreshed_at: self.refreshed_at(lang, ui), refreshing: self.refreshing(lang), sources: sources(lang, ui).count() })
     }
 
     /// Relie un élément à la leçon créée à partir de lui.
@@ -1184,21 +1562,30 @@ impl Store {
 
 // ---------- actualisation ----------
 
-/// Relit les sources d'une langue. `on_event` : installation des composants
-/// vidéo s'il le faut (étape « tools »), puis avancement (0 à 100).
-pub async fn refresh(data_dir: &Path, store: &Store, lang: &str, ui: &str, on_event: &mut (dyn FnMut(ImportEvent) + Send)) -> Result<Report> {
+/// Relit les sources d'une langue qui sont à relire (`force` : demandé par
+/// l'apprenant, toutes celles qui n'ont pas été lues depuis quelques minutes).
+/// `on_event` : installation des composants vidéo s'il le faut (étape « tools »),
+/// avancement (0 à 100), et « found » chaque fois qu'une source apporte du nouveau
+/// (la vue se met à jour au fil de la lecture).
+pub async fn refresh(
+    data_dir: &Path,
+    store: &Store,
+    lang: &str,
+    ui: &str,
+    force: bool,
+    on_event: &mut (dyn FnMut(ImportEvent) + Send),
+) -> Result<Report> {
     let _busy = Busy::new(store, lang);
-    let _turn = store.gate.lock().await;
+    let turn = store.turn(lang);
+    let _turn = turn.lock().await;
     let started = now();
-    let (at, _) = store.run(lang);
-    if started - at < FRESH {
-        return Ok(Report { skipped: true, ..Default::default() });
-    }
-    let list: Vec<&'static Source> = sources(lang, ui).collect();
+    let all: Vec<&'static Source> = sources(lang, ui).collect();
+    let list: Vec<(&'static Source, SrcState)> =
+        all.iter().map(|&s| (s, store.src_state(s.id))).filter(|(s, st)| is_due(s, st, started, force)).collect();
     if list.is_empty() {
-        return Ok(Report::default());
+        return Ok(Report { skipped: !all.is_empty(), sources: all.len(), ..Default::default() });
     }
-    let ytdlp = if list.iter().any(|s| s.kind == Kind::YouTube) {
+    let ytdlp = if list.iter().any(|(s, _)| matches!(s.kind, Kind::YouTube | Kind::Chart)) {
         match crate::tools::find_ytdlp(data_dir) {
             Some(p) => Some(p),
             None => {
@@ -1213,32 +1600,53 @@ pub async fn refresh(data_dir: &Path, store: &Store, lang: &str, ui: &str, on_ev
     on_event(ImportEvent::Progress { value: 0.0 });
 
     let client = link::client()?;
-    // deux chaînes YouTube à la fois au plus, avec une pause entre deux : sans quoi YouTube refuse un moment
-    let youtube = tokio::sync::Semaphore::new(2);
-    let jobs: Vec<_> = list.iter().map(|&s| fetch_one(data_dir, ytdlp.as_deref(), &client, &youtube, s, !store.has(s.id))).collect();
-    let mut results = stream::iter(jobs).buffer_unordered(6);
+    let jobs: Vec<_> = list.iter().map(|(s, st)| fetch_one(data_dir, ytdlp.as_deref(), &client, store, s, st.clone())).collect();
+    let mut results = stream::iter(jobs).buffer_unordered(8);
 
     let total = list.len();
     let mut report = Report { sources: total, ..Default::default() };
     let (mut done, mut answered) = (0, 0);
-    while let Some((s, r)) = results.next().await {
+    while let Some((s, prev, r)) = results.next().await {
         done += 1;
+        let mut st = SrcState { checked: started, ..prev.clone() };
         match r {
-            Ok(found) if !found.is_empty() => {
-                report.added += store.save(s, &found, started)?;
+            Ok(Fetched::Items(found, tags)) if !found.is_empty() => {
+                let n = store.save(s, &found, started)?;
+                report.added += n;
                 answered += 1;
+                st.ok = started;
+                st.fails = 0;
+                if let Some((etag, modified)) = tags {
+                    st.etag = etag;
+                    st.modified = modified;
+                }
+                if n > 0 {
+                    on_event(ImportEvent::Stage { stage: "found".into() });
+                }
             }
-            // un flux vide ou illisible garde ce qu'il proposait hier
-            _ => report.failed.push(s.name.to_string()),
+            Ok(Fetched::Unchanged) => {
+                answered += 1;
+                st.ok = started;
+                st.fails = 0;
+            }
+            // un flux vide ou illisible garde ce qu'il proposait ; on réessaiera plus tard
+            _ => {
+                st.fails = prev.fails + 1;
+                report.failed.push(s.name.to_string());
+            }
         }
+        store.set_state(s.id, &st)?;
         on_event(ImportEvent::Progress { value: done as f64 / total as f64 * 100.0 });
     }
+    let (at, _) = store.run(lang);
     store.set_run(lang, if answered > 0 { started } else { at }, started)?;
     Ok(report)
 }
 
-/// Lecture quotidienne, en arrière-plan, des langues étudiées (la langue
-/// active d'abord). Un événement `discover` suit chaque langue relue.
+/// Lecture en arrière-plan des langues étudiées (la langue active d'abord) :
+/// toutes les 20 minutes, les sources dont le rythme est passé (les actualités
+/// toutes les 3 h, les chaînes et podcasts deux fois par jour, les classements
+/// chaque jour). Un événement `discover` suit chaque langue où du nouveau est arrivé.
 pub async fn auto_loop(app: tauri::AppHandle) {
     use tauri::{Emitter, Manager};
     tokio::time::sleep(Duration::from_secs(40)).await;
@@ -1246,7 +1654,7 @@ pub async fn auto_loop(app: tauri::AppHandle) {
         let st = app.state::<crate::state::AppState>();
         let (on, langs): (bool, Vec<String>) = {
             let c = st.db.lock();
-            // lecture quotidienne coupée dans les Réglages : seulement sur demande
+            // lecture d'arrière-plan coupée dans les Réglages : seulement sur demande
             let on = crate::db::setting(&c, "discover_auto").as_deref() != Some("0");
             let active = crate::db::setting(&c, "lang").unwrap_or_default();
             let all = crate::db::setting(&c, "langs").unwrap_or_default();
@@ -1255,14 +1663,18 @@ pub async fn auto_loop(app: tauri::AppHandle) {
             v.retain(|l| seen.insert(l.clone()));
             (on, v)
         };
+        let ui = crate::i18n::native();
         for lang in langs.into_iter().filter(|_| on) {
-            if st.discover.due(&lang) && sources(&lang, crate::i18n::native()).next().is_some() {
+            if st.discover.due(&lang, ui) {
                 let mut quiet = |_e: ImportEvent| {};
-                let _ = refresh(&st.data_dir, &st.discover, &lang, crate::i18n::native(), &mut quiet).await;
-                let _ = app.emit("discover", &lang);
+                if let Ok(r) = refresh(&st.data_dir, &st.discover, &lang, ui, false, &mut quiet).await {
+                    if r.added > 0 || r.sources > 0 {
+                        let _ = app.emit("discover", &lang);
+                    }
+                }
             }
         }
-        tokio::time::sleep(Duration::from_secs(30 * 60)).await;
+        tokio::time::sleep(Duration::from_secs(20 * 60)).await;
     }
 }
 
@@ -1280,6 +1692,7 @@ mod tests {
             assert!(s.id.starts_with(&format!("{}-", s.lang)), "préfixe de langue : {}", s.id);
             match s.kind {
                 Kind::YouTube => assert!(s.url.starts_with("UC") && s.url.len() == 24, "chaîne : {}", s.id),
+                Kind::Chart => assert!(s.url.starts_with("PL") && s.shelf == Shelf::Music, "classement : {}", s.id),
                 _ => assert!(s.url.starts_with("http"), "flux : {}", s.id),
             }
         }
@@ -1420,7 +1833,7 @@ mod tests {
             ]}"#,
         )
         .unwrap();
-        let f = youtube_entries(&v);
+        let f = youtube_entries(&v, 12);
         assert_eq!(f.len(), 2);
         assert_eq!(f[0].url, "https://www.youtube.com/watch?v=Tu3IHEb3bko");
         assert_eq!(f[0].image, "https://i.ytimg.com/vi/Tu3IHEb3bko/hq720_custom_1.jpg?sqp=b");
@@ -1473,11 +1886,12 @@ mod tests {
         store.mark(&a, 7).unwrap();
         assert_eq!(store.list("it", "fr", &lessons).unwrap().items[0].lesson_id, Some(7));
 
-        // le lendemain : un nouvel élément, un ancien parti ; la date et la première apparition restent
+        // le lendemain : un nouvel élément ; celui que la chaîne ne liste plus reste (une leçon pour
+        // apprenants ne vieillit pas) ; la date et la première apparition restent
         let second = [found("ccccccccccc", "Nuovo video", 400), found("aaaaaaaaaaa", "Super Easy Italian 9", 999)];
         assert_eq!(store.save(easy, &second, 2000).unwrap(), 1);
         let feed = store.list("it", "fr", &[]).unwrap();
-        assert_eq!(feed.items.len(), 2);
+        assert_eq!(feed.items.len(), 3);
         let kept = feed.items.iter().find(|i| i.id == a).unwrap();
         assert_eq!((kept.published, kept.fetched_at), (300, 1000));
 
@@ -1497,11 +1911,59 @@ mod tests {
         assert!(store.list("it", "fr", &[]).unwrap().items.iter().all(|i| i.id != c));
         assert!(store.list("es", "fr", &[]).unwrap().items.is_empty());
 
-        // lecture du jour
-        assert!(store.due("it"));
-        store.set_run("it", now(), now()).unwrap();
-        assert!(!store.due("it"));
+        // un an plus tard : ce que la chaîne ne liste plus s'en va, sauf la leçon créée
+        let later = 2600 + 365 * 86400;
+        store.save(easy, &[found("eeeeeeeeeee", "Ancora", later)], later).unwrap();
+        let ids: Vec<String> = store.list("it", "fr", &lessons).unwrap().items.into_iter().map(|i| i.title).collect();
+        assert_eq!(ids, ["Ancora", "Super Easy Italian 9"]);
+
+        // actualités : cinq jours, et vingt-quatre éléments au plus par source
+        let ansa = source("it-ansa").unwrap();
+        let many: Vec<Found> = (0..30).map(|i| found(&format!("news{i:07}"), &format!("Notizia {i}"), later - i * 3600)).collect();
+        store.save(ansa, &many, later).unwrap();
+        assert_eq!(store.list("it", "fr", &[]).unwrap().items.iter().filter(|i| i.source == "it-ansa").count(), 24);
+
+        // rythme de lecture par source : relue si son tour est passé, ou à la demande après cinq minutes
+        assert!(store.due("it", "fr"));
+        let t = now();
+        for s in sources("it", "fr") {
+            store.set_state(s.id, &SrcState { checked: t, ok: t, ..Default::default() }).unwrap();
+        }
+        assert!(!store.due("it", "fr"));
+        assert!(!is_due(easy, &store.src_state(easy.id), t + 60, true));
+        assert!(is_due(easy, &store.src_state(easy.id), t + FRESH, true));
+        assert!(is_due(ansa, &store.src_state(ansa.id), t + 3 * 3600, false));
+        assert!(!is_due(easy, &store.src_state(easy.id), t + 3 * 3600, false));
+        // après des échecs, on attend davantage
+        let failing = SrcState { checked: t, fails: 3, ..Default::default() };
+        assert!(!is_due(ansa, &failing, t + 2 * 3600, false));
+        assert!(is_due(ansa, &failing, t + 3 * 3600 + 1, false));
         assert!(store.list("it", "fr", &[]).unwrap().refreshed_at > 0);
+
+        // chansons : paroles vérifiées gardées ; sans paroles, revérifiées plus tard
+        store.set_song("vid00000001", true, "Lumi", "La strada").unwrap();
+        assert_eq!(store.song("vid00000001"), Some((true, "Lumi".into(), "La strada".into())));
+        store.set_song("vid00000002", false, "", "").unwrap();
+        assert_eq!(store.song("vid00000002"), Some((false, String::new(), String::new())));
+        drop(store);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// Un cache d'une version précédente (copie) s'ouvre et se met à niveau :
+    /// `LUMEN_DISCOVER_DB=…/discover.db cargo test --lib old_cache_upgrades -- --ignored --nocapture`.
+    #[test]
+    #[ignore]
+    fn old_cache_upgrades() {
+        let src = std::path::PathBuf::from(std::env::var("LUMEN_DISCOVER_DB").expect("LUMEN_DISCOVER_DB"));
+        let dir = std::env::temp_dir().join(format!("lumen-discover-old-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::copy(&src, dir.join("discover.db")).unwrap();
+        let store = Store::open(&dir);
+        for lang in ["it", "ru"] {
+            let feed = store.list(lang, "fr", &[]).unwrap();
+            println!("{lang} : {} éléments, lu le {}, à relire : {}", feed.items.len(), feed.refreshed_at, store.due(lang, "fr"));
+            assert!(!feed.items.is_empty());
+        }
         drop(store);
         let _ = std::fs::remove_dir_all(dir);
     }
@@ -1534,7 +1996,7 @@ mod tests {
             }
         };
         let started = std::time::Instant::now();
-        let r = refresh(&dir, &store, &lang, "fr", &mut log).await.unwrap();
+        let r = refresh(&dir, &store, &lang, "fr", true, &mut log).await.unwrap();
         println!("{} nouveaux éléments, {} sources, sans réponse : {:?} ({:.1} s)", r.added, r.sources, r.failed, started.elapsed().as_secs_f64());
         let feed = store.list(&lang, "fr", &[]).unwrap();
         assert!(feed.refreshed_at > 0 && !feed.items.is_empty());
@@ -1546,7 +2008,9 @@ mod tests {
         let undated = feed.items.iter().filter(|i| i.published == 0).count();
         println!("sans date : {undated} sur {}", feed.items.len());
         // relire aussitôt ne relit rien
-        assert!(refresh(&dir, &store, &lang, "fr", &mut |_| {}).await.unwrap().skipped);
+        assert!(refresh(&dir, &store, &lang, "fr", true, &mut |_| {}).await.unwrap().skipped);
+        let music: Vec<&Item> = feed.items.iter().filter(|i| i.shelf == "music").collect();
+        println!("chansons avec paroles dans la langue : {}", music.len());
         drop(store);
         let _ = std::fs::remove_dir_all(dir);
     }
@@ -1557,33 +2021,49 @@ mod tests {
     #[ignore]
     async fn discover_live() {
         let only = std::env::var("LUMEN_DISCOVER").unwrap_or_default();
+        // quelques sources seulement, par leurs identifiants
+        let ids = std::env::var("LUMEN_DISCOVER_IDS").unwrap_or_default();
         let langs: Vec<&str> = if only.is_empty() { crate::text::LANGS.to_vec() } else { only.split(',').collect() };
         let dir = std::env::temp_dir().join("lumen-discover-live");
         std::fs::create_dir_all(&dir).unwrap();
         let ytdlp = crate::tools::find_ytdlp(&dir);
         let client = link::client().unwrap();
+        let store = Store::open(&dir);
+        let only_kind = std::env::var("LUMEN_DISCOVER_KIND").unwrap_or_default();
         let mut broken = Vec::new();
         for lang in langs {
             for s in SOURCES.iter().filter(|s| s.lang == lang) {
-                let r = fetch(&dir, ytdlp.as_deref(), &client, s, true).await;
-                if s.kind == Kind::YouTube {
+                if only_kind == "music" && s.kind != Kind::Chart || only_kind == "other" && s.kind == Kind::Chart {
+                    continue;
+                }
+                if !ids.is_empty() && !ids.split(',').any(|i| i == s.id) {
+                    continue;
+                }
+                let r = fetch(&dir, ytdlp.as_deref(), &client, &store, s, &SrcState::default(), true).await;
+                if matches!(s.kind, Kind::YouTube | Kind::Chart) {
                     tokio::time::sleep(Duration::from_millis(800)).await;
                 }
                 match r {
-                    Ok(f) if !f.is_empty() => {
+                    Ok(Fetched::Items(f, _)) if !f.is_empty() => {
                         let newest = f.iter().map(|x| x.published).max().unwrap_or(0);
                         let age = if newest > 0 { (now() - newest) / 86400 } else { -1 };
                         let first = &f[0];
                         let (lo, hi) = grade(s, &first.title);
+                        // une chanson : artiste et titre seulement (jamais ses paroles)
+                        let label = if s.kind == Kind::Chart { format!("{} – {}", first.artist, first.track) } else { first.title.clone() };
+                        // titres et résumés reconnus dans la langue de la source (une source surtout en anglais se repère)
+                        let judged: Vec<bool> = f.iter().filter_map(|x| langid::matches(&format!("{}. {}", x.title, x.summary), s.lang)).collect();
+                        let share = if judged.is_empty() { -1 } else { (judged.iter().filter(|b| **b).count() * 100 / judged.len()) as i64 };
                         println!(
-                            "OK  {:<18} {:>2} él. · {:>4} j · img {} · {}-{} · {}",
+                            "OK  {:<18} {:>2} él. · {:>4} j · img {} · {}-{} · langue {:>3} % · {}",
                             s.id,
                             f.len(),
                             age,
                             if first.image.is_empty() { "non" } else { "oui" },
                             lo,
                             hi,
-                            first.title.chars().take(70).collect::<String>()
+                            share,
+                            label.chars().take(60).collect::<String>()
                         );
                     }
                     Ok(_) => {

@@ -13,7 +13,9 @@ import { setUiLang, t, type UiLang } from "./lib/i18n";
 import { useApp } from "./lib/store";
 import { startUpdateChecks } from "./lib/updater";
 import { ImportSheet } from "./views/ImportSheet";
+import { Preview } from "./components/Preview";
 import { Chat } from "./views/Chat";
+import { DiscoverView } from "./views/Discover";
 import { Library } from "./views/Library";
 import { Onboarding } from "./views/Onboarding";
 import { Playlists } from "./views/Playlists";
@@ -154,6 +156,7 @@ export function App() {
             transition={{ duration: 0.22, ease: [0.2, 0.8, 0.2, 1] }}
           >
             {view === "library" && <Library />}
+            {view === "discover" && <DiscoverView />}
             {view === "playlists" && <Playlists />}
             {view === "reader" && <Reader />}
             {view === "chat" && <Chat />}
@@ -164,6 +167,7 @@ export function App() {
         </AnimatePresence>
       </main>
       <ImportSheet />
+      <Preview />
       <Guide />
       <News />
       <Tour />

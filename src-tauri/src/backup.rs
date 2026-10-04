@@ -44,12 +44,12 @@ const MANIFEST: &str = "Infos.json";
 const FORMAT: i64 = 1;
 /// Versions quotidiennes gardées dans l'historique.
 const HISTORY_DAYS: usize = 14;
-/// Réglages qui ne quittent pas ce Mac : la clé LingQ (promis : « elle reste
-/// sur ce Mac ») et l'emplacement de la sauvegarde, propre à ce disque.
-const LOCAL_ONLY: [&str; 2] = ["lingq_key", "backup_dir"];
+/// Réglages qui ne quittent pas ce Mac : les clés LingQ et Gemini (promis :
+/// « elle reste sur ce Mac ») et l'emplacement de la sauvegarde, propre à ce disque.
+const LOCAL_ONLY: [&str; 3] = ["lingq_key", "gemini_key", "backup_dir"];
 /// Réglages de ce Mac conservés quand on restaure une sauvegarde (la langue de
 /// l'interface aussi : celle qu'on vient de choisir à l'accueil reste).
-const KEEP_ON_RESTORE: [&str; 7] = ["lingq_key", "backup_dir", "backup_on", "backup_audio", "backup_video", "backup_snooze", "ui_lang"];
+const KEEP_ON_RESTORE: [&str; 8] = ["lingq_key", "gemini_key", "backup_dir", "backup_on", "backup_audio", "backup_video", "backup_snooze", "ui_lang"];
 /// Leçons d'accueil : un profil qui n'a qu'elles n'a encore rien à sauvegarder.
 /// Leur collection dépend de la langue de l'interface au premier lancement.
 const STARTER_COLLECTIONS: [&str; 2] = ["Pour commencer", "Getting started"];

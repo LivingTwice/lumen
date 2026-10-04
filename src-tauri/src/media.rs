@@ -632,6 +632,39 @@ pub async fn yt_latest(data_dir: &Path, ytdlp: &Path, url: &str, max: usize, lan
     Ok(serde_json::from_str(json)?)
 }
 
+/// Les éléments `from` à `to` d'une liste (résultats de recherche, playlist),
+/// sans rien télécharger. `lang` : titres dans cette langue plutôt que traduits.
+pub async fn yt_flat(data_dir: &Path, ytdlp: &Path, url: &str, from: usize, to: usize, lang: Option<&str>) -> Result<serde_json::Value> {
+    let mut args: Vec<String> = vec!["-J".into(), "--flat-playlist".into(), "--playlist-items".into(), format!("{from}:{to}")];
+    if let Some(l) = lang {
+        args.extend(["--extractor-args".into(), format!("youtube:lang={l}")]);
+    }
+    args.push(url.into());
+    let mut quiet = |_p: f64| {};
+    let out = run_ytdlp(data_dir, ytdlp, &args, None, &mut quiet).await?;
+    let json = out.iter().find(|l| l.starts_with('{')).ok_or_else(|| anyhow!(crate::i18n::t("aucun résultat", "no results")))?;
+    Ok(serde_json::from_str(json)?)
+}
+
+/// Adresses de lecture directe d'une vidéo (ou du seul son), pour la regarder
+/// avant d'en faire une leçon : image H.264 et son AAC séparés (que la WebView lit
+/// telles quelles), sinon un flux qui porte les deux (HLS compris).
+/// L'image de YouTube se prend en HLS : WebKit ne lit pas ses fichiers DASH
+/// d'image seule (la vidéo restait figée, le son seul jouait). Le son, lui, se
+/// lit très bien en DASH.
+pub async fn yt_stream(data_dir: &Path, ytdlp: &Path, url: &str, audio_only: bool, browser: Option<&str>) -> Result<serde_json::Value> {
+    let format = if audio_only {
+        "ba[ext=m4a][protocol=https]/ba[protocol=https]/ba/b"
+    } else {
+        "bv*[vcodec^=avc1][height<=720][protocol^=m3u8]+ba[ext=m4a][protocol=https]/bv*[vcodec^=avc1][height<=720][protocol=https]+ba[ext=m4a][protocol=https]/b[vcodec^=avc1][acodec!=none][protocol=https]/b[protocol^=m3u8]/b[protocol=https]/b"
+    };
+    let args: Vec<String> = vec!["-J".into(), "-f".into(), format.into(), url.into()];
+    let mut quiet = |_p: f64| {};
+    let out = run_with_fallback(data_dir, ytdlp, &args, browser, &mut quiet).await?;
+    let json = out.iter().find(|l| l.starts_with('{')).ok_or_else(|| anyhow!(crate::i18n::t("vidéo illisible", "unreadable video")))?;
+    Ok(serde_json::from_str(json)?)
+}
+
 /// Télécharge la piste audio d'une vidéo (YouTube et la plupart des sites
 /// vidéo). Renvoie le fichier et le titre.
 pub async fn yt_audio(

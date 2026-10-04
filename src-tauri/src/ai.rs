@@ -184,7 +184,11 @@ impl Engine {
         // même ouverture que le modèle de conversation de Qwen3.5 (enable_thinking)
         prompt.push_str(if g.think.is_some() { "<|im_start|>assistant\n<think>\n" } else { "<|im_start|>assistant\n<think>\n\n</think>\n\n" });
         let vocab = model.vocab();
-        let tokens = vocab.tokenize(prompt.as_bytes(), false, true);
+        let mut tokens = vocab.tokenize(prompt.as_bytes(), false, true);
+        // jeton de début : attendu par MiniCPM (« <s> »), absent chez Qwen
+        if vocab.should_add_bos() || std::env::var("LUMEN_FORCE_BOS").is_ok() {
+            tokens.insert(0, vocab.bos());
+        }
         let stop_tokens = vocab.tokenize(THINK_STOP.as_bytes(), false, true);
         // fin de réflexion : un seul jeton spécial chez Qwen (sinon, repérée dans le texte)
         let think_end = {
@@ -1204,5 +1208,198 @@ mod live {
         // arrêt demandé : la réponse partielle est gardée
         let (out, _) = ask("Écris-moi une longue histoire en italien sur un phare.", None, Some(12));
         assert!(out.stopped && !out.answer.is_empty());
+    }
+
+    /// Comparaison de modèles sur les mêmes questions, dans les 31 langues : sens en contexte
+    /// (interface en français et en anglais), phrases, simplification, chat, et vitesse.
+    /// Sert à choisir les modèles proposés (un fichier de résultats par modèle) :
+    /// LUMEN_TEST_MODELS=a.gguf,b.gguf [LUMEN_COMPARE_OUT=dossier] cargo test --release --lib compare_live -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn compare_live() {
+        use std::fmt::Write as _;
+        let Ok(paths) = std::env::var("LUMEN_TEST_MODELS") else { return };
+        let out_dir = std::env::var("LUMEN_COMPARE_OUT").map(PathBuf::from).unwrap_or_else(|_| std::env::temp_dir().join("lumen-compare"));
+        std::fs::create_dir_all(&out_dir).unwrap();
+        // (langue, mot, phrase, repère du dictionnaire, réponses acceptées : débuts de mots)
+        let words_fr: &[(&str, &str, &str, &str, &[&str])] = &[
+            ("it", "preso", "Ho preso un caffè al bar prima di andare in ufficio.", "", &["pris", "bu"]),
+            ("it", "Non vedo l'ora", "Non vedo l'ora di rivederti.", "", &["hâte", "impatien"]),
+            ("it", "pianta", "La pianta in salotto ha bisogno di acqua.", "", &["plante"]),
+            ("es", "olvidaron", "Se me olvidaron las llaves en casa.", "", &["oubli"]),
+            ("es", "constipado", "Estoy constipado desde el lunes.", "", &["enrhum"]),
+            ("es", "viene", "Siéntate, que ya viene la comida.", "", &["arrive", "vient"]),
+            ("de", "aufgehört", "Er hat mit dem Rauchen aufgehört.", "", &["arrêt", "cessé"]),
+            ("de", "abholen", "Kannst du mich morgen vom Bahnhof abholen?", "", &["cherch", "récupér", "prendre"]),
+            ("de", "Bank", "Wir saßen auf einer Bank am Fluss.", "banque ; banc", &["banc"]),
+            ("pt", "puxou", "Ela puxou a porta com força.", "", &["tir"]),
+            ("pt", "saudade", "Fiquei com saudade da minha avó.", "", &["manqu", "nostalg", "regret"]),
+            ("ru", "душно", "Он открыл окно, потому что в комнате было душно.", "", &["étouff", "lourd", "irrespirable", "suffoc", "manqu"]),
+            ("ru", "успел", "Он не успел на последний автобус.", "", &["raté", "manqué", "eu le temps", "attrap", "arrivé à temps"]),
+            ("en", "pick you up", "I'll pick you up at eight.", "", &["cherch", "récupér", "prendre"]),
+            ("en", "fair", "It's not fair that she has to work on Sunday.", "", &["juste", "équitable"]),
+            ("nl", "boodschappen doen", "We gaan morgen boodschappen doen.", "", &["course", "commission"]),
+            ("sv", "ont", "Jag har ont i huvudet.", "", &["mal", "douleur"]),
+            ("da", "hyggede", "Vi hyggede os med en kop te.", "", &["agréable", "bon moment", "cosy", "confort", "détend", "plaisir", "amus"]),
+            ("fi", "ystävälleni", "Kirjoitin kirjeen ystävälleni eilen.", "", &["ami"]),
+            ("et", "poodi", "Ma lähen homme poodi.", "", &["magasin", "boutique"]),
+            ("lv", "pilsētā", "Es dzīvoju lielā pilsētā.", "", &["ville"]),
+            ("lt", "geriu", "Aš geriu kavą kiekvieną rytą.", "", &["boi", "bu"]),
+            ("pl", "zamknąć", "Zapomniałem zamknąć drzwi na klucz.", "", &["ferm", "verrouill"]),
+            ("cs", "zubaři", "Zítra musím jít k zubaři.", "", &["dentiste"]),
+            ("sk", "bicykel", "Kúpil som si nový bicykel.", "", &["vélo", "bicyclette"]),
+            ("sl", "vreme", "Danes je zelo lepo vreme.", "", &["temps", "météo"]),
+            ("hr", "pekari", "Kupio sam kruh u pekari.", "", &["boulanger"]),
+            ("hu", "moziba", "Holnap elmegyünk a moziba.", "", &["cinéma"]),
+            ("ro", "umbrela", "Am uitat umbrela acasă.", "", &["parapluie"]),
+            ("bg", "планина", "Утре ще ходим на планина.", "", &["montagne"]),
+            ("uk", "читати", "Я дуже люблю читати книжки.", "", &["lire"]),
+            ("el", "θάλασσα", "Το καλοκαίρι πηγαίνουμε στη θάλασσα.", "", &["mer", "plage"]),
+            ("tr", "kalkmam", "Yarın sabah erken kalkmam lazım.", "", &["lever", "levé"]),
+            ("ar", "لأستعير", "ذهبت إلى المكتبة لأستعير كتابا.", "", &["emprunt"]),
+            ("hi", "पसंद", "मुझे चाय बहुत पसंद है।", "", &["aim", "plaî", "préf", "goût", "apprécie"]),
+            ("id", "makan siang", "Saya sudah makan siang.", "", &["déjeun", "repas de midi"]),
+            ("vi", "học", "Tôi đang học tiếng Pháp.", "", &["appren", "étudi"]),
+            ("ko", "만날", "저는 내일 친구를 만날 거예요.", "", &["rencontr", "voir", "retrouv"]),
+            ("ja", "見に行きました", "昨日、友達と映画を見に行きました。", "", &["allé voir", "allés voir", "suis allé", "sommes allés", "voir"]),
+            ("ja", "忘れて", "傘を忘れてしまいました。", "", &["oubli"]),
+        ];
+        let words_en: &[(&str, &str, &str, &str, &[&str])] = &[
+            ("fr", "raté", "Il a raté son train ce matin.", "", &["miss"]),
+            ("fr", "tombée dans les pommes", "Je suis tombée dans les pommes à cause de la chaleur.", "", &["faint", "pass"]),
+            ("it", "manca", "Mi manca molto la mia famiglia.", "", &["miss"]),
+            ("es", "me di cuenta", "Ya me di cuenta del error.", "", &["realiz", "realis", "notic"]),
+            ("de", "Lust", "Ich habe keine Lust, heute zu kochen.", "", &["feel like", "desire", "mood", "want", "inclination", "urge"]),
+            ("nl", "heb zin in", "Ik heb zin in een ijsje.", "", &["feel like", "fancy", "want", "crav", "in the mood"]),
+            ("pl", "Czekam", "Czekam na autobus od godziny.", "", &["wait", "been wait"]),
+            ("tr", "okudun", "Bu kitabı okudun mu?", "", &["read"]),
+            ("ar", "المساء", "أحب القراءة في المساء.", "", &["evening"]),
+            ("vi", "mưa", "Hôm nay trời mưa to quá.", "", &["rain"]),
+            ("ko", "고파요", "배가 고파요.", "", &["hungry"]),
+            ("ja", "乗り遅れました", "電車に乗り遅れました。", "", &["miss"]),
+        ];
+        let sentences: &[(&str, &str, &str)] = &[
+            ("fr", "it", "Se avessi saputo che venivi, avrei preparato una torta."),
+            ("fr", "de", "Obwohl es regnete, sind wir spazieren gegangen."),
+            ("fr", "ru", "Мне кажется, что он сегодня не придёт."),
+            ("fr", "es", "Me hubiera gustado que me lo dijeras antes."),
+            ("fr", "pl", "Gdybym miał więcej czasu, nauczyłbym się grać na pianinie."),
+            ("fr", "hu", "Tegnap este sokáig beszélgettünk a barátaimmal."),
+            ("fr", "ja", "雨が降っていたので、家で本を読みました。"),
+            ("fr", "ko", "주말에 가족과 함께 바다에 갔어요."),
+            ("fr", "ar", "لم أتمكن من النوم الليلة الماضية بسبب الضوضاء."),
+            ("en", "fr", "Il faut que tu viennes me voir avant de partir."),
+            ("en", "it", "Ci vediamo domani, se non piove."),
+            ("en", "tr", "Türkçe öğrenmek sandığımdan daha zor."),
+        ];
+        let simplify: &[(&str, &str, &str, &str)] = &[
+            ("fr", "it", "A2", "Nonostante la pioggia incessante che da giorni flagellava la costa, il vecchio guardiano del faro si ostinava a salire ogni sera i centoventi gradini della torre, convinto che, finché la lanterna avesse brillato, nessuna nave si sarebbe smarrita tra gli scogli. I pescatori del villaggio, che lo consideravano un po' eccentrico, cominciarono a capire il valore della sua dedizione soltanto quando, una notte di tempesta, la luce salvò un peschereccio in difficoltà."),
+            ("en", "de", "A1", "Obwohl die Stadtverwaltung seit Jahren versprochen hatte, die marode Brücke über den Fluss zu sanieren, begannen die Bauarbeiten erst, nachdem ein Lastwagen beinahe eingebrochen wäre und die örtliche Zeitung tagelang über die Gefahr berichtet hatte."),
+        ];
+        let lesson = LessonContext {
+            title: "Il faro",
+            text: "Ogni mattina, Marta saliva le scale strette del vecchio faro. Dalla cima, il mare sembrava infinito e calmo.\n\nUn giorno trovò una lettera nascosta tra due pietre.",
+            partial: false,
+        };
+        // (interface, langue, leçon jointe, question)
+        let chats: &[(&str, &str, bool, &str)] = &[
+            ("fr", "it", true, "Explique-moi « saliva » dans la première phrase, et pourquoi ce n'est pas « salì »."),
+            ("fr", "it", false, "Ciao! Ieri io sono andato al mare con mio amici. E tu, cosa hai fatto?"),
+            ("fr", "es", false, "Quelle est la différence entre « ser » et « estar » ? Donne deux exemples."),
+            ("fr", "ja", false, "Explique simplement la différence entre は et が."),
+            ("en", "de", false, "When do I use “seit” and when “vor” to talk about time?"),
+        ];
+
+        for path in paths.split(',').map(str::trim).filter(|p| !p.is_empty()) {
+            let path = Path::new(path);
+            let name = path.file_stem().unwrap().to_string_lossy().to_string();
+            let engine = Engine::new();
+            let mut log = String::new();
+            let t0 = std::time::Instant::now();
+            let model = engine.load(path).unwrap();
+            let vocab = model.vocab();
+            let think = vocab.tokenize(b"</think>", false, true);
+            let end = vocab.tokenize(b"<|im_end|>", false, true);
+            let _ = writeln!(
+                log,
+                "# {name}\nchargement : {:?} · {:.2} Go · début <s> : {} · </think> en {} jeton(s) · <|im_end|> fin de tour : {}",
+                t0.elapsed(),
+                model.size() as f64 / 1e9,
+                vocab.should_add_bos(),
+                think.len(),
+                end.len() == 1 && vocab.is_eog(end[0]),
+            );
+            let n_tok = |s: &str| vocab.tokenize(s.as_bytes(), false, false).len();
+            let score = |section: &str, cases: &[(&str, &str, &str, &str, &[&str])], native: &str, log: &mut String| {
+                let (mut ok, mut total_ms) = (0usize, 0u128);
+                let _ = writeln!(log, "\n## {section}");
+                for (lang, word, sentence, hint, accept) in cases {
+                    let t = std::time::Instant::now();
+                    let raw = engine.generate(path, &word_messages(native, lang, word, sentence, hint), 72, Priority::Background, |_| true).unwrap();
+                    let ms = t.elapsed().as_millis();
+                    total_ms += ms;
+                    let (s, n) = parse_word_answer(&raw);
+                    let low = s.to_lowercase();
+                    let good = accept.iter().any(|a| low.contains(a));
+                    ok += good as usize;
+                    let _ = writeln!(log, "{} [{lang}] {word} → « {s} » · {n} ({ms} ms)", if good { "✓" } else { "✗" });
+                }
+                let _ = writeln!(log, "→ {ok}/{} attendus, {} ms en moyenne", cases.len(), total_ms / cases.len() as u128);
+                (ok, cases.len())
+            };
+            let (a, b) = score("Sens en contexte, interface en français", words_fr, "fr", &mut log);
+            let (c, d) = score("Sens en contexte, interface en anglais", words_en, "en", &mut log);
+
+            let _ = writeln!(log, "\n## Phrases");
+            for (native, lang, s) in sentences {
+                let t = std::time::Instant::now();
+                let out = engine.generate(path, &sentence_messages(native, lang, s), 160, Priority::Background, |_| true).unwrap();
+                let _ = writeln!(log, "[{lang} → {native}] {s}\n   {out} ({} ms)", t.elapsed().as_millis());
+            }
+
+            let _ = writeln!(log, "\n## Simplifier");
+            for (native, lang, level, text) in simplify {
+                let t = std::time::Instant::now();
+                let out = engine.generate(path, &simplify_messages(native, lang, level, text), 600, Priority::Background, |_| true).unwrap();
+                let _ = writeln!(log, "[{lang} {level}] langue reconnue : {:?} ({} ms)\n{out}", crate::langid::guess(&out), t.elapsed().as_millis());
+            }
+
+            let _ = writeln!(log, "\n## Chat");
+            let (mut gen_tokens, mut gen_secs) = (0usize, 0f64);
+            for (native, lang, with_lesson, q) in chats {
+                let flag = Arc::new(AtomicBool::new(false));
+                let msgs = chat_messages(native, lang, 900, with_lesson.then_some(&lesson), &[], q, &[]);
+                let n_prompt: usize = msgs.iter().map(|(_, c)| n_tok(c)).sum();
+                let g = Gen { max_tokens: 700, think: None, sampling: Sampling::Natural, priority: Priority::Stoppable(flag) };
+                let t = std::time::Instant::now();
+                let mut first: Option<std::time::Duration> = None;
+                let out = engine
+                    .run(path, &msgs, g, |_| {
+                        first.get_or_insert(t.elapsed());
+                        true
+                    })
+                    .unwrap();
+                let all = t.elapsed();
+                let first = first.unwrap_or(all);
+                let n = n_tok(&out.answer);
+                gen_tokens += n;
+                gen_secs += (all - first).as_secs_f64();
+                let _ = writeln!(
+                    log,
+                    "\n### [{native}/{lang}] {q}\n(consigne ≈ {n_prompt} jetons, premier mot après {:.2} s, {n} jetons en {:.1} s)\n{}",
+                    first.as_secs_f64(),
+                    all.as_secs_f64(),
+                    out.answer
+                );
+            }
+            let _ = writeln!(
+                log,
+                "\n## Bilan\nmots : {a}/{b} (français), {c}/{d} (anglais) · écriture : {:.1} jetons/s · durée totale : {:.0} s",
+                gen_tokens as f64 / gen_secs.max(0.001),
+                t0.elapsed().as_secs_f64()
+            );
+            println!("{log}");
+            std::fs::write(out_dir.join(format!("{name}.md")), &log).unwrap();
+        }
     }
 }

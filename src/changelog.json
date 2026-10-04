@@ -1,6 +1,122 @@
 {
-  "_lisezmoi": "Nouveautés montrées après chaque mise à jour (components/News.tsx) et notes de publication. Ajouter ce qui change sous la version \"next\" au fil du travail ; « Publier une version » lui donne son numéro et sa date. Icônes : noms de components/Icon.tsx. Actions : \"tour\" (visite guidée), \"guide\", \"settings:<page>\" (general, langs, reading, voice, discover, ai, videos, backup, lingq, about), \"view:<vue>\" (library, playlists, chat, vocab, progress).",
+  "_lisezmoi": "Nouveautés montrées après chaque mise à jour (components/News.tsx) et notes de publication. Ajouter ce qui change sous la version \"next\" au fil du travail ; « Publier une version » lui donne son numéro et sa date. Icônes : noms de components/Icon.tsx. Actions : \"tour\" (visite guidée), \"guide\", \"settings:<page>\" (general, langs, reading, voice, discover, podcasts, ai, videos, backup, lingq, about), \"import:<onglet>\" (text, link, file, media, podcast), \"view:<vue>\" (library, discover, playlists, chat, vocab, progress).",
   "releases": [
+    {
+      "version": "0.5.0",
+      "date": "2026-10-04",
+      "title": { "fr": "Chercher, regarder, apprendre", "en": "Search, watch, learn" },
+      "items": [
+        {
+          "icon": "search",
+          "title": { "fr": "Chercher en ligne, sans navigateur", "en": "Search online, no browser needed" },
+          "body": {
+            "fr": "Dans Découvrir, un champ de recherche interroge YouTube, Dailymotion, les chansons, les podcasts, Wikipédia et Vikidia, dans la langue que vous étudiez. Choisissez la catégorie (YouTube, chansons, podcasts, articles…) avant même de chercher, ou passez de l'une à l'autre ensuite. Les résultats dans une autre langue passent après. Collez aussi un lien (TikTok, Instagram, Vimeo, un article) : Lumen regarde ce qu'il y a derrière.",
+            "en": "In Discover, a search field looks through YouTube, Dailymotion, songs, podcasts, Wikipedia and Vikidia, in the language you're learning. Pick the category (YouTube, songs, podcasts, articles…) before you even search, or switch between them afterwards. Results in another language come last. You can also paste a link (TikTok, Instagram, Vimeo, an article): Lumen looks at what's behind it."
+          },
+          "action": "view:discover"
+        },
+        {
+          "icon": "play",
+          "title": { "fr": "Regarder avant de choisir", "en": "Watch before you choose" },
+          "body": {
+            "fr": "Touchez une vidéo, un épisode, une chanson ou un article : il s'ouvre aussitôt dans un aperçu, pour le regarder, l'écouter ou en lire le début. Pour un article ou des paroles, Lumen montre la part de mots que vous connaissez déjà.",
+            "en": "Tap a video, an episode, a song or an article: it opens right away in a preview, to watch it, listen to it or read the beginning. For an article or lyrics, Lumen shows the share of words you already know."
+          }
+        },
+        {
+          "icon": "sparkle",
+          "title": { "fr": "La leçon se prépare pendant que vous explorez", "en": "The lesson gets ready while you explore" },
+          "body": {
+            "fr": "« En faire une leçon » lance le téléchargement et la transcription en arrière-plan ; une carte dans la barre latérale suit l'avancement, et une notification ouvre la leçon dès qu'elle est prête. Vous pouvez en lancer plusieurs.",
+            "en": "“Make it a lesson” starts the download and the transcription in the background; a card in the sidebar follows the progress, and a notification opens the lesson as soon as it's ready. You can start several."
+          }
+        },
+        {
+          "icon": "podcast",
+          "title": { "fr": "Des podcasts écrits pour vous", "en": "Podcasts made for you" },
+          "body": {
+            "fr": "Importer › Podcast : choisissez un sujet, une forme (conversation, histoire ou débat), votre niveau et une durée. Gemini, l'IA de Google, écrit le podcast dans la langue que vous apprenez, y glisse les mots que vous étudiez et le fait dire par deux voix. Il devient une leçon complète, sans faute de transcription, avec la lanterne calée par Whisper. Il faut une clé Gemini gratuite (Réglages › Podcasts).",
+            "en": "Import › Podcast: choose a topic, a format (conversation, story or debate), your level and a length. Gemini, Google's AI, writes the podcast in the language you're learning, works in the words you're studying and has two voices perform it. It becomes a full lesson, with no transcription errors, and the lantern set by Whisper. You need a free Gemini key (Settings › Podcasts)."
+          },
+          "action": "import:podcast"
+        },
+        {
+          "icon": "music",
+          "title": { "fr": "Des chansons, avec leurs paroles", "en": "Songs, with their lyrics" },
+          "body": {
+            "fr": "Le rayon « Chansons du moment » propose les titres les plus écoutés du pays dont les paroles sont dans la langue étudiée. Les paroles deviennent le texte de la leçon et la lanterne suit la chanson : mot à mot si Whisper est installé, sinon ligne après ligne. Une chanson se cherche aussi par son titre.",
+            "en": "The “Songs of the moment” shelf offers the country's most played songs whose lyrics are in the language you're learning. The lyrics become the lesson's text and the lantern follows the song: word by word if Whisper is installed, otherwise line by line. You can also search for a song by its title."
+          }
+        },
+        {
+          "icon": "sparkle",
+          "title": { "fr": "Découvrir a sa place dans la barre latérale", "en": "Discover has its own place in the sidebar" },
+          "body": {
+            "fr": "Découvrir n'est plus un onglet de la bibliothèque : il a son entrée dans la barre latérale, juste sous Bibliothèque. Son étoile scintille quand des vidéos, des podcasts ou des chansons nouvelles vous attendent à votre niveau, et elle dit combien. En haut de la page, l'essentiel : la recherche, et l'heure de la dernière mise à jour avec le bouton « Actualiser ».",
+            "en": "Discover is no longer a tab inside the library: it has its own entry in the sidebar, right below Library. Its star twinkles when new videos, podcasts or songs are waiting at your level, and it shows how many. At the top of the page, just the essentials: the search, and the time of the last update with the “Refresh” button."
+          },
+          "action": "view:discover"
+        },
+        {
+          "icon": "refresh",
+          "title": { "fr": "Plus de sources, toujours fraîches", "en": "More sources, always fresh" },
+          "body": {
+            "fr": "Près de 290 sources vérifiées, dont des actualités lentes par niveau (A1 à B1), de la vulgarisation et des podcasts pour les langues qui en manquaient. Chaque source a son rythme : les actualités se relisent toutes les trois heures, et une trouvaille reste proposée même quand la chaîne a publié depuis. Les chaînes en danois, en finnois et en indonésien, restées vides, fonctionnent de nouveau.",
+            "en": "Nearly 290 checked sources, including slow news by level (A1 to B1), science and history channels, and podcasts for the languages that lacked them. Each source has its own pace: news is checked every three hours, and a find stays suggested even after the channel has published more. Danish, Finnish and Indonesian channels, which had gone empty, work again."
+          }
+        },
+        {
+          "icon": "chart",
+          "title": { "fr": "Un niveau estimé plus juste", "en": "A fairer level estimate" },
+          "body": {
+            "fr": "Le niveau de Découvrir comptait chaque forme d'un mot : un russe ou un finnois paraissaient bien plus avancés qu'ils ne l'étaient. Lumen regroupe désormais vos mots connus par mot de base grâce au dictionnaire, avec les mêmes seuils pour toutes les langues (les kanji en japonais).",
+            "en": "Discover's level counted every form of a word: Russian or Finnish learners looked far more advanced than they were. Lumen now groups your known words by base word thanks to the dictionary, with the same thresholds for every language (kanji in Japanese)."
+          },
+          "action": "settings:discover"
+        },
+        {
+          "icon": "library",
+          "title": { "fr": "La part de mots nouveaux", "en": "The share of new words" },
+          "body": {
+            "fr": "Chaque leçon indique le pourcentage de ses mots différents encore nouveaux pour vous, comme sur LingQ : de quoi choisir une leçon à votre portée. La jauge dessous compte de la même façon les mots déjà rencontrés : les deux font toujours 100 %.",
+            "en": "Each lesson shows the percentage of its distinct words that are still new to you, as on LingQ: an easy way to pick a lesson within reach. The gauge below counts the words you've already met the same way: together they always make 100%."
+          },
+          "action": "view:library"
+        },
+        {
+          "icon": "bulb",
+          "title": { "fr": "Une lanterne plus douce", "en": "A softer lantern" },
+          "body": {
+            "fr": "La lumière qui suit le mot prononcé est plus légère : on la suit tout aussi bien, et le texte respire davantage.",
+            "en": "The light that follows the spoken word is lighter: it's just as easy to follow, and the text has more room to breathe."
+          }
+        },
+        {
+          "icon": "book",
+          "title": { "fr": "Toucher le vide pour désélectionner", "en": "Tap empty space to deselect" },
+          "body": {
+            "fr": "Dans une leçon, un clic dans la marge, entre deux lignes ou sur le titre éteint le mot ou l'expression sélectionnés, comme la touche Échap.",
+            "en": "In a lesson, a click in the margin, between two lines or on the title clears the selected word or phrase, just like the Escape key."
+          }
+        },
+        {
+          "icon": "up",
+          "title": { "fr": "Revenir en haut d'un clic", "en": "Back to the top in one click" },
+          "body": {
+            "fr": "Quand on descend loin dans la bibliothèque, une flèche apparaît en bas à droite pour remonter tout en haut. Et les coins des cartes restent bien arrondis au survol.",
+            "en": "When you scroll far down the library, an arrow appears at the bottom right to take you straight back to the top. And card corners now stay nicely rounded on hover."
+          }
+        },
+        {
+          "icon": "sparkle",
+          "title": { "fr": "Une nouvelle icône", "en": "A new icon" },
+          "body": {
+            "fr": "L'astre de Lumen se lève derrière un livre ouvert, dans les couleurs chaudes de l'app, et un mot y luit sous la lanterne. La fenêtre d'installation a été redessinée dans le même esprit.",
+            "en": "Lumen's sun rises behind an open book, in the app's warm colors, with one word glowing under the lantern. The install window has been redrawn in the same spirit."
+          }
+        }
+      ]
+    },
     {
       "version": "0.4.0",
       "date": "2026-10-04",
@@ -64,7 +180,7 @@
             "fr": "Vidéos, podcasts et articles récents dans votre langue, rangés par niveau de A1 à C1 : environ 195 sources pour les 31 langues, relues chaque jour.",
             "en": "Recent videos, podcasts and articles in your language, sorted by level from A1 to C1: about 195 sources across 31 languages, checked every day."
           },
-          "action": "view:library"
+          "action": "view:discover"
         },
         {
           "icon": "chart",

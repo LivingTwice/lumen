@@ -1,11 +1,13 @@
 // Découvrir : des leçons venues d'ailleurs. Le natif (discover.rs) lit chaque
 // jour les sources choisies pour la langue ; l'interface range ce qu'elles
 // proposent par niveau et par rayon, et en fait des leçons à la demande.
+import { useEffect } from "react";
 import { create } from "zustand";
 import { api, errorText, isTauri } from "./api";
 import { count, locale, t } from "./i18n";
+import { roughEstimate } from "./level";
 import { useApp } from "./store";
-import type { DiscoverFeed, DiscoverItem, LangCode } from "./types";
+import type { DiscoverFeed, DiscoverItem, LangCode, LevelEstimate } from "./types";
 
 export const LEVELS = ["A1", "A2", "B1", "B2", "C1"] as const;
 
@@ -33,31 +35,60 @@ export function fits(it: Pick<DiscoverItem, "lo" | "hi">, level: number): boolea
   return it.lo <= level && level <= it.hi;
 }
 
-/**
- * Niveau estimé d'après les mots connus. Ils sont comptés comme sur LingQ (chaque
- * forme d'un mot compte) : les paliers sont donc plus hauts que dans un manuel.
- */
-export function estimateLevel(known: number): number {
-  if (known < 800) return 1;
-  if (known < 2500) return 2;
-  if (known < 6000) return 3;
-  if (known < 12000) return 4;
-  return 5;
+/** Niveaux estimés par langue (le natif regroupe les mots connus par lemme). */
+const useEstimates = create<{ by: Partial<Record<string, LevelEstimate>>; load(lang: LangCode): Promise<void> }>((set) => ({
+  by: {},
+  async load(lang) {
+    try {
+      const e = await api().levelEstimate(lang);
+      set((s) => ({ by: { ...s.by, [lang]: e } }));
+    } catch {
+      /* le repli approché suffit */
+    }
+  },
+}));
+
+/** Niveau estimé d'une langue, recalculé quand les mots connus changent. */
+export function useEstimate(lang: LangCode): LevelEstimate {
+  const known = useApp((s) => s.knownCount);
+  const e = useEstimates((s) => s.by[lang]);
+  const load = useEstimates((s) => s.load);
+  useEffect(() => {
+    // le calcul (quelques dixièmes de seconde) attend que l'apprenant ait fini de marquer ses mots
+    const timer = window.setTimeout(() => void load(lang), e ? 1500 : 0);
+    return () => window.clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lang, known, load]);
+  return e ?? roughEstimate(lang, known);
+}
+
+/** « 6 700 mots différents » : ce que compte l'estimation, dit simplement. */
+export function unitsLabel(e: LevelEstimate): string {
+  if (e.unit === "kanji") return count(e.units, "kanji connu", "kanji connus", "known kanji", "known kanji");
+  if (e.unit === "syllables") return count(e.units, "syllabe connue", "syllabes connues", "known syllable", "known syllables");
+  return `${e.exact ? "" : "≈ "}${count(e.units, "mot différent", "mots différents", "distinct word", "distinct words")}`;
 }
 
 /** Niveau de l'apprenant dans la langue active : choisi, sinon estimé. */
 export function useLevel(lang: LangCode) {
   const chosen = Number(useApp((s) => s.settings[`level_${lang}`])) || 0;
   const known = useApp((s) => s.knownCount);
-  const estimated = estimateLevel(known);
+  const estimate = useEstimate(lang);
   return {
-    level: chosen || estimated,
+    level: chosen || estimate.level,
     auto: !chosen,
-    estimated,
+    estimated: estimate.level,
+    estimate,
     known,
     /** `null` : revenir au niveau estimé */
     setLevel: (l: number | null) => void useApp.getState().setSetting(`level_${lang}`, l ? String(l) : ""),
   };
+}
+
+/** Niveau choisi ou estimé, hors des composants (messages). */
+export function levelNow(lang: LangCode): number {
+  const chosen = Number(useApp.getState().settings[`level_${lang}`]) || 0;
+  return chosen || (useEstimates.getState().by[lang] ?? roughEstimate(lang, useApp.getState().knownCount)).level;
 }
 
 /** Dernière visite de Découvrir dans cette langue (secondes, 0 : jamais). */
@@ -98,9 +129,6 @@ export async function openSource(url: string) {
   } else window.open(url, "_blank", "noopener");
 }
 
-/** Une lecture est due : jamais faite, ou faite il y a plus de 20 h (le natif suit la même règle). */
-const STALE = 20 * 3600;
-
 interface Busy {
   /** 0 à 100 */
   progress: number;
@@ -113,9 +141,9 @@ interface DiscoverStore {
   /** lecture demandée depuis l'interface, par langue */
   busy: Partial<Record<string, Busy>>;
   load(lang: LangCode): Promise<DiscoverFeed | null>;
-  /** relit les sources ; `quiet` : sans message à la fin */
-  refresh(lang: LangCode, opts?: { quiet?: boolean }): Promise<void>;
-  /** charge la langue, et la relit si sa lecture du jour n'est pas faite */
+  /** relit les sources ; `quiet` : sans message à la fin ; `force` : toutes, même lues il y a peu */
+  refresh(lang: LangCode, opts?: { quiet?: boolean; force?: boolean }): Promise<void>;
+  /** charge la langue, et relit les sources dont le tour est passé */
   ensure(lang: LangCode): Promise<void>;
   hide(lang: LangCode, item: DiscoverItem): Promise<void>;
   /** l'élément est devenu une leçon */
@@ -149,27 +177,58 @@ export const useDiscover = create<DiscoverStore>((set, get) => ({
 
   async refresh(lang, opts = {}) {
     if (get().busy[lang]) return;
-    set((s) => ({ busy: { ...s.busy, [lang]: { progress: 0, stage: "" } } }));
+    const force = opts.force ?? true;
+    set((s) => ({ busy: { ...s.busy, [lang]: { progress: 0, stage: force ? "discover" : "" } } }));
     const toast = useApp.getState().toast;
+    const before = new Set((get().feeds[lang]?.items ?? []).map((it) => it.id));
+    // les trouvailles apparaissent au fil de la lecture, source après source
+    let reload: number | null = null;
+    const soon = () => {
+      if (reload !== null) return;
+      reload = window.setTimeout(() => {
+        reload = null;
+        void get().load(lang);
+      }, 900);
+    };
     try {
-      const r = await api().discoverRefresh(lang, (e) =>
+      const r = await api().discoverRefresh(lang, force, (e) => {
+        if (e.type === "stage" && e.stage === "found") return soon();
         set((s) => {
           const cur = s.busy[lang] ?? { progress: 0, stage: "" };
           return { busy: { ...s.busy, [lang]: e.type === "stage" ? { progress: 0, stage: e.stage } : { ...cur, progress: e.value } } };
-        }),
-      );
-      await get().load(lang);
-      if (!opts.quiet && !r.skipped) {
-        if (r.sources > 0 && r.failed.length === r.sources)
-          toast(t("Aucune source n'a répondu. Lumen a-t-il accès à Internet ?", "No source answered. Does Lumen have Internet access?"), "error");
-        else if (r.added > 0) {
-          const finds = count(r.added, "nouveauté", "nouveautés", "new find", "new finds");
-          toast(t(`${finds} à découvrir`, `${finds} to discover`), "light");
-        } else toast(t("Rien de neuf pour l'instant : revenez demain.", "Nothing new for now: come back tomorrow."));
+        });
+      });
+      if (reload !== null) window.clearTimeout(reload);
+      const feed = await get().load(lang);
+      if (opts.quiet) return;
+      if (r.skipped) {
+        toast(t("Tout est à jour : Lumen vient de regarder ces sources.", "Everything is up to date: Lumen just checked these sources."));
+        return;
       }
+      if (r.sources > 0 && r.failed.length === r.sources) {
+        toast(t("Aucune source n'a répondu. Lumen a-t-il accès à Internet ?", "No source answered. Does Lumen have Internet access?"), "error");
+        return;
+      }
+      const level = levelNow(lang);
+      const fresh = (feed?.items ?? []).filter((it) => !before.has(it.id));
+      const here = fresh.filter((it) => it.shelf === "music" || fits(it, level)).length;
+      const silent =
+        r.failed.length > 0
+          ? t(` (${r.failed.length} sur ${r.sources} n'ont pas répondu)`, ` (${r.failed.length} of ${r.sources} didn't answer)`)
+          : "";
+      if (here > 0) toast(t(`${count(here, "nouveauté", "nouveautés", "new find", "new finds")} à votre niveau${silent}`, `${count(here, "nouveauté", "nouveautés", "new find", "new finds")} at your level${silent}`), "light");
+      else if (fresh.length > 0)
+        toast(
+          t(
+            `${count(fresh.length, "nouveauté", "nouveautés", "", "")}, à d'autres niveaux que le vôtre${silent}`,
+            `${count(fresh.length, "", "", "new find", "new finds")}, at other levels than yours${silent}`,
+          ),
+        );
+      else toast(t(`Rien de neuf pour l'instant : les sources n'ont rien publié depuis.${silent}`, `Nothing new for now: the sources haven't published anything since.${silent}`));
     } catch (e) {
       if (!opts.quiet) toast(errorText(e), "error");
     } finally {
+      if (reload !== null) window.clearTimeout(reload);
       set((s) => {
         const busy = { ...s.busy };
         delete busy[lang];
@@ -181,10 +240,10 @@ export const useDiscover = create<DiscoverStore>((set, get) => ({
   async ensure(lang) {
     const feed = get().feeds[lang] ?? (await get().load(lang));
     if (!feed || feed.refreshing || get().busy[lang]) return;
-    // lecture quotidienne coupée dans les Réglages : seulement sur demande
+    // lecture d'arrière-plan coupée dans les Réglages : seulement sur demande
     if (useApp.getState().settings.discover_auto === "0") return;
-    // la première lecture se fait sous les yeux de l'apprenant ; ensuite, sans message
-    if (Date.now() / 1000 - feed.refreshed_at > STALE) await get().refresh(lang, { quiet: feed.items.length > 0 });
+    // le natif ne relit que les sources dont le tour est passé ; la toute première lecture se fait sous les yeux
+    await get().refresh(lang, { quiet: true, force: feed.items.length === 0 && feed.refreshed_at === 0 });
   },
 
   async hide(lang, item) {
@@ -205,8 +264,20 @@ export const useDiscover = create<DiscoverStore>((set, get) => ({
   },
 }));
 
-/** Nouveautés à ce niveau depuis la dernière visite (pastille de l'onglet Découvrir). */
+/** Nouveautés à ce niveau depuis la dernière visite (pastille de Découvrir). */
 export function newAtLevel(feed: DiscoverFeed | undefined, seen: number, level: number): number {
   if (!feed) return 0;
   return feed.items.filter((it) => isNew(it, seen) && fits(it, level)).length;
+}
+
+/** Ce que l'entrée Découvrir de la barre latérale signale : nouveautés à votre niveau, et dernière visite (0 : jamais). */
+export function useDiscoverNews(lang: LangCode): { fresh: number; seen: number } {
+  const feed = useDiscover((s) => s.feeds[lang]);
+  const load = useDiscover((s) => s.load);
+  const seen = Number(useApp((s) => s.settings[`discover_seen_${lang}`])) || 0;
+  const { level } = useLevel(lang);
+  useEffect(() => {
+    void load(lang);
+  }, [lang, load]);
+  return { fresh: newAtLevel(feed, seen, level), seen };
 }

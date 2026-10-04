@@ -1,7 +1,7 @@
 import data from "../changelog.json";
 import type { IconName } from "../components/Icon";
 import { locale, t } from "./i18n";
-import { useApp, type SettingsTab, type View } from "./store";
+import { useApp, type ImportTab, type SettingsTab, type View } from "./store";
 
 /**
  * Nouveautés de chaque version (src/changelog.json). Après une mise à jour,
@@ -76,6 +76,7 @@ export function runAction(action: string) {
   if (action === "tour") void app.startTour();
   else if (action === "guide") app.openGuide();
   else if (action.startsWith("settings:")) app.openSettings(action.slice(9) as SettingsTab);
+  else if (action.startsWith("import:")) app.openImport(null, action.slice(7) as ImportTab);
   else if (action.startsWith("view:")) {
     const view = action.slice(5) as View;
     if (view === "playlists") app.openPlaylist(null);

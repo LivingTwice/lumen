@@ -43,6 +43,9 @@ export interface LessonSummary {
   created_at: number;
   opened_at: number | null;
   new_words: number;
+  /** part (0-100) des mots différents encore nouveaux */
+  new_pct: number;
+  /** part (0-100) des mots différents déjà rencontrés : 100 - new_pct */
   known_pct: number;
   excerpt: string;
   /** seconde atteinte dans l'audio ou la vidéo, et durée totale (0 si inconnue) */
@@ -330,8 +333,8 @@ export interface DiscoverItem {
   id: string;
   source: string;
   source_name: string;
-  /** rayon : pour apprenants, actualités, culture */
-  shelf: "learn" | "news" | "culture";
+  /** rayon : pour apprenants, actualités, culture, chansons */
+  shelf: "learn" | "news" | "culture" | "music";
   kind: "video" | "audio" | "text";
   title: string;
   /** vidéo YouTube, fichier son, ou article */
@@ -353,6 +356,9 @@ export interface DiscoverItem {
   fetched_at: number;
   /** leçon déjà créée à partir de cet élément */
   lesson_id: number | null;
+  /** chanson : artiste et titre (ses paroles existent, dans la langue étudiée) */
+  artist: string;
+  track: string;
 }
 
 export interface DiscoverFeed {
@@ -371,6 +377,136 @@ export interface DiscoverReport {
   failed: string[];
   /** une lecture venait de se faire : rien n'a été relu */
   skipped: boolean;
+}
+
+/** Paroles d'une chanson : minutées (format LRC) ou en texte seul. */
+export interface Lyrics {
+  synced: string;
+  plain: string;
+  instrumental: boolean;
+}
+
+/** Plateformes de la recherche en ligne. */
+export type SearchPlatform = "youtube" | "dailymotion" | "podcast" | "music" | "wiki";
+
+/** Un résultat de recherche en ligne, quelle que soit la plateforme (miroir de `search::Hit`). */
+export interface SearchHit {
+  id: string;
+  platform: SearchPlatform;
+  /** "show" : une émission de podcast entière */
+  kind: "video" | "audio" | "show" | "song" | "text";
+  title: string;
+  /** ce qu'on regarde et importe : vidéo, fichier son, flux de l'émission, article (vide pour une chanson) */
+  url: string;
+  /** page d'origine */
+  page: string;
+  image: string;
+  /** chaîne, émission, artiste ou encyclopédie */
+  author: string;
+  summary: string;
+  duration: number;
+  published: number;
+  /** vues (vidéos), épisodes (émissions), popularité (chansons) */
+  count: number;
+  /** niveaux annoncés (0 : inconnus) */
+  lo: number;
+  hi: number;
+  /** dans la langue étudiée, dans une autre, ou on ne sait pas */
+  in_lang: boolean | null;
+  other_lang: string;
+  album: string;
+  /** extrait de 30 s (chansons) */
+  sample: string;
+  lyrics: Lyrics | null;
+  /** article : nombre de mots, approché */
+  words: number;
+}
+
+export interface SearchPage {
+  hits: SearchHit[];
+  more: boolean;
+}
+
+/** Adresses de lecture d'une vidéo ou d'un son, pour l'aperçu (miroir de `search::Stream`). */
+export interface MediaStream {
+  /** image (et son si `audio` est vide) */
+  video: string;
+  /** son à part, que la vidéo muette suit */
+  audio: string;
+  width: number;
+  height: number;
+  /** langue parlée annoncée par le site */
+  language: string;
+  title: string;
+  description: string;
+  author: string;
+  duration: number;
+  published: number;
+  count: number;
+}
+
+/** Une chanson à importer (paroles pour texte, la lanterne suit la chanson). */
+export interface SongItem {
+  /** vidéo YouTube (vide : cherchée sur YouTube Music) */
+  url: string;
+  artist: string;
+  title: string;
+  album: string;
+  duration: number;
+  image: string;
+  page: string;
+  lyrics: Lyrics | null;
+  /** garder l'image du clip */
+  video: boolean;
+}
+
+/** Forme d'un podcast sur mesure : deux animateurs, un conteur, ou deux avis qui s'opposent. */
+export type PodcastFormat = "talk" | "story" | "debate";
+
+/** Un podcast à créer avec Gemini (miroir de `podcast::Request`). */
+export interface PodcastRequest {
+  topic: string;
+  /** 1 (A1) à 5 (C1) */
+  level: number;
+  minutes: number;
+  format: PodcastFormat;
+  /** précisions facultatives (ton, angle, temps des verbes…) */
+  details: string;
+  /** glisser dans le texte quelques mots en apprentissage */
+  use_words: boolean;
+}
+
+/** Modèles Gemini ouverts par une clé, du meilleur au repli (miroir de `podcast::Models`). */
+export interface GeminiModels {
+  /** pour écrire le podcast */
+  text: string[];
+  /** pour le dire */
+  tts: string[];
+}
+
+/** Niveau estimé d'après les mots connus regroupés par lemme (miroir de `level::Estimate`). */
+export interface LevelEstimate {
+  /** mots connus tels qu'enregistrés (chaque forme compte) */
+  forms: number;
+  /** lemmes, kanji ou syllabes */
+  units: number;
+  unit: "lemmas" | "kanji" | "syllables";
+  /** calculé avec un dictionnaire (sinon approché) */
+  exact: boolean;
+  /** 1 (A1) à 5 (C1) */
+  level: number;
+  /** début du niveau, seuil du suivant (0 au plus haut) */
+  floor: number;
+  next: number;
+}
+
+/** Ce qu'un texte a de nouveau pour l'apprenant. */
+export interface TextStats {
+  words: number;
+  unique: number;
+  new_words: number;
+  new_pct: number;
+  known_pct: number;
 }
 
 /** Nombres d'une sauvegarde : ce qui sera retrouvé en la restaurant. */

@@ -7,10 +7,15 @@ mod commands;
 mod db;
 mod dict;
 mod discover;
+mod langid;
+mod level;
 mod link;
 mod lingq;
+mod lyrics;
 mod media;
 mod models;
+mod podcast;
+mod search;
 mod state;
 mod text;
 mod tools;
@@ -46,6 +51,7 @@ pub fn run() {
                 voice_epoch: std::sync::atomic::AtomicU64::new(0),
                 backup: backup::Tracker::default(),
                 discover,
+                levels: Mutex::new(HashMap::new()),
             });
             // sauvegarde automatique, au plus toutes les 10 minutes
             tauri::async_runtime::spawn(backup::auto_loop(app.handle().clone()));
@@ -108,6 +114,15 @@ pub fn run() {
             commands::discover_refresh,
             commands::discover_mark,
             commands::discover_hide,
+            commands::search_online,
+            commands::media_stream,
+            commands::song_find,
+            commands::lyrics_find,
+            commands::import_song,
+            commands::gemini_check,
+            commands::podcast_create,
+            commands::level_estimate,
+            commands::text_stats,
         ])
         .build(tauri::generate_context!())
         .expect("Lumen couldn't start")

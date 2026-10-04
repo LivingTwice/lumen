@@ -3,12 +3,14 @@ import { useEffect, useState } from "react";
 import { api } from "../lib/api";
 import { useChat } from "../lib/chat";
 import { useDictStatus } from "../lib/dicts";
+import { useDiscoverNews } from "../lib/discover";
 import { LANGS, langInfo } from "../lib/langs";
 import { useApp, type View } from "../lib/store";
 import type { LangCode, LessonSummary } from "../lib/types";
 import { Icon, type IconName } from "./Icon";
 import { CountUp, Menu, Orb } from "./ui";
 import { BackupCard } from "./BackupCard";
+import { ImportQueueCard } from "./ImportQueueCard";
 import { LingqCard } from "./LingqCard";
 import { UpdateCard } from "./UpdateCard";
 import { count, formatNumber, t } from "../lib/i18n";
@@ -16,6 +18,7 @@ import { studyTime } from "../lib/progress";
 
 const nav = (): { view: View; label: string; icon: IconName }[] => [
   { view: "library", label: t("Bibliothèque", "Library"), icon: "library" },
+  { view: "discover", label: t("Découvrir", "Discover"), icon: "sparkle" },
   { view: "playlists", label: "Playlists", icon: "playlist" },
   { view: "reader", label: t("Lecture en cours", "Now reading"), icon: "book" },
   { view: "chat", label: "Chat", icon: "chat" },
@@ -44,6 +47,12 @@ export function Sidebar() {
   const refreshKnown = useApp((s) => s.refreshKnown);
   // une réponse du chat s'écrit pendant qu'on est ailleurs : la lueur le signale
   const chatBusy = useChat((s) => !!s.pending);
+  // Découvrir : nouveautés à votre niveau depuis la dernière visite, ou jamais ouvert
+  const news = useDiscoverNews(lang);
+  const fresh = view === "discover" ? 0 : news.fresh;
+  const unseen = !news.seen && view !== "discover";
+  // l'étoile ne scintille que s'il y a du nouveau, et jamais pendant la lecture
+  const calling = (fresh > 0 || unseen) && view !== "reader";
   const [menu, setMenu] = useState(false);
   const [recent, setRecent] = useState<LessonSummary[]>([]);
 
@@ -66,7 +75,7 @@ export function Sidebar() {
     await setSetting("lang", code);
     if (!langs.includes(code)) await setSetting("langs", [...langs, code].join(","));
     await refreshKnown();
-    go("library");
+    go(view === "discover" ? "discover" : "library");
   };
 
   return (
@@ -132,7 +141,7 @@ export function Sidebar() {
           return (
             <button
               key={n.view}
-              className={`nav-item ${active ? "active" : ""}`}
+              className={`nav-item ${active ? "active" : ""} ${n.view === "discover" ? `nav-discover ${calling ? "calling" : ""}` : ""}`}
               onClick={() => (n.view === "reader" && lessonId ? openLesson(lessonId) : n.view === "playlists" ? openPlaylist(null) : go(n.view))}
               disabled={disabled}
               style={disabled ? { opacity: 0.45, cursor: "default" } : undefined}
@@ -143,6 +152,12 @@ export function Sidebar() {
               <Icon name={n.icon} />
               <span>{n.label}</span>
               {n.view === "chat" && chatBusy && view !== "chat" && <span className="nav-live" aria-label={t("Réponse en cours", "Answer in progress")} />}
+              {n.view === "discover" && fresh > 0 && (
+                <span className="nav-discover-count num" aria-label={count(fresh, "nouveauté à votre niveau", "nouveautés à votre niveau", "new find at your level", "new finds at your level")}>
+                  {fresh > 99 ? "99+" : fresh}
+                </span>
+              )}
+              {n.view === "discover" && unseen && !fresh && <span className="nav-discover-dot" aria-hidden="true" />}
               {n.view === "progress" && streak && streak.current > 0 && (
                 <span
                   className={`nav-streak num ${streak.today_done ? "lit" : ""}`}
@@ -191,6 +206,7 @@ export function Sidebar() {
 
       <div className="side-bottom">
         <UpdateCard />
+        <ImportQueueCard />
         <LingqCard />
         <BackupCard />
         <button className="ai-card" style={{ textAlign: "left", cursor: "pointer" }} onClick={() => openSettings("ai")}>

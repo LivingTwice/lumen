@@ -5,15 +5,20 @@ import type { AppInfo, DiscoverItem, DownloadEvent, LangCode, ModelRow, Streak }
 import { LOOK_DEFAULTS } from "./reading";
 import { STARTERS, starterCollection } from "./langs";
 
-export type View = "library" | "playlists" | "reader" | "chat" | "vocab" | "progress" | "settings";
+export type View = "library" | "discover" | "playlists" | "reader" | "chat" | "vocab" | "progress" | "settings";
 
 /** Catégories des Réglages, chacune sur sa propre page. */
-export type SettingsTab = "general" | "langs" | "reading" | "voice" | "discover" | "ai" | "videos" | "backup" | "lingq" | "about";
+export type SettingsTab = "general" | "langs" | "reading" | "voice" | "discover" | "podcasts" | "ai" | "videos" | "backup" | "lingq" | "about";
+
+/** Onglets de la feuille d'import. */
+export type ImportTab = "text" | "link" | "file" | "media" | "podcast";
 
 export interface Toast {
   id: number;
   text: string;
   kind: "info" | "error" | "light";
+  /** bouton dans la notification (« Ouvrir ») */
+  action?: { label: string; run(): void };
 }
 
 export interface DownloadState {
@@ -77,6 +82,10 @@ interface AppStore {
   importFiles: string[] | null;
   /** élément de Découvrir à importer (la feuille d'import s'ouvre dessus) */
   importItem: DiscoverItem | null;
+  /** lien à ouvrir dans la feuille d'import (émission de podcast trouvée par la recherche) */
+  importUrl: string | null;
+  /** onglet sur lequel la feuille d'import s'ouvre (null : celui d'habitude) */
+  importTab: ImportTab | null;
   toasts: Toast[];
   models: ModelRow[];
   downloads: Record<string, DownloadState>;
@@ -117,11 +126,13 @@ interface AppStore {
   openLesson(id: number, opts?: { playlist?: number; autoplay?: boolean }): void;
   /** oublie la leçon en cours si c'est celle-ci (supprimée) */
   forgetLesson(id: number): void;
-  openImport(files?: string[] | null): void;
+  openImport(files?: string[] | null, tab?: ImportTab): void;
   /** importe un élément de Découvrir : vidéo, épisode ou article */
   openImportItem(item: DiscoverItem): void;
+  /** ouvre la feuille d'import sur un lien, déjà analysé */
+  openImportLink(url: string): void;
   closeImport(): void;
-  toast(text: string, kind?: Toast["kind"]): void;
+  toast(text: string, kind?: Toast["kind"], action?: Toast["action"]): void;
   refreshModels(): Promise<void>;
   download(id: string): Promise<void>;
   cancelDownload(id: string): Promise<void>;
@@ -147,6 +158,8 @@ export const useApp = create<AppStore>((set, get) => ({
   importOpen: false,
   importFiles: null,
   importItem: null,
+  importUrl: null,
+  importTab: null,
   toasts: [],
   models: [],
   downloads: {},
@@ -283,22 +296,26 @@ export const useApp = create<AppStore>((set, get) => ({
     void get().setSetting("last_lesson", "");
   },
 
-  openImport(files = null) {
-    set({ importOpen: true, importFiles: files, importItem: null });
+  openImport(files = null, tab) {
+    set({ importOpen: true, importFiles: files, importItem: null, importUrl: null, importTab: tab ?? null });
   },
 
   openImportItem(item) {
-    set({ importOpen: true, importFiles: null, importItem: item });
+    set({ importOpen: true, importFiles: null, importItem: item, importUrl: null, importTab: null });
+  },
+
+  openImportLink(url) {
+    set({ importOpen: true, importFiles: null, importItem: null, importUrl: url, importTab: null });
   },
 
   closeImport() {
-    set({ importOpen: false, importFiles: null, importItem: null });
+    set({ importOpen: false, importFiles: null, importItem: null, importUrl: null, importTab: null });
   },
 
-  toast(text, kind = "info") {
+  toast(text, kind = "info", action) {
     const id = ++toastId;
-    set((s) => ({ toasts: [...s.toasts, { id, text, kind }] }));
-    setTimeout(() => set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) })), kind === "error" ? 6000 : 3600);
+    set((s) => ({ toasts: [...s.toasts, { id, text, kind, action }] }));
+    setTimeout(() => set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) })), action ? 8000 : kind === "error" ? 6000 : 3600);
   },
 
   async refreshModels() {

@@ -585,6 +585,15 @@ export function Reader() {
     const b = Math.max(drag.current.start, i);
     setRange({ a, b });
   };
+  // toucher le vide (marges, entre deux lignes, titre) éteint la sélection, comme Échap
+  const onVoidDown = (e: React.PointerEvent<HTMLElement>) => {
+    if (e.button !== 0 || e.shiftKey || !rangeRef.current || lookOpen) return;
+    // un mot, un bouton ou un champ gardent leur rôle
+    if ((e.target as HTMLElement).closest("[data-i], button, a, input, textarea, select, [role='button']")) return;
+    // la barre de défilement n'est pas du vide
+    if (e.target === e.currentTarget && e.nativeEvent.offsetX >= e.currentTarget.clientWidth) return;
+    setRange(null);
+  };
   useEffect(() => {
     const up = () => {
       if (!drag.current) return;
@@ -1131,7 +1140,7 @@ export function Reader() {
         )}
 
         {paged ? (
-          <div className="reader-leaves" onWheel={onSwipe}>
+          <div className="reader-leaves" onWheel={onSwipe} onPointerDown={onVoidDown}>
             {arrow("left")}
             <div className="leaf">
               <div className="leaf-view" ref={viewRef}>
@@ -1173,7 +1182,7 @@ export function Reader() {
             {arrow("right")}
           </div>
         ) : (
-          <div className="reader-scroll" ref={scrollRef} onScroll={onReaderScroll}>
+          <div className="reader-scroll" ref={scrollRef} onScroll={onReaderScroll} onPointerDown={onVoidDown}>
             <div className="reader-inner">
               {header}
 

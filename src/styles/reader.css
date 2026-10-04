@@ -376,7 +376,7 @@ span.player-voice .icon-btn {
   content: "";
   position: absolute;
   inset: -55% -30%;
-  background: var(--lantern);
+  background: var(--lantern-halo);
   filter: blur(2px);
 }
 .lantern::after {
@@ -384,8 +384,8 @@ span.player-voice .icon-btn {
   position: absolute;
   inset: 0;
   border-radius: inherit;
-  background: var(--light-soft);
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--light) 45%, transparent);
+  background: var(--lantern-fill);
+  box-shadow: 0 0 0 1px var(--lantern-ring);
 }
 
 /* illumination : la page se termine, les mots nouveaux deviennent connus */
@@ -1390,7 +1390,7 @@ span.player-voice .icon-btn {
   content: "";
   position: absolute;
   inset: -60% -30%;
-  background: radial-gradient(closest-side, rgba(255, 190, 110, 0.42), rgba(255, 180, 94, 0.15) 60%, rgba(255, 180, 94, 0));
+  background: radial-gradient(closest-side, rgba(255, 190, 110, 0.27), rgba(255, 184, 100, 0.09) 60%, rgba(255, 184, 100, 0));
   filter: blur(2px);
 }
 .sub-lantern::after {
@@ -1398,8 +1398,8 @@ span.player-voice .icon-btn {
   position: absolute;
   inset: 0;
   border-radius: inherit;
-  background: rgba(255, 196, 120, 0.16);
-  box-shadow: 0 0 0 1px rgba(255, 196, 120, 0.42);
+  background: rgba(255, 196, 120, 0.1);
+  box-shadow: 0 0 0 1px rgba(255, 196, 120, 0.27);
 }
 .subtitle-band .sw {
   cursor: pointer;

@@ -6,6 +6,7 @@ import { t } from "./i18n";
 import pkg from "../../package.json";
 import { LANGS, STARTERS, bundledDict } from "./langs";
 import { tokenize, normalize } from "./tokenize";
+import { roughEstimate } from "./level";
 import type {
   BackupCounts,
   BackupInfo,
@@ -20,7 +21,10 @@ import type {
   LessonSummary,
   LinkInfo,
   LinkMedia,
+  Lyrics,
   ModelRow,
+  SearchHit,
+  SearchPlatform,
   NewLesson,
   Playlist,
   Span,
@@ -78,6 +82,8 @@ const STARTERS_MOCK =
 // podcasts), des éléments à l'œuvre générée pour les autres langues
 type MockFind = Pick<DiscoverItem, "source" | "source_name" | "shelf" | "kind" | "title" | "lo" | "hi" | "duration"> & {
   yt?: string;
+  /** chanson : artiste */
+  artist?: string;
   image?: string;
   /** âge en jours */
   age: number;
@@ -142,7 +148,29 @@ const IT_FINDS: MockFind[] = [
       ["Maltempo, allerta arancione in Liguria e Toscana", 1],
     ] as const
   ).map(([title, age]) => ({ title, lo: 5, hi: 5, duration: 0, age, source: "it-ansa", source_name: "ANSA", shelf: "news", kind: "text" }) as MockFind),
+  ...(
+    [
+      ["PshqcQwshdU", "Lontano", "Sfera Ebbasta", 238, 2],
+      ["XgTSQwZcHH8", "PER NOI", "Geolier", 231, 3],
+    ] as const
+  ).map(([yt, title, artist, duration, age]) => ({ yt, title, artist, lo: 2, hi: 5, duration, age, source: "it-chart", source_name: "Top 100 · Italie", shelf: "music", kind: "video" }) as MockFind),
 ];
+
+// Chansons : paroles inventées pour l'aperçu (jamais de vraies paroles ici)
+const MOCK_LRC =
+  "[00:02.00] La luce del mattino\n[00:06.00] Sopra il mare calmo\n[00:10.50] Il faro si accende piano\n[00:15.00]\n[00:17.00] Canta, canta la sera\n[00:21.00] Una lettera nascosta\n[00:25.00] Tra due pietre antiche\n[00:29.00] La luce del mattino\n[00:33.00] Ritorna sopra il mare";
+
+/** Paroles inventées pour une langue : les phrases du texte de départ, une par ligne. */
+function mockLyrics(lang: LangCode): Lyrics {
+  if (lang === "it") return { synced: MOCK_LRC, plain: "", instrumental: false };
+  const lines = STARTERS[lang].text.split(/(?<=[.!?。])\s+|\n+/).filter((l) => l.trim().length > 3).slice(0, 9);
+  const synced = lines.map((l, i) => `[00:${String(2 + i * 4).padStart(2, "0")}.00] ${l.trim()}`).join("\n");
+  return { synced, plain: "", instrumental: false };
+}
+
+/** Vidéo et son libres de droits, pour essayer l'aperçu dans le navigateur. */
+const SAMPLE_VIDEO = "https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4";
+const SAMPLE_AUDIO = "https://interactive-examples.mdn.mozilla.net/media/cc0-audio/t-rex-roar.mp3";
 
 /** Éléments générés pour les autres langues : titres tirés du texte de départ. */
 function genericFinds(lang: LangCode): MockFind[] {
@@ -231,14 +259,19 @@ export function createMockApi(): Api {
     { id: "supertonic-3", kind: "tts", name: "Supertonic 3", get detail() { return t("Voix naturelle pour les mots, les expressions et l'audio des leçons, dans les 31 langues", "Natural voice for words, phrases and lesson audio, in all 31 languages"); }, size: 149e6, url: "", file: "", ram_gb: 8 },
   ];
 
+  // miroir de new_share (db.rs)
+  const newShare = (fresh: number, distinct: number) => {
+    if (!distinct || !fresh) return 0;
+    if (fresh === distinct) return 100;
+    return Math.min(99, Math.max(1, Math.round((fresh * 100) / distinct)));
+  };
+
   const summary = (l: Lesson): LessonSummary => {
     const keys = tokenize(l.text, l.lang).filter((t) => t.w).map((t) => t.k);
     const uniq = new Set<string>();
-    let rec = 0;
-    for (const k of keys) {
-      if (db.terms[`${l.lang}|${k}`]) rec++;
-      else uniq.add(k);
-    }
+    for (const k of keys) if (!db.terms[`${l.lang}|${k}`]) uniq.add(k);
+    const distinct = new Set(keys).size;
+    const newPct = newShare(uniq.size, distinct);
     return {
       id: l.id,
       lang: l.lang,
@@ -254,7 +287,9 @@ export function createMockApi(): Api {
       created_at: (l as Lesson & { created_at?: number }).created_at ?? 0,
       opened_at: (l as Lesson & { opened_at?: number }).opened_at ?? null,
       new_words: uniq.size,
-      known_pct: keys.length ? Math.floor((rec * 100) / keys.length) : 100,
+      new_pct: newPct,
+      // même base que new_pct : les mots différents (comme lessons_list)
+      known_pct: distinct ? 100 - newPct : 100,
       excerpt: l.text.slice(0, 220).replace(/\n/g, " "),
       position: l.position ?? 0,
       duration: l.duration ?? 0,
@@ -353,8 +388,69 @@ export function createMockApi(): Api {
         page_text: false,
         fetched_at: at,
         lesson_id: null,
+        artist: f.shelf === "music" ? (f.artist ?? f.source_name) : "",
+        track: f.shelf === "music" ? f.title : "",
       };
     });
+
+  /** Résultats de recherche simulés, plausibles pour chaque plateforme. */
+  const searchHits = (lang: LangCode, platform: SearchPlatform, query: string, page: number): SearchHit[] => {
+    const q = query.trim();
+    const base = { summary: "", duration: 0, published: 0, count: 0, lo: 0, hi: 0, in_lang: true, other_lang: "", album: "", sample: "", lyrics: null, words: 0 };
+    const words = STARTERS[lang].text.split(/(?<=[.!?。])\s+/).filter((x) => x.length > 12);
+    const line = (i: number) => (words[i % words.length] ?? STARTERS[lang].title).slice(0, 70);
+    const now = Math.round(Date.now() / 1000);
+    if (platform === "youtube") {
+      const finds = lang === "it" ? IT_FINDS.filter((f) => f.yt) : [];
+      const list = finds.length ? finds : Array.from({ length: 8 }, (_, i) => ({ yt: "", title: `${q} · ${line(i)}`, duration: 300 + i * 91, lo: 0, hi: 0, source_name: "Lumen Stories" }) as MockFind);
+      return list.slice(0, 12).map((f, i) => ({
+        ...base,
+        id: `yt:${f.yt || `mock${page}${i}`}`,
+        platform,
+        kind: "video",
+        title: f.title,
+        url: f.yt ? `https://www.youtube.com/watch?v=${f.yt}` : `https://www.youtube.com/watch?v=mock${page}${i}`,
+        page: f.yt ? `https://www.youtube.com/watch?v=${f.yt}` : "",
+        image: f.yt ? `https://i.ytimg.com/vi/${f.yt}/hqdefault.jpg` : "",
+        author: f.source_name,
+        duration: f.duration,
+        count: 12000 + i * 4321,
+        lo: f.lo,
+        hi: f.hi,
+        in_lang: i === 3 ? false : true,
+        other_lang: i === 3 ? "en" : "",
+      }));
+    }
+    if (platform === "dailymotion")
+      return Array.from({ length: 6 }, (_, i) => ({ ...base, id: `dm:${page}${i}`, platform, kind: "video" as const, title: `${q} · ${line(i + 2)}`, url: `https://www.dailymotion.com/video/mock${page}${i}`, page: "", image: "", author: "Euronews", duration: 120 + i * 40, published: now - i * 86400 * 3, count: 830 + i * 77 }));
+    if (platform === "podcast")
+      return [
+        ...["Slow Stories", "Café des mots", "Notes du soir"].map((name, i) => ({ ...base, id: `as:${i}`, platform, kind: "show" as const, title: name, url: `https://feeds.example/${i}.rss`, page: "", image: "", author: "Lumen Radio", summary: t("Société", "Society"), count: 40 + i * 12 })),
+        ...Array.from({ length: 6 }, (_, i) => ({ ...base, id: `ap:${page}${i}`, platform, kind: "audio" as const, title: `${line(i)}`, url: `https://cdn.example/mock-${i}.mp3`, page: "", image: "", author: "Slow Stories", summary: line(i + 1), duration: 900 + i * 133, published: now - i * 86400 * 7 })),
+      ];
+    if (platform === "music")
+      return ["La luce del mattino", "Il faro", "Mare calmo", "Lettera nascosta", "Canta la sera"].map((title, i) => ({
+        ...base,
+        id: `dz:${page}${i}`,
+        platform,
+        kind: "song" as const,
+        title,
+        url: "",
+        page: "",
+        image: "",
+        author: i % 2 ? "Aurora Lumi" : "I Fari",
+        album: "Lumière",
+        duration: 190 + i * 21,
+        lyrics: i === 4 ? null : mockLyrics(lang),
+        in_lang: i === 4 ? null : true,
+        words: 60,
+      }));
+    return [
+      { ...base, id: `wk:v:${page}`, platform, kind: "text", title: q, url: `https://${lang}.vikidia.org/wiki/${encodeURIComponent(q)}`, page: "", image: "", author: "Vikidia", summary: line(0), lo: 3, hi: 4, words: 900 },
+      { ...base, id: `wk:w:${page}`, platform, kind: "text", title: q, url: `https://${lang}.wikipedia.org/wiki/${encodeURIComponent(q)}`, page: "", image: "", author: "Wikipedia", summary: line(1), lo: 5, hi: 5, words: 4200 },
+      { ...base, id: `wk:w2:${page}`, platform, kind: "text", title: `${q} (${t("histoire", "history")})`, url: `https://${lang}.wikipedia.org/wiki/${encodeURIComponent(q)}_2`, page: "", image: "", author: "Wikipedia", summary: line(2), lo: 5, hi: 5, words: 2400 },
+    ];
+  };
 
   const mock: Api = {
     async appInfo() {
@@ -976,7 +1072,11 @@ export function createMockApi(): Api {
         });
       return { items, refreshed_at: d?.at ?? 0, refreshing: false, sources: new Set(items.map((i) => i.source)).size || 6 };
     },
-    async discoverRefresh(lang, onEvent) {
+    async discoverRefresh(lang, force, onEvent) {
+      const was = discover.get(lang);
+      // une lecture d'arrière-plan sans rien à relire : rien ne bouge
+      if (was && !force && Date.now() / 1000 - was.at < 3 * 3600) return { added: 0, sources: 0, failed: [], skipped: true };
+      if (was && force && Date.now() / 1000 - was.at < 5 * 60) return { added: 0, sources: 6, failed: [], skipped: true };
       onEvent({ type: "stage", stage: "discover" });
       for (let i = 1; i <= 10; i++) {
         await sleep(250);
@@ -1004,10 +1104,86 @@ export function createMockApi(): Api {
       discoverListeners.add(onChange);
       return () => discoverListeners.delete(onChange);
     },
+    async searchOnline(lang, platform, query, page, _filter, onEvent) {
+      onEvent({ type: "stage", stage: "search" });
+      await sleep(platform === "youtube" ? 1100 : platform === "music" ? 1500 : 600);
+      if (!query.trim()) return { hits: [], more: false };
+      return { hits: searchHits(lang as LangCode, platform, query, page), more: page < 1 && platform !== "podcast" };
+    },
+    async mediaStream(_url, audio) {
+      await sleep(700);
+      return { video: audio ? "" : SAMPLE_VIDEO, audio: audio ? SAMPLE_AUDIO : "", width: 1280, height: 720, language: "", title: "", description: "", author: "", duration: 0, published: 0, count: 0 };
+    },
+    async songFind(artist, title) {
+      await sleep(500);
+      return `https://www.youtube.com/watch?v=mock-${encodeURIComponent(`${artist}-${title}`)}`;
+    },
+    async lyricsFind() {
+      await sleep(400);
+      return mockLyrics(useLangFromDb());
+    },
+    async importSong(lang, song, onEvent) {
+      for (const stage of ["lyrics", "download", "transcribe"]) {
+        onEvent({ type: "stage", stage });
+        for (let i = 1; i <= 5; i++) {
+          await sleep(120);
+          onEvent({ type: "progress", value: i * 20 });
+        }
+      }
+      const lyrics = song.lyrics ?? mockLyrics(lang);
+      const text = lyrics.synced
+        .split("\n")
+        .map((l) => l.replace(/^\[[^\]]*\]\s*/, "").trim())
+        .join("\n")
+        .replace(/\n{2,}/g, "\n\n")
+        .trim();
+      return mock.lessonCreate({ lang, title: song.title, text, collection: song.artist, kind: "text", source: song.page });
+    },
+    async geminiCheck(key) {
+      await sleep(700);
+      if (key.trim().length < 20)
+        throw t(
+          "Google refuse cette clé Gemini. Vérifiez-la dans Google AI Studio, puis collez-la à nouveau.",
+          "Google refuses this Gemini key. Check it in Google AI Studio, then paste it again.",
+        );
+      return { text: ["gemini-3.8-flash", "gemini-3.5-flash"], tts: ["gemini-3.8-flash-tts", "gemini-3.8-flash-lite-tts"] };
+    },
+    async podcastCreate(lang, request, onEvent) {
+      if (!db.settings.gemini_key) throw t("Ajoutez d'abord votre clé Gemini (Réglages › Podcasts).", "First add your Gemini key (Settings › Podcasts).");
+      onEvent({ type: "stage", stage: "script" });
+      await sleep(1400);
+      for (const stage of ["studio", "timing"]) {
+        onEvent({ type: "stage", stage });
+        for (let i = 1; i <= 10; i++) {
+          await sleep(stage === "studio" ? 260 : 90);
+          onEvent({ type: "progress", value: i * 10 });
+        }
+      }
+      onEvent({ type: "stage", stage: "lesson" });
+      // pas de son dans le navigateur : les phrases du texte de départ, réparties en répliques
+      const sentences = STARTERS[lang].text.split(/(?<=[.!?。])\s+/).filter((s) => s.trim().length > 3);
+      const turns = request.format === "story" ? 3 : 2;
+      const paras: string[] = [];
+      for (let i = 0; i < sentences.length; i += turns) paras.push(sentences.slice(i, i + turns).join(" "));
+      return mock.lessonCreate({ lang, title: request.topic.trim(), text: paras.join("\n\n"), collection: t("Mes podcasts", "My podcasts"), kind: "text", source: "" });
+    },
+    async levelEstimate(lang) {
+      const forms = Object.entries(db.terms).filter(([k, x]) => k.startsWith(`${lang}|`) && x.status === 4 && !x.term.includes(" ")).length;
+      return { ...roughEstimate(lang as LangCode, forms), exact: true };
+    },
+    async textStats(lang, text) {
+      const keys = tokenize(text, lang as LangCode).filter((x) => x.w).map((x) => x.k);
+      const distinct = new Set(keys);
+      const fresh = new Set(keys.filter((k) => !db.terms[`${lang}|${k}`]));
+      const rec = keys.filter((k) => db.terms[`${lang}|${k}`]).length;
+      return { words: keys.length, unique: distinct.size, new_words: fresh.size, new_pct: newShare(fresh.size, distinct.size), known_pct: keys.length ? Math.floor((rec * 100) / keys.length) : 100 };
+    },
     mediaUrl(path) {
       return path;
     },
   };
+  /** langue étudiée dans l'aperçu (paroles simulées) */
+  const useLangFromDb = () => (db.settings.lang || "en") as LangCode;
   return mock;
 }
 

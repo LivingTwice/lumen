@@ -1,18 +1,17 @@
 import { AnimatePresence, motion } from "motion/react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { AddToPlaylist } from "../components/AddToPlaylist";
 import { Cover } from "../components/Cover";
 import { Icon } from "../components/Icon";
-import { Menu, Orb, Segmented, Sheet, useGlow } from "../components/ui";
+import { Menu, Orb, ScrollTop, Segmented, Sheet, useGlow } from "../components/ui";
 import { api, errorText } from "../lib/api";
 import { confirmAsk } from "../lib/dialogs";
 import { count, isEn, t } from "../lib/i18n";
 import { STARTERS, inLang, starterCollection } from "../lib/langs";
 import { formatDuration, formatNumber, useApp } from "../lib/store";
 import type { LessonSummary } from "../lib/types";
-import { Discover, DiscoverTab } from "./Discover";
 
-type Filter = "all" | "text" | "audio" | "book" | "done" | "discover";
+type Filter = "all" | "text" | "audio" | "book" | "done";
 
 function greeting() {
   const h = new Date().getHours();
@@ -84,13 +83,22 @@ function LessonCard({
             <span className="num">{count(l.word_count, "mot", "mots", "word", "words")}</span>
             <span className="sep" />
             <span className="num new-dot">{formatNumber(l.new_words)} {t("nouveaux", "new")}</span>
+            <span
+              className="num new-pct"
+              title={t(`${l.new_pct} % des mots différents de la leçon sont nouveaux pour vous`, `${l.new_pct}% of the lesson's distinct words are new to you`)}
+            >
+              {t(`${l.new_pct} %`, `${l.new_pct}%`)}
+            </span>
             {l.completed && (
               <span className="done-pill">
                 <Icon name="check" size={12} stroke={2.4} /> {t("Lu", "Read")}
               </span>
             )}
           </div>
-          <div className="lesson-known" title={t(`${l.known_pct} % des mots déjà rencontrés`, `${l.known_pct}% of the words already met`)}>
+          <div
+            className="lesson-known"
+            title={t(`${l.known_pct} % des mots différents de la leçon sont déjà connus ou en cours d'apprentissage`, `${l.known_pct}% of the lesson's distinct words are already known or being learned`)}
+          >
             <div className="bar">
               <i style={{ width: `${l.known_pct}%` }} />
             </div>
@@ -132,13 +140,14 @@ export function Library() {
   const bump = useApp((s) => s.bumpLibrary);
   const openImport = useApp((s) => s.openImport);
   const openLesson = useApp((s) => s.openLesson);
+  const go = useApp((s) => s.go);
   const toast = useApp((s) => s.toast);
   const known = useApp((s) => s.knownCount);
   const [lessons, setLessons] = useState<LessonSummary[] | null>(null);
   const [filter, setFilter] = useState<Filter>("all");
-  const discovering = filter === "discover";
   const [query, setQuery] = useState("");
   const hero = useGlow<HTMLDivElement>();
+  const scroller = useRef<HTMLDivElement>(null);
   // l'entrée en cascade ne vaut que pour la première apparition des leçons ;
   // ensuite (recherche, filtre), les cartes apparaissent et glissent sans attendre
   const [intro, setIntro] = useState(true);
@@ -211,15 +220,10 @@ export function Library() {
         <div style={{ flex: 1 }} data-tauri-drag-region />
         <label className="search no-drag">
           <Icon name="search" size={16} />
-          <input
-            placeholder={discovering ? t("Rechercher dans Découvrir", "Search Discover") : t("Rechercher une leçon", "Search lessons")}
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            aria-label={discovering ? t("Rechercher dans Découvrir", "Search Discover") : t("Rechercher une leçon", "Search lessons")}
-          />
+          <input placeholder={t("Rechercher une leçon", "Search lessons")} value={query} onChange={(e) => setQuery(e.target.value)} aria-label={t("Rechercher une leçon", "Search lessons")} />
         </label>
       </div>
-      <div className="view">
+      <div className="view" ref={scroller}>
         <div className="view-inner">
           <header className="page-head">
             <div>
@@ -235,7 +239,7 @@ export function Library() {
             </button>
           </header>
 
-          {resume && !discovering && (
+          {resume && (
             <motion.div
               className="hero glow-surface"
               ref={hero.ref}
@@ -270,7 +274,7 @@ export function Library() {
             </motion.div>
           )}
 
-          {lessons && (lessons.length > 0 || discovering) && (
+          {lessons && lessons.length > 0 && (
             <div className="lib-toolbar">
               <Segmented
                 id="lib-filter"
@@ -283,15 +287,12 @@ export function Library() {
                   { value: "audio", label: t("Audio et vidéo", "Audio and video") },
                   { value: "book", label: t("Livres", "Books") },
                   { value: "done", label: t("Terminées", "Finished") },
-                  { value: "discover", label: <DiscoverTab lang={lang} /> },
                 ]}
               />
             </div>
           )}
 
-          {discovering && <Discover lang={lang} query={query} />}
-
-          {lessons && lessons.length === 0 && !discovering && (
+          {lessons && lessons.length === 0 && (
             <div className="empty">
               <Orb size={48} />
               <h3>{t("Votre bibliothèque attend sa première lumière", "Your library is waiting for its first light")}</h3>
@@ -309,25 +310,24 @@ export function Library() {
                   <Icon name="import" size={16} /> {t("Importer", "Import")}
                 </button>
               </div>
-              <button className="btn ghost disc-invite" onClick={() => setFilter("discover")}>
+              <button className="btn ghost disc-invite" onClick={() => go("discover")}>
                 <Icon name="sparkle" size={15} /> {t("Ou découvrez des vidéos, des podcasts et des articles à votre niveau", "Or discover videos, podcasts and articles at your level")}
               </button>
             </div>
           )}
 
           {/* « popLayout » : une carte qui s'en va quitte aussitôt la grille, les autres prennent sa place en glissant */}
-          {!discovering && (
-            <div className="lesson-grid">
-              <AnimatePresence mode="popLayout">
-                {shown.map((l, i) => (
-                  <LessonCard key={l.id} l={l} index={i} intro={intro} onDelete={() => remove(l)} onRename={() => rename(l)} onPlaylist={() => setAdding(l)} />
-                ))}
-              </AnimatePresence>
-            </div>
-          )}
-          {!discovering && lessons && lessons.length > 0 && shown.length === 0 && <p className="muted" style={{ padding: "40px 0", textAlign: "center" }}>{t("Aucune leçon ne correspond.", "No lesson matches.")}</p>}
+          <div className="lesson-grid">
+            <AnimatePresence mode="popLayout">
+              {shown.map((l, i) => (
+                <LessonCard key={l.id} l={l} index={i} intro={intro} onDelete={() => remove(l)} onRename={() => rename(l)} onPlaylist={() => setAdding(l)} />
+              ))}
+            </AnimatePresence>
+          </div>
+          {lessons && lessons.length > 0 && shown.length === 0 && <p className="muted" style={{ padding: "40px 0", textAlign: "center" }}>{t("Aucune leçon ne correspond.", "No lesson matches.")}</p>}
         </div>
       </div>
+      <ScrollTop target={scroller} />
       <Sheet
         open={!!renaming}
         onClose={() => setRenaming(null)}

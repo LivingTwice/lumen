@@ -23,4 +23,6 @@ pub struct AppState {
     pub backup: crate::backup::Tracker,
     /// Découvrir : ce que les sources proposent (cache à part, `discover.db`)
     pub discover: crate::discover::Store,
+    /// niveau estimé par langue, avec l'empreinte des mots connus qui l'a donné
+    pub levels: Mutex<HashMap<String, (String, crate::level::Estimate)>>,
 }

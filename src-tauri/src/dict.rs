@@ -501,6 +501,95 @@ impl Dict {
     }
 }
 
+// ---------- lemmes : les formes connues regroupées sous leur mot de base ----------
+
+/// Descriptions de formes qu'on ne suit pas pour regrouper (fautes, graphies anciennes).
+const DOUBTFUL: &[&str] = &[
+    "misspelling", "alternative", "variant", "abbreviation", "archaic", "obsolete", "dated", "nonstandard", "pre-reform", "eye dialect",
+    "variante", "orthographe", "abréviation", "graphie", "archaïque", "vieilli",
+];
+
+/// Les dictionnaires d'une langue présents sur ce Mac (dans les deux langues de
+/// l'interface), ouverts à part : un long calcul ne bloque pas les recherches de mots.
+pub struct Lemmatizer {
+    dicts: Vec<Dict>,
+    lang: String,
+}
+
+impl Dicts {
+    /// `None` : aucun dictionnaire de cette langue n'est encore sur ce Mac.
+    pub fn lemmatizer(&self, lang: &str) -> Option<Lemmatizer> {
+        let ui = crate::i18n::native();
+        let other = if ui == "fr" { "en" } else { "fr" };
+        let mut dicts = Vec::new();
+        for native in [ui, other] {
+            let path = if self.bundled(native, lang) {
+                self.ensure(native, lang).ok()
+            } else {
+                remote(native, lang).map(|r| self.remote_db(r, lang)).filter(|p| p.exists())
+            };
+            let Some(p) = path else { continue };
+            let Ok(conn) = Connection::open_with_flags(&p, OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX) else { continue };
+            let v2 = conn.query_row("SELECT value FROM meta WHERE key='format'", [], |r| r.get::<_, String>(0)).is_ok_and(|v| v == "2");
+            dicts.push(Dict { conn, v2 });
+        }
+        (!dicts.is_empty()).then(|| Lemmatizer { dicts, lang: lang.to_string() })
+    }
+}
+
+impl Dict {
+    /// Le mot est une entrée à part entière (nom, verbe…), pas seulement une forme.
+    fn headword(&self, k: &str) -> bool {
+        let Ok(mut st) = self.conn.prepare_cached("SELECT pos FROM entries WHERE k=?1 LIMIT 8") else { return false };
+        let Ok(rows) = st.query_map([k], |r| r.get::<_, String>(0)) else { return false };
+        let found = rows.filter_map(|r| r.ok()).any(|pos| {
+            let p = pos.to_lowercase();
+            !p.starts_with("forme") && !p.starts_with("form") && p != "kanji"
+        });
+        found
+    }
+}
+
+impl Lemmatizer {
+    /// Clé du lemme d'un mot connu ; `None` : le mot est inconnu des dictionnaires
+    /// (nom propre, mot rare, faute de frappe).
+    pub fn lemma(&self, word: &str) -> Option<String> {
+        if let Some(l) = self.lemma_of(word) {
+            return Some(l);
+        }
+        // particules et affixes attachés (coréen, arabe, indonésien, négation soudée)
+        variants(&self.lang, word).into_iter().find_map(|(stem, _)| self.lemma_of(&stem))
+    }
+
+    fn lemma_of(&self, word: &str) -> Option<String> {
+        // une entrée à part entière est son propre lemme (« anno », l'année, pas « hanno »)
+        if self.dicts.iter().any(|d| {
+            let k = d.key(word, &self.lang);
+            !k.is_empty() && d.headword(&k)
+        }) {
+            return Some(key(word, &self.lang));
+        }
+        for d in &self.dicts {
+            let k = d.key(word, &self.lang);
+            if k.is_empty() {
+                continue;
+            }
+            let mut forms: Vec<(String, String)> = d
+                .forms(&k)
+                .unwrap_or_default()
+                .into_iter()
+                .filter(|(l, n)| d.key(l, &self.lang) != k && !DOUBTFUL.iter().any(|x| n.to_lowercase().contains(x)))
+                .collect();
+            // une forme décrite, et la plus simple, d'abord (comme pour l'affichage)
+            forms.sort_by_key(|(_, n)| (n.is_empty(), n.split_whitespace().count()));
+            if let Some((l, _)) = forms.first() {
+                return Some(key(l, &self.lang));
+            }
+        }
+        None
+    }
+}
+
 fn entry_row(r: &rusqlite::Row) -> rusqlite::Result<DictEntry> {
     let g: String = r.get(3)?;
     Ok(DictEntry {

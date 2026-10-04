@@ -46,6 +46,15 @@
   background: var(--bg-sunk);
   isolation: isolate;
 }
+/* sur une carte, l'arrondi du haut épouse celui de la carte (bordure de 1 px comprise).
+   WebKit oublie l'arrondi du cadre tant que l'image qu'il contient s'anime (zoom au
+   survol) : les coins devenaient carrés le temps de l'animation. Un masque, même plein,
+   l'oblige à découper selon l'arrondi (il couperait une ombre portée : cartes seulement). */
+.lesson-card .cover {
+  border-radius: calc(var(--radius-l) - 1px) calc(var(--radius-l) - 1px) 0 0;
+  -webkit-mask-image: linear-gradient(#000, #000);
+  mask-image: linear-gradient(#000, #000);
+}
 .cover-box.big {
   display: flex;
 }
@@ -287,12 +296,17 @@
 }
 .lesson-meta {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
+  gap: 4px 8px;
   font-size: 12px;
   color: var(--muted);
   margin-top: auto;
   padding-top: 6px;
+}
+/* carte étroite : les éléments passent à la ligne entiers, jamais coupés */
+.lesson-meta > * {
+  white-space: nowrap;
 }
 .lesson-meta .sep {
   width: 3px;
@@ -310,6 +324,20 @@
   box-shadow: inset 0 0 0 1px var(--w-new-line);
   margin-right: 6px;
   vertical-align: -0.5px;
+}
+/* part des mots nouveaux, teintée comme les mots nouveaux dans la leçon */
+.new-pct {
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  margin-left: -2px;
+  padding: 0 7px;
+  border-radius: 999px;
+  background: var(--w-new);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--w-new-line) 18%, transparent);
+  color: var(--w-new-line);
+  font-size: 11px;
+  font-weight: 600;
 }
 .done-pill {
   margin-left: auto;
@@ -945,7 +973,7 @@
 
 .import-tabs {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(5, 1fr);
   gap: 8px;
   margin-bottom: 20px;
 }
@@ -2895,4 +2923,292 @@
 }
 .set-row.set-stack .look-papers {
   max-width: 420px;
+}
+
+/* ---------- Importer › Podcast (Gemini) ---------- */
+.pod-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.pod-intro {
+  display: flex;
+  align-items: flex-start;
+  gap: 18px;
+  padding: 18px 18px 16px;
+  border-radius: 16px;
+  border: 1px solid color-mix(in srgb, var(--light-strong) 22%, var(--border));
+  background:
+    radial-gradient(120% 140% at 0% 0%, var(--light-veil), transparent 60%),
+    var(--bg-elev);
+}
+.pod-intro-art {
+  position: relative;
+  flex: none;
+  width: 64px;
+  height: 64px;
+  display: grid;
+  place-items: center;
+}
+/* l'astre « à l'antenne » : deux ondes de lumière qui s'en éloignent */
+.pod-wave {
+  position: absolute;
+  inset: 8px;
+  border-radius: 50%;
+  border: 1.5px solid var(--light-strong);
+  opacity: 0;
+  animation: pod-wave 3.2s ease-out infinite;
+}
+.pod-wave.late {
+  animation-delay: 1.6s;
+}
+@keyframes pod-wave {
+  0% {
+    transform: scale(0.7);
+    opacity: 0.55;
+  }
+  100% {
+    transform: scale(1.45);
+    opacity: 0;
+  }
+}
+.pod-intro-text {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+.pod-intro-text strong {
+  font-family: var(--font-display);
+  font-size: 19px;
+  font-weight: 500;
+}
+.pod-intro-text > span {
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+.pod-steps {
+  margin: 4px 0 0;
+  padding: 0;
+  list-style: none;
+  counter-reset: pod-step;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.pod-steps li {
+  counter-increment: pod-step;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--text);
+}
+.pod-steps li::before {
+  content: counter(pod-step);
+  flex: none;
+  width: 18px;
+  height: 18px;
+  display: inline-grid;
+  place-items: center;
+  border-radius: 50%;
+  font-size: 10.5px;
+  font-weight: 650;
+  color: color-mix(in srgb, var(--light-strong) 75%, var(--text));
+  background: var(--light-veil);
+  transform: translateY(-1px);
+}
+.pod-topic.textarea {
+  min-height: 0;
+  font-size: 16px;
+}
+.pod-ideas {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: -6px;
+}
+.pod-ideas .idea {
+  height: 28px;
+  font-size: 12.5px;
+}
+.pod-ideas .pod-more {
+  color: var(--muted);
+  background: transparent;
+}
+.pod-formats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+.pod-format {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  border: 1px solid var(--border);
+  background: transparent;
+  text-align: left;
+  transition: border-color 0.2s ease, background-color 0.2s ease, box-shadow 0.25s ease;
+}
+.pod-format:hover {
+  background: var(--chip);
+}
+.pod-format.on {
+  border-color: var(--light-strong);
+  background: var(--light-veil);
+  box-shadow: 0 0 0 3px var(--light-veil);
+}
+.pod-format .icon {
+  margin-bottom: 4px;
+  color: var(--muted);
+  transition: color 0.2s ease;
+}
+.pod-format.on .icon {
+  color: var(--light-strong);
+}
+.pod-format strong {
+  font-size: 13.5px;
+  font-weight: 600;
+}
+.pod-format span {
+  font-size: 11.5px;
+  line-height: 1.4;
+  color: var(--muted);
+}
+.pod-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px 22px;
+}
+.pod-level-hint {
+  margin-top: -6px;
+}
+.pod-switch {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: var(--chip);
+}
+.pod-switch .grow {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.pod-switch strong {
+  font-size: 13.5px;
+  font-weight: 550;
+}
+.pod-switch span {
+  font-size: 12px;
+  color: var(--muted);
+}
+.pod-notebook {
+  border-radius: 14px;
+  border: 1px dashed var(--border-strong);
+}
+.pod-notebook.open {
+  border-style: solid;
+  border-color: var(--border);
+}
+.pod-notebook-head {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 14px;
+  border: 0;
+  background: transparent;
+  font-size: 12.5px;
+  font-weight: 550;
+  color: var(--muted);
+}
+.pod-notebook-head:hover {
+  color: var(--text);
+}
+.pod-notebook-head .icon {
+  transition: transform 0.25s ease;
+}
+.pod-notebook.open .pod-notebook-head .icon {
+  transform: rotate(180deg);
+}
+.pod-notebook-body {
+  overflow: hidden;
+}
+.pod-notebook-inner {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 0 14px 14px;
+}
+.pod-notebook-inner p {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+.pod-notebook-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* clé Gemini (Réglages › Podcasts et feuille d'import) */
+.gemini-key {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.key-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.key-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--muted);
+}
+.key-note.error {
+  color: var(--danger);
+}
+.key-note.error .icon {
+  flex: none;
+  margin-top: 1px;
+}
+.key-note.ok {
+  color: var(--text);
+}
+.key-check {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  color: var(--ok);
+  background: color-mix(in srgb, var(--ok) 16%, transparent);
+}
+/* fenêtre étroite : la feuille d'import rétrécit avec elle */
+@media (max-width: 700px) {
+  .pod-formats {
+    grid-template-columns: 1fr;
+  }
+  .import-tabs {
+    grid-template-columns: repeat(3, 1fr);
+  }
 }

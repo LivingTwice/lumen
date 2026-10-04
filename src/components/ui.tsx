@@ -1,5 +1,5 @@
-import { AnimatePresence, motion } from "motion/react";
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { AnimatePresence, motion, useReducedMotion } from "motion/react";
+import { useCallback, useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 import { useApp } from "../lib/store";
 import { Icon } from "./Icon";
 import { formatNumber, t } from "../lib/i18n";
@@ -62,6 +62,17 @@ export function Toasts() {
           >
             {t.kind === "light" && <span className="toast-glow" />}
             {t.text}
+            {t.action && (
+              <button
+                className="toast-action"
+                onClick={() => {
+                  t.action!.run();
+                  useApp.setState((s) => ({ toasts: s.toasts.filter((x) => x.id !== t.id) }));
+                }}
+              >
+                {t.action.label}
+              </button>
+            )}
           </motion.div>
         ))}
       </AnimatePresence>
@@ -220,5 +231,39 @@ export function Duration({ secs }: { secs: number }) {
         </span>
       ))}
     </span>
+  );
+}
+
+/** « Revenir en haut » : apparaît quand on est bien descendu dans une vue qui défile. */
+export function ScrollTop({ target, after = 480 }: { target: RefObject<HTMLElement | null>; after?: number }) {
+  const [shown, setShown] = useState(false);
+  const still = useReducedMotion();
+  useEffect(() => {
+    const el = target.current;
+    if (!el) return;
+    const onScroll = () => setShown(el.scrollTop > after);
+    onScroll();
+    el.addEventListener("scroll", onScroll, { passive: true });
+    return () => el.removeEventListener("scroll", onScroll);
+  }, [target, after]);
+  return (
+    <AnimatePresence>
+      {shown && (
+        <motion.button
+          className="scroll-top"
+          onClick={() => target.current?.scrollTo({ top: 0, behavior: still ? "auto" : "smooth" })}
+          aria-label={t("Revenir en haut", "Back to top")}
+          title={t("Revenir en haut", "Back to top")}
+          initial={{ opacity: 0, y: 14, scale: 0.86 }}
+          animate={{ opacity: 1, y: 0, scale: 1 }}
+          exit={{ opacity: 0, y: 10, scale: 0.9, transition: { duration: 0.16, ease: "easeOut" } }}
+          whileHover={{ y: -2 }}
+          whileTap={{ scale: 0.92 }}
+          transition={{ type: "spring", stiffness: 380, damping: 26 }}
+        >
+          <Icon name="up" size={18} stroke={2.2} />
+        </motion.button>
+      )}
+    </AnimatePresence>
   );
 }

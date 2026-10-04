@@ -1,0 +1,645 @@
+/* ==========================================================================
+   Aperçu : regarder, écouter ou lire avant d'en faire une leçon
+   ========================================================================== */
+
+:root {
+  /* la scène reste une nuit chaude, en clair comme en sombre (vidéo, pochette) */
+  --pv-night: #0f0a06;
+  --pv-night-2: #1a120a;
+}
+
+.pv-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  display: grid;
+  place-items: center;
+  padding: 28px;
+  background: color-mix(in srgb, #140c05 58%, transparent);
+  backdrop-filter: blur(16px) saturate(1.15);
+  -webkit-backdrop-filter: blur(16px) saturate(1.15);
+}
+.pv {
+  position: relative;
+  width: min(1180px, 100%);
+  height: min(720px, calc(100vh - 56px));
+  display: grid;
+  grid-template-columns: minmax(0, 1.62fr) minmax(320px, 1fr);
+  border-radius: 26px;
+  overflow: hidden;
+  background: var(--bg-elev);
+  box-shadow: var(--shadow-l), 0 0 0 1px var(--border), 0 40px 120px rgba(255, 170, 80, 0.12);
+}
+.pv-close {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  z-index: 6;
+}
+
+/* ---------- la scène ---------- */
+
+.pv-stage {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  background: var(--pv-night);
+  overflow: hidden;
+}
+.pv-kind-text .pv-stage {
+  background: var(--bg);
+}
+.pv-player {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: var(--pv-night);
+}
+.pv-video {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  background: transparent;
+  cursor: pointer;
+}
+.pv-ambient {
+  position: absolute;
+  inset: -14%;
+  width: 128%;
+  height: 128%;
+  object-fit: cover;
+  filter: blur(60px) brightness(0.5) saturate(1.5);
+  opacity: 0.85;
+  pointer-events: none;
+}
+.pv-poster {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  filter: brightness(0.55) saturate(1.1);
+}
+.pv-buffer {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  color: rgba(255, 255, 255, 0.82);
+  font-size: 13.5px;
+  pointer-events: none;
+}
+.pv-failed {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 80%;
+  padding: 12px 16px;
+  border-radius: 14px;
+  font-size: 13.5px;
+  line-height: 1.4;
+  color: #fff;
+  background: rgba(194, 65, 45, 0.82);
+}
+.pv-failed.static {
+  position: static;
+  transform: none;
+  margin: 40px auto;
+  width: fit-content;
+}
+.pv-bigplay {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  z-index: 3;
+  width: 78px;
+  height: 78px;
+  margin: -39px 0 0 -39px;
+  display: grid;
+  place-items: center;
+  padding-left: 5px;
+  border: 0;
+  border-radius: 50%;
+  color: #fff;
+  background: rgba(255, 255, 255, 0.14);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.25), 0 0 60px rgba(255, 180, 94, 0.35);
+  cursor: pointer;
+  transition: background 0.25s ease, box-shadow 0.25s ease;
+}
+.pv-bigplay:hover {
+  background: color-mix(in srgb, var(--light-strong) 75%, transparent);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.35), 0 0 80px rgba(255, 180, 94, 0.6);
+}
+
+/* commandes : discrètes pendant la lecture, là dès qu'on survole */
+.pv-controls {
+  position: absolute;
+  left: 14px;
+  right: 14px;
+  bottom: 14px;
+  z-index: 4;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border-radius: 14px;
+  color: #fff;
+  background: rgba(15, 10, 6, 0.55);
+  backdrop-filter: blur(14px) saturate(1.2);
+  -webkit-backdrop-filter: blur(14px) saturate(1.2);
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
+.pv-player.paused .pv-controls,
+.pv-player.sound .pv-controls,
+.pv-player:hover .pv-controls,
+.pv-player:focus-within .pv-controls {
+  opacity: 1;
+}
+.pv-ctl {
+  display: grid;
+  place-items: center;
+  min-width: 32px;
+  height: 32px;
+  padding: 0 6px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 650;
+  cursor: pointer;
+}
+.pv-ctl:hover {
+  background: rgba(255, 255, 255, 0.12);
+}
+.pv-time {
+  font-size: 12px;
+  white-space: nowrap;
+  opacity: 0.9;
+}
+.pv-time i {
+  font-style: normal;
+  opacity: 0.45;
+}
+.pv-scrub {
+  --p: 0%;
+  flex: 1;
+  display: flex;
+  align-items: center;
+  height: 24px;
+  cursor: pointer;
+}
+.pv-scrub input {
+  width: 100%;
+  height: 4px;
+  margin: 0;
+  -webkit-appearance: none;
+  appearance: none;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--light-strong), var(--light) var(--p), rgba(255, 255, 255, 0.22) var(--p));
+  cursor: pointer;
+}
+.pv-scrub input::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 0 0 3px rgba(255, 180, 94, 0.35), 0 0 12px rgba(255, 180, 94, 0.7);
+}
+
+/* son seul : la pochette sur son reflet, et les paroles qui s'éclairent */
+.pv-cover {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 40px;
+  padding: 40px 44px 84px;
+  overflow: hidden;
+  background: radial-gradient(120% 90% at 30% 20%, var(--pv-night-2), var(--pv-night));
+  container-type: size;
+  --art: min(300px, 38cqw, calc(100cqh - 124px));
+}
+.pv-cover-back {
+  position: absolute;
+  inset: -12%;
+  width: 124%;
+  height: 124%;
+  object-fit: cover;
+  filter: blur(46px) brightness(0.45) saturate(1.5);
+  opacity: 0.9;
+}
+.pv-cover-art {
+  position: relative;
+  z-index: 1;
+  flex: 0 0 auto;
+  /* carrée, aussi grande que la scène le permet (unités de la scène) */
+  width: var(--art);
+  height: var(--art);
+  border-radius: 20px;
+  overflow: hidden;
+  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(255, 255, 255, 0.08);
+}
+.pv-cover-art img,
+.pv-cover-art .cover-art {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.pv-lyrics {
+  position: relative;
+  z-index: 1;
+  flex: 1;
+  min-width: 0;
+  align-self: stretch;
+  overflow-y: auto;
+  padding: 0 6px 0 0;
+  scrollbar-width: none;
+  font-family: var(--font-read);
+  font-size: 21px;
+  line-height: 1.45;
+  color: rgba(255, 255, 255, 0.72);
+  -webkit-mask-image: linear-gradient(transparent, #000 22%, #000 78%, transparent);
+  mask-image: linear-gradient(transparent, #000 22%, #000 78%, transparent);
+}
+.pv-lyrics::-webkit-scrollbar {
+  display: none;
+}
+/* de l'air avant la première ligne et après la dernière : la ligne chantée peut venir au milieu */
+.pv-lyrics::before,
+.pv-lyrics::after {
+  content: "";
+  display: block;
+  height: 40%;
+}
+.pv-lyrics p {
+  margin: 0 0 10px;
+  transition: color 0.35s ease, text-shadow 0.35s ease;
+}
+.pv-lyrics.live p {
+  color: rgba(255, 255, 255, 0.38);
+}
+.pv-lyrics.live p.past {
+  color: rgba(255, 255, 255, 0.55);
+}
+.pv-lyrics.live p.on {
+  color: #fff;
+  text-shadow: 0 0 26px rgba(255, 190, 110, 0.6);
+}
+.pv-lyrics-gap {
+  display: block;
+  height: 18px;
+}
+
+/* un article : le début, dans la police de lecture */
+.pv-read {
+  position: absolute;
+  inset: 0;
+  overflow-y: auto;
+  padding: 52px 56px 40px;
+  color: var(--text);
+  -webkit-mask-image: linear-gradient(#000 80%, transparent);
+  mask-image: linear-gradient(#000 80%, transparent);
+}
+.pv-read article {
+  max-width: 640px;
+  margin: 0 auto;
+  font-family: var(--font-read);
+  font-size: 18px;
+  line-height: 1.7;
+}
+.pv-read h3 {
+  margin: 0 0 18px;
+  font-family: var(--font-display);
+  font-size: 30px;
+  font-weight: 500;
+  line-height: 1.15;
+}
+.pv-read p {
+  margin: 0 0 1em;
+}
+.pv-read-ghost {
+  max-width: 640px;
+  margin: 0 auto;
+}
+.pv-read-ghost i {
+  display: block;
+  height: 13px;
+  margin: 0 0 15px;
+  border-radius: 6px;
+  background: var(--chip-hover);
+  position: relative;
+  overflow: hidden;
+}
+.pv-read-ghost i::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(100deg, transparent 30%, var(--light-veil) 50%, transparent 70%);
+  animation: shimmer 1.6s ease-in-out infinite;
+}
+
+/* ---------- la colonne d'information ---------- */
+
+.pv-side {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-height: 0;
+  padding: 30px 26px 22px;
+  overflow-y: auto;
+  border-left: 1px solid var(--border);
+}
+/* rien ne s'écrase dans la colonne : elle défile */
+.pv-side > * {
+  flex-shrink: 0;
+}
+.pv-platform {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding-right: 40px;
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--disc-ink);
+}
+.pv-platform .lv-chip {
+  margin-left: 4px;
+}
+.pv-title {
+  font-family: var(--font-display);
+  font-size: 28px;
+  font-weight: 500;
+  line-height: 1.15;
+  letter-spacing: -0.01em;
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+.pv-facts {
+  margin-top: -6px;
+  font-size: 13px;
+  color: var(--muted);
+}
+.pv-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: var(--chip);
+  font-size: 13px;
+  line-height: 1.45;
+}
+.pv-note > .icon {
+  flex-shrink: 0;
+  margin-top: 1px;
+  color: var(--disc-ink);
+}
+.pv-note > div {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+.pv-note strong {
+  font-weight: 620;
+}
+.pv-note span {
+  color: var(--muted);
+}
+.pv-note .btn {
+  align-self: flex-start;
+  margin-top: 6px;
+}
+.pv-note.glow {
+  background: var(--light-veil);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--light-strong) 28%, transparent);
+}
+.pv-note.error {
+  background: color-mix(in srgb, var(--danger) 11%, transparent);
+}
+.pv-note.error > .icon,
+.pv-note.error span {
+  color: var(--danger);
+}
+
+/* part de mots connus */
+.pv-known {
+  padding: 14px 14px 12px;
+  border-radius: 14px;
+  background: var(--chip);
+}
+.pv-known-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+.pv-known-head strong {
+  font-family: var(--font-display);
+  font-size: 26px;
+  font-weight: 500;
+  color: var(--text);
+}
+.pv-known-bar {
+  height: 6px;
+  margin: 8px 0 7px;
+  border-radius: 999px;
+  background: var(--chip-hover);
+  overflow: hidden;
+}
+.pv-known-bar i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--light-strong), var(--light));
+  box-shadow: 0 0 12px var(--light-soft);
+  transition: width 0.6s var(--ease-out);
+}
+.pv-known-foot {
+  font-size: 12px;
+  color: var(--faint);
+}
+
+/* le début ou tout l'article */
+.pv-choice {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+.pv-choice button {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.2s ease, background 0.2s ease;
+}
+.pv-choice button strong {
+  font-size: 13px;
+  font-weight: 620;
+}
+.pv-choice button span {
+  font-size: 12px;
+  color: var(--muted);
+}
+.pv-choice button.on {
+  border-color: color-mix(in srgb, var(--light-strong) 55%, transparent);
+  background: var(--light-veil);
+}
+
+.pv-desc {
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--muted);
+}
+.pv-desc p {
+  white-space: pre-line;
+  display: -webkit-box;
+  -webkit-line-clamp: 6;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+.pv-desc.open p {
+  display: block;
+}
+
+.pv-actions {
+  margin-top: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-top: 6px;
+}
+.pv-make {
+  width: 100%;
+  justify-content: center;
+}
+.pv-making {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  padding: 14px;
+  border-radius: 14px;
+  background: var(--light-veil);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--light-strong) 30%, transparent);
+}
+.pv-making-head {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-size: 13.5px;
+}
+.pv-making-head strong {
+  flex: 1;
+  font-weight: 620;
+}
+.pv-making-head span {
+  font-size: 12.5px;
+  color: var(--muted);
+}
+.pv-making-hint,
+.pv-hint {
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--faint);
+}
+.pv-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  margin-left: -8px;
+}
+
+@media (max-width: 980px) {
+  .pv {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto minmax(0, 1fr);
+    height: min(860px, calc(100vh - 40px));
+  }
+  /* la scène laisse la moitié de la hauteur à l'information */
+  .pv-stage {
+    height: min(46vh, calc((100vw - 56px) * 9 / 16));
+  }
+  .pv-kind-text .pv-stage {
+    height: 38vh;
+  }
+  .pv-side {
+    padding: 20px 22px 18px;
+    border-left: 0;
+    border-top: 1px solid var(--border);
+  }
+  .pv-cover {
+    padding: 24px 28px 72px;
+    gap: 24px;
+    --art: min(300px, 38cqw, calc(100cqh - 96px));
+  }
+  .pv-lyrics {
+    font-size: 17px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pv-lyrics p {
+    transition: none;
+  }
+}
+
+/* la croix reste visible sur la scène sombre comme sur la colonne claire */
+.pv .pv-close {
+  background: var(--bg-elev);
+  box-shadow: var(--shadow-s), 0 0 0 1px var(--border);
+}
+
+/* paroles d'un clip : dans la colonne, à faire défiler */
+.pv-side-lyrics {
+  flex-shrink: 0;
+  height: 210px;
+  border-radius: 14px;
+  background: var(--chip);
+  overflow: hidden;
+}
+.pv-side-lyrics .pv-lyrics {
+  height: 100%;
+  padding: 18px 16px;
+  font-size: 15px;
+  color: var(--text);
+  -webkit-mask-image: linear-gradient(transparent, #000 12%, #000 88%, transparent);
+  mask-image: linear-gradient(transparent, #000 12%, #000 88%, transparent);
+}
+.pv-side-lyrics .pv-lyrics p {
+  margin-bottom: 6px;
+}
+.pv-side-lyrics .pv-lyrics::before,
+.pv-side-lyrics .pv-lyrics::after {
+  height: 4px;
+}

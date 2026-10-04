@@ -153,7 +153,7 @@ pub async fn say(data_dir: &Path, m: &ModelInfo, lang: &str, text: &str, voice: 
 }
 
 /// Échantillons d'un WAV PCM 16 bits mono, avec leur fréquence.
-fn read_pcm(wav: &[u8]) -> Option<(u32, Vec<i16>)> {
+pub(crate) fn read_pcm(wav: &[u8]) -> Option<(u32, Vec<i16>)> {
     if wav.len() < 12 || &wav[0..4] != b"RIFF" || &wav[8..12] != b"WAVE" {
         return None;
     }
@@ -179,7 +179,7 @@ fn read_pcm(wav: &[u8]) -> Option<(u32, Vec<i16>)> {
     Some((rate, data?.chunks_exact(2).map(|c| i16::from_le_bytes([c[0], c[1]])).collect()))
 }
 
-fn write_wav(rate: u32, s: &[i16]) -> Vec<u8> {
+pub(crate) fn write_wav(rate: u32, s: &[i16]) -> Vec<u8> {
     let bytes = (s.len() * 2) as u32;
     let mut out = Vec::with_capacity(44 + bytes as usize);
     out.extend_from_slice(b"RIFF");
@@ -201,7 +201,7 @@ fn write_wav(rate: u32, s: &[i16]) -> Vec<u8> {
 }
 
 /// Début et fin de la parole (au-dessus de 2 % de la crête), en échantillons.
-fn speech_bounds(s: &[i16]) -> Option<(usize, usize, i32)> {
+pub(crate) fn speech_bounds(s: &[i16]) -> Option<(usize, usize, i32)> {
     let peak = s.iter().map(|v| (*v as i32).abs()).max().unwrap_or(0);
     if peak < 200 {
         return None;
@@ -381,34 +381,45 @@ pub async fn lesson_audio(
         return Err(e);
     }
     // volume égalisé sur l'ensemble (les phrases gardent leurs nuances entre elles)
+    level_volume(&mut all);
+    let duration = all.len() as f64 / rate.max(1) as f64;
+    let path = save_m4a(&work, &media, "voice", rate, &all).await;
+    drop(all);
+    let _ = tokio::fs::remove_dir_all(&work).await;
+    Ok(LessonAudio { path: path?, timings, duration })
+}
+
+/// Crête ramenée à 85 % du maximum (gain borné : un son presque muet reste discret).
+pub(crate) fn level_volume(all: &mut [i16]) {
     if let Some(peak) = all.iter().map(|v| (*v as i32).abs()).max().filter(|p| *p > 0) {
         let gain = (0.85 * 32767.0 / peak as f32).min(2.5);
         for v in all.iter_mut() {
             *v = (*v as f32 * gain).round().clamp(-32768.0, 32767.0) as i16;
         }
     }
-    let duration = all.len() as f64 / rate.max(1) as f64;
-    let wav_path = work.join("lecon.wav");
-    tokio::fs::write(&wav_path, write_wav(rate, &all)).await?;
-    drop(all);
+}
+
+/// Enregistre un son assemblé dans `media/<horodatage>.<tag>.m4a`, compressé en
+/// AAC (environ 0,5 Mo par minute au lieu de 5 Mo en WAV) ; en WAV si `afconvert` échoue.
+/// `work` : dossier de travail, où passe le WAV intermédiaire.
+pub(crate) async fn save_m4a(work: &Path, media: &Path, tag: &str, rate: u32, samples: &[i16]) -> Result<PathBuf> {
+    let wav_path = work.join(format!("{tag}.wav"));
+    tokio::fs::write(&wav_path, write_wav(rate, samples)).await?;
     let stem = crate::media::new_stem();
-    let m4a = media.join(format!("{stem}.voice.m4a"));
-    // AAC : environ 0,5 Mo par minute au lieu de 5 Mo en WAV
+    let m4a = media.join(format!("{stem}.{tag}.m4a"));
     let conv = tokio::process::Command::new("afconvert")
         .args(["-f", "m4af", "-d", "aac", "-b", "64000"])
         .arg(&wav_path)
         .arg(&m4a)
         .output()
         .await;
-    let path = if conv.map(|o| o.status.success()).unwrap_or(false) && m4a.exists() {
-        m4a
-    } else {
-        let wav = media.join(format!("{stem}.voice.wav"));
-        tokio::fs::rename(&wav_path, &wav).await?;
-        wav
-    };
-    let _ = tokio::fs::remove_dir_all(&work).await;
-    Ok(LessonAudio { path, timings, duration })
+    if conv.map(|o| o.status.success()).unwrap_or(false) && m4a.exists() {
+        let _ = tokio::fs::remove_file(&wav_path).await;
+        return Ok(m4a);
+    }
+    let wav = media.join(format!("{stem}.{tag}.wav"));
+    tokio::fs::rename(&wav_path, &wav).await?;
+    Ok(wav)
 }
 
 #[cfg(test)]

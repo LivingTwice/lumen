@@ -188,3 +188,32 @@ export function baseName(path: string): string {
   const name = path.split(/[\\/]/).pop() ?? path;
   return name.replace(/\.[^.]+$/, "").replace(/[_-]+/g, " ").trim();
 }
+
+export function wordCount(text: string): number {
+  return text.split(/\s+/).filter(Boolean).length;
+}
+
+/** Coupe un long texte en parties d'environ `max` mots, aux paragraphes. */
+export function splitLong(text: string, max = 2600): string[] {
+  const paras = text.split("\n\n");
+  const parts: string[] = [];
+  let cur: string[] = [];
+  let n = 0;
+  for (const p of paras) {
+    const w = wordCount(p);
+    if (n + w > max && cur.length) {
+      parts.push(cur.join("\n\n"));
+      cur = [];
+      n = 0;
+    }
+    cur.push(p);
+    n += w;
+  }
+  if (cur.length) parts.push(cur.join("\n\n"));
+  return parts;
+}
+
+/** Le début d'un long texte (aux paragraphes), environ `max` mots. */
+export function firstWords(text: string, max: number): string {
+  return splitLong(text, max)[0] ?? text;
+}

@@ -6,6 +6,7 @@ import { api, errorText, isTauri } from "../lib/api";
 import { youtubeId } from "../lib/covers";
 import { pickFiles } from "../lib/dialogs";
 import { cleanTitle, useDiscover } from "../lib/discover";
+import { stageText } from "../lib/imports";
 import {
   MEDIA_EXT,
   baseName,
@@ -16,60 +17,25 @@ import {
   extractEpub,
   extractPdf,
   extractSubtitles,
+  splitLong,
+  wordCount,
   type Chapter,
 } from "../lib/importers";
 import { count, formatNumber, locale, pick, t } from "../lib/i18n";
 import { inLang } from "../lib/langs";
-import { formatBytes, formatDuration, useApp } from "../lib/store";
+import { formatBytes, formatDuration, useApp, type ImportTab } from "../lib/store";
 import type { DiscoverItem, ImportEvent, LinkInfo, LinkMedia, NewLesson } from "../lib/types";
+import { PodcastTab, usePodcastForm } from "./import/PodcastTab";
 
-type Tab = "text" | "link" | "file" | "media";
+type Tab = ImportTab;
 
 const tabs = (): { id: Tab; label: string; hint: string; icon: IconName }[] => [
   { id: "text", label: t("Texte", "Text"), hint: t("Coller", "Paste"), icon: "text" },
   { id: "link", label: t("Lien", "Link"), hint: t("Web, vidéo, podcast", "Web, video, podcast"), icon: "link" },
   { id: "file", label: t("Fichier", "File"), hint: "EPUB, PDF, SRT…", icon: "file" },
   { id: "media", label: t("Audio, vidéo", "Audio, video"), hint: "Transcription", icon: "wave" },
+  { id: "podcast", label: "Podcast", hint: t("Écrit pour vous", "Made for you"), icon: "podcast" },
 ];
-
-const stages = (): Record<string, string> => ({
-  probe: t("Lecture du lien", "Reading the link"),
-  copy: t("Copie du fichier", "Copying the file"),
-  tools: t("Installation des composants vidéo", "Installing the video components"),
-  download: t("Téléchargement du son", "Downloading the sound"),
-  file: t("Téléchargement du fichier", "Downloading the file"),
-  video: t("Finalisation de la vidéo", "Finishing the video"),
-  decode: t("Lecture du son", "Reading the sound"),
-  model: t("Préparation du modèle", "Preparing the model"),
-  transcribe: "Transcription",
-  // avec Qwen3-ASR : Whisper repère les mots, puis Qwen3-ASR écrit le texte
-  timing: t("Repérage des mots", "Locating the words"),
-  text: t("Écriture du texte", "Writing the text"),
-});
-
-function wordCount(t: string) {
-  return t.split(/\s+/).filter(Boolean).length;
-}
-
-/** Coupe un long texte en parties d'environ `max` mots, aux paragraphes. */
-function splitLong(text: string, max = 2600): string[] {
-  const paras = text.split("\n\n");
-  const parts: string[] = [];
-  let cur: string[] = [];
-  let n = 0;
-  for (const p of paras) {
-    const w = wordCount(p);
-    if (n + w > max && cur.length) {
-      parts.push(cur.join("\n\n"));
-      cur = [];
-      n = 0;
-    }
-    cur.push(p);
-    n += w;
-  }
-  if (cur.length) parts.push(cur.join("\n\n"));
-  return parts;
-}
 
 interface Pending {
   title: string;
@@ -139,6 +105,8 @@ export function ImportSheet() {
   const open = useApp((s) => s.importOpen);
   const files = useApp((s) => s.importFiles);
   const item = useApp((s) => s.importItem);
+  const linkToOpen = useApp((s) => s.importUrl);
+  const tabToOpen = useApp((s) => s.importTab);
   const close = useApp((s) => s.closeImport);
   const lang = useApp((s) => s.lang)();
   const info = useApp((s) => s.info);
@@ -161,6 +129,7 @@ export function ImportSheet() {
   const [mediaFiles, setMediaFiles] = useState<string[]>([]);
   const [found, setFound] = useState<Found | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const podcast = usePodcastForm(lang);
 
   const asrReady = models.some((m) => m.kind === "asr" && m.installed);
   const asrModel = models.find((m) => m.kind === "asr" && m.id === "whisper-turbo") ?? models.find((m) => m.kind === "asr");
@@ -176,11 +145,16 @@ export function ImportSheet() {
     setMediaFiles([]);
     setFound(null);
     setError(null);
+    podcast.reset();
   };
 
   useEffect(() => {
     if (!open) return;
     reset();
+    if (tabToOpen) {
+      setTab(tabToOpen);
+      return;
+    }
     if (item) {
       // depuis Découvrir : la vidéo ou l'épisode est déjà connu ; un article (ou un
       // épisode dont la page porte le texte) se lit d'abord sur sa page
@@ -197,6 +171,12 @@ export function ImportSheet() {
         });
       return;
     }
+    if (linkToOpen) {
+      setTab("link");
+      setUrl(linkToOpen);
+      void probeLink(linkToOpen);
+      return;
+    }
     if (files && files.length) {
       const media = files.filter((f) => MEDIA_EXT.includes(extOf(f)));
       const docs = files.filter((f) => !MEDIA_EXT.includes(extOf(f)));
@@ -209,7 +189,7 @@ export function ImportSheet() {
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, files, item]);
+  }, [open, files, item, linkToOpen, tabToOpen]);
 
   const finish = (ids: number[], label: string) => {
     // la carte de Découvrir mène désormais à la leçon
@@ -385,7 +365,7 @@ export function ImportSheet() {
 
   const onImportEvent = (stagePrefix: string) => (e: ImportEvent) => {
     if (e.type === "stage") {
-      setBusy(`${stagePrefix}${stages()[e.stage] ?? e.stage}`);
+      setBusy(`${stagePrefix}${stageText(e.stage)}`);
       setProgress(["transcribe", "timing", "text", "download", "file", "tools"].includes(e.stage) ? 0 : null);
     } else setProgress(e.value);
   };
@@ -480,6 +460,20 @@ export function ImportSheet() {
             {t("Ajouter à la bibliothèque", "Add to the library")}
           </button>
         </>
+      );
+    if (tab === "podcast" && podcast.hasKey)
+      footer = (
+        <button
+          className="btn primary"
+          disabled={!podcast.ready}
+          onClick={() => {
+            podcast.create();
+            close();
+            toast(t("Gemini écrit votre podcast. Il vous attendra dans la bibliothèque.", "Gemini is writing your podcast. It will be waiting in your library."), "light");
+          }}
+        >
+          <Icon name="sparkle" size={15} /> {t("Créer le podcast", "Create the podcast")}
+        </button>
       );
     if (tab === "media")
       footer = (
@@ -671,6 +665,8 @@ export function ImportSheet() {
                 </div>
               </>
             )}
+
+            {tab === "podcast" && <PodcastTab form={podcast} />}
 
             {tab === "media" && (
               <>

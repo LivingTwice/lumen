@@ -10,6 +10,7 @@ import "./styles/onboarding.css";
 import "./styles/chat.css";
 import "./styles/guide.css";
 import "./styles/discover.css";
+import "./styles/preview.css";
 import "./styles/news.css";
 import "./styles/tour.css";
 

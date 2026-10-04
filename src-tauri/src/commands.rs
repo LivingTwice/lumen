@@ -17,6 +17,10 @@ use crate::dict::DictResult;
 use crate::discover;
 use crate::link;
 use crate::lingq;
+use crate::lyrics;
+use crate::level;
+use crate::podcast;
+use crate::search;
 use crate::media::{self, ImportEvent};
 use crate::models::{self, DownloadEvent};
 use crate::i18n::{self, t};
@@ -1083,6 +1087,84 @@ pub async fn lesson_fetch_video(state: State<'_, AppState>, id: i64, on_event: C
     Ok(p)
 }
 
+// ---------- podcasts sur mesure (Gemini) ----------
+
+/// Vérifie une clé Gemini et dit quels modèles elle ouvre (pour écrire, pour dire).
+#[tauri::command]
+pub async fn gemini_check(key: String) -> R<podcast::Models> {
+    let c = podcast::client().map_err(err)?;
+    podcast::models(&c, &key).await.map_err(err)
+}
+
+/// Crée un podcast sur mesure et en fait une leçon : Gemini l'écrit puis le dit
+/// (voir `podcast`). Le texte de la leçon est celui du script ; Whisper, s'il
+/// est installé, cale la lanterne mot à mot (et si la voix s'en écartait trop,
+/// le son serait transcrit comme un import ordinaire).
+#[tauri::command]
+pub async fn podcast_create(state: State<'_, AppState>, lang: String, request: podcast::Request, on_event: Channel<ImportEvent>) -> R<i64> {
+    let send = |stage: &str| {
+        let _ = on_event.send(ImportEvent::Stage { stage: stage.into() });
+    };
+    let (key, words) = {
+        let c = state.db.lock();
+        let key = db::setting(&c, "gemini_key").map(|k| k.trim().to_string()).filter(|k| !k.is_empty());
+        let words = if request.use_words { db::learning_terms(&c, &lang, 25).map_err(err)? } else { Vec::new() };
+        (key, words)
+    };
+    let key = key.ok_or(t("Ajoutez d'abord votre clé Gemini (Réglages › Podcasts).", "First add your Gemini key (Settings › Podcasts)."))?;
+    if request.topic.trim().is_empty() {
+        return Err(t("Choisissez un sujet pour le podcast.", "Choose a topic for the podcast.").into());
+    }
+    send("script");
+    let c = podcast::client().map_err(err)?;
+    let models = podcast::models(&c, &key).await.map_err(err)?;
+    let script = podcast::write(&c, &key, &models.text, &lang, &request, &words).await.map_err(err)?;
+    send("studio");
+    let rec = podcast::record(&c, &key, &models.tts, &state.data_dir, &lang, request.level, &script, |p| {
+        let _ = on_event.send(ImportEvent::Progress { value: p });
+    })
+    .await
+    .map_err(err)?;
+    let mut text = rec.text.clone();
+    let mut timings = serde_json::to_string(&rec.timings).map_err(err)?;
+    let mut version = db::TIMING_LINES;
+    if let Ok(m) = active_model(&state, "asr") {
+        let whisper = models::path_of(&state.data_dir, m);
+        let heard = media::lesson_transcript(&state.ai, &whisper, text_model(&state, &lang), &rec.path, &lang, Some(&rec.text), |e| {
+            let _ = on_event.send(e);
+        })
+        .await;
+        match heard {
+            Ok((x, y)) if !x.trim().is_empty() => {
+                text = x;
+                timings = y;
+                version = db::TIMING_PRECISE;
+            }
+            // la leçon se crée quand même, avec la lanterne réplique par réplique
+            Ok(_) => {}
+            Err(e) => eprintln!("podcast : recalage impossible : {e}"),
+        }
+    }
+    send("lesson");
+    let lesson = NewLesson {
+        lang,
+        title: script.title.clone(),
+        collection: t("Mes podcasts", "My podcasts").into(),
+        kind: "audio".into(),
+        source: String::new(),
+        text,
+        media_path: Some(rec.path.display().to_string()),
+        timings: Some(timings.clone()),
+        video_path: None,
+    };
+    let conn = state.db.lock();
+    let id = db::lesson_create(&conn, &lesson).map_err(err)?;
+    db::lesson_set_timings(&conn, id, &timings, version).map_err(err)?;
+    // la bibliothèque connaît la durée avant la première écoute
+    db::lesson_update(&conn, id, &LessonPatch { duration: Some(rec.duration), ..Default::default() }).map_err(err)?;
+    Ok(id)
+}
+
 // ---------- LingQ ----------
 
 /// Clé de l'import LingQ dans la table des travaux annulables.
@@ -1170,11 +1252,17 @@ pub async fn discover_list(state: State<'_, AppState>, lang: String) -> R<discov
 
 /// Relit maintenant les sources d'une langue (sans attendre la lecture du jour).
 #[tauri::command]
-pub async fn discover_refresh(app: tauri::AppHandle, state: State<'_, AppState>, lang: String, on_event: Channel<ImportEvent>) -> R<discover::Report> {
+pub async fn discover_refresh(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    lang: String,
+    force: Option<bool>,
+    on_event: Channel<ImportEvent>,
+) -> R<discover::Report> {
     let mut send = |e: ImportEvent| {
         let _ = on_event.send(e);
     };
-    let report = discover::refresh(&state.data_dir, &state.discover, &lang, i18n::native(), &mut send).await.map_err(err)?;
+    let report = discover::refresh(&state.data_dir, &state.discover, &lang, i18n::native(), force.unwrap_or(true), &mut send).await.map_err(err)?;
     let _ = app.emit("discover", &lang);
     Ok(report)
 }
@@ -1189,4 +1277,203 @@ pub async fn discover_mark(state: State<'_, AppState>, id: String, lesson: i64) 
 #[tauri::command]
 pub async fn discover_hide(state: State<'_, AppState>, id: String) -> R<()> {
     state.discover.hide(&id).map_err(err)
+}
+
+// ---------- Chercher : vidéos, podcasts, chansons, articles en ligne ----------
+
+/// Cherche sur une plateforme, dans la langue étudiée (voir `search::search`).
+#[tauri::command]
+pub async fn search_online(
+    state: State<'_, AppState>,
+    lang: String,
+    platform: String,
+    query: String,
+    page: usize,
+    filter: String,
+    on_event: Channel<ImportEvent>,
+) -> R<search::SearchPage> {
+    let mut send = |e: ImportEvent| {
+        let _ = on_event.send(e);
+    };
+    search::search(&state.data_dir, &lang, &platform, &query, page, &filter, &mut send).await.map_err(err)
+}
+
+/// Adresses de lecture d'une vidéo (ou du seul son) pour l'aperçu.
+#[tauri::command]
+pub async fn media_stream(state: State<'_, AppState>, url: String, audio: bool) -> R<search::Stream> {
+    let browser = db::setting(&state.db.lock(), "youtube_browser").filter(|b| !b.is_empty());
+    search::stream(&state.data_dir, &url, audio, browser.as_deref()).await.map_err(err)
+}
+
+/// La vidéo YouTube d'une chanson (version de l'album de préférence).
+#[tauri::command]
+pub async fn song_find(state: State<'_, AppState>, artist: String, title: String) -> R<String> {
+    search::song_url(&state.data_dir, &artist, &title).await.map_err(err)
+}
+
+/// Les paroles d'une chanson (minutées si possible), ou rien.
+#[tauri::command]
+pub async fn lyrics_find(artist: String, title: String, album: String, duration: f64) -> R<Option<lyrics::Lyrics>> {
+    let c = lyrics::client().map_err(err)?;
+    Ok(lyrics::find(&c, &artist, &title, &album, duration).await.filter(|l| !l.is_empty()))
+}
+
+/// Une chanson à importer : ce que la recherche ou Découvrir en sait.
+#[derive(serde::Deserialize, Debug)]
+pub struct SongItem {
+    /// vidéo YouTube de la chanson (vide : cherchée sur YouTube Music)
+    #[serde(default)]
+    pub url: String,
+    pub artist: String,
+    pub title: String,
+    #[serde(default)]
+    pub album: String,
+    #[serde(default)]
+    pub duration: f64,
+    /// pochette (sauf clip YouTube, qui a ses miniatures)
+    #[serde(default)]
+    pub image: String,
+    /// page d'origine (source de la leçon)
+    #[serde(default)]
+    pub page: String,
+    /// paroles déjà trouvées (sinon cherchées)
+    #[serde(default)]
+    pub lyrics: Option<lyrics::Lyrics>,
+    /// garder l'image du clip, sinon le son seul
+    #[serde(default)]
+    pub video: bool,
+}
+
+/// Une chanson devient une leçon : les paroles pour texte, une ligne par
+/// paragraphe ; la lanterne suit les lignes des paroles minutées, recalée mot à
+/// mot sur la voix si Whisper est installé. Pas de transcription : le chant se
+/// transcrit mal, les paroles publiées sont justes.
+#[tauri::command]
+pub async fn import_song(state: State<'_, AppState>, lang: String, song: SongItem, on_event: Channel<ImportEvent>) -> R<i64> {
+    let data_dir = state.data_dir.clone();
+    let browser = db::setting(&state.db.lock(), "youtube_browser").filter(|b| !b.is_empty());
+    let send = |stage: &str| {
+        let _ = on_event.send(ImportEvent::Stage { stage: stage.into() });
+    };
+    let mut prog = |p: f64| {
+        let _ = on_event.send(ImportEvent::Progress { value: p });
+    };
+    send("lyrics");
+    let found = match song.lyrics.clone().filter(|l| !l.is_empty()) {
+        Some(l) => Some(l),
+        None => {
+            let c = lyrics::client().map_err(err)?;
+            lyrics::find(&c, &song.artist, &song.title, &song.album, song.duration).await.filter(|l| !l.is_empty())
+        }
+    };
+    let words = found.as_ref().ok_or(t(
+        "Lumen n'a pas trouvé les paroles de cette chanson. Vous pouvez l'importer comme une vidéo : elle sera transcrite.",
+        "Lumen couldn't find the lyrics of this song. You can import it as a video: it will be transcribed.",
+    ))?;
+    let (text, lrc) = lyrics::layout(words, &lang, song.duration);
+    if crate::text::word_keys(&text, &lang).len() < 8 {
+        return Err(t("Les paroles trouvées sont trop courtes pour une leçon.", "The lyrics found are too short for a lesson.").into());
+    }
+    if crate::tools::find_ytdlp(&data_dir).is_none() {
+        send("tools");
+    }
+    let ytdlp = crate::tools::ensure_youtube_tools(&data_dir, &mut prog).await.map_err(err)?;
+    let url = if song.url.trim().is_empty() {
+        send("probe");
+        search::song_url(&data_dir, &song.artist, &song.title).await.map_err(err)?
+    } else {
+        song.url.clone()
+    };
+    send("download");
+    let stem = media::new_stem();
+    let (audio, _) = media::yt_audio(&data_dir, &ytdlp, &url, &stem, browser.as_deref(), &mut prog).await.map_err(err)?;
+    let video_task = song.video.then(|| {
+        let (dd, yt, u, st, br) = (data_dir.clone(), ytdlp.clone(), url.clone(), stem.clone(), browser.clone());
+        tokio::spawn(async move {
+            let mut quiet = |_p: f64| {};
+            media::yt_video(&dd, &yt, &u, &st, br.as_deref(), &mut quiet).await
+        })
+    });
+    let cover_task = (!song.image.is_empty() && !song.video).then(|| {
+        let (dd, u) = (data_dir.clone(), song.image.clone());
+        tokio::spawn(async move { link::fetch_cover(&dd, &u).await })
+    });
+
+    // la lanterne : mot à mot sur la voix si Whisper l'entend assez, sinon ligne à ligne
+    let mut timings = lrc.clone();
+    let mut version = db::TIMING_LINES;
+    if let Ok(m) = active_model(&state, "asr") {
+        let whisper = models::path_of(&state.data_dir, m);
+        let heard = media::transcribe(&whisper, &audio, &lang, None, |e| {
+            let _ = on_event.send(e);
+        })
+        .await;
+        if let Ok(heard) = heard {
+            let (aligned, found) = media::align_timings(&text, &lang, &heard);
+            if found >= 0.35 || (lrc.is_none() && found >= 0.15) {
+                timings = Some(aligned);
+                version = db::TIMING_PRECISE;
+            }
+        }
+    }
+    let mut video = None;
+    if let Some(task) = video_task {
+        send("video");
+        if let Ok(Ok(p)) = task.await {
+            video = Some(p.display().to_string());
+        }
+    }
+    let cover = match cover_task {
+        Some(task) => task.await.ok().flatten(),
+        None => None,
+    };
+    let timings = timings.unwrap_or_else(|| "[]".into());
+    let lesson = NewLesson {
+        lang,
+        title: song.title.trim().to_string(),
+        collection: song.artist.trim().to_string(),
+        kind: if video.is_some() { "video" } else { "audio" }.into(),
+        source: [&song.page, &url].iter().find(|s| s.starts_with("http")).map(|s| s.to_string()).unwrap_or_default(),
+        text,
+        media_path: Some(audio.display().to_string()),
+        timings: Some(timings.clone()),
+        video_path: video,
+    };
+    let conn = state.db.lock();
+    let id = db::lesson_create(&conn, &lesson).map_err(err)?;
+    db::lesson_set_timings(&conn, id, &timings, if timings == "[]" { 0 } else { version }).map_err(err)?;
+    if let Some(c) = cover {
+        db::lesson_set_cover(&conn, id, Some(&c.display().to_string())).map_err(err)?;
+    }
+    Ok(id)
+}
+
+// ---------- niveau estimé, mots connus d'un texte ----------
+
+/// Niveau estimé dans une langue, d'après les mots connus regroupés par lemme
+/// (voir `level`). Gardé tant que les mots connus et les dictionnaires ne changent pas.
+#[tauri::command]
+pub async fn level_estimate(state: State<'_, AppState>, lang: String) -> R<level::Estimate> {
+    let (known, stamp) = {
+        let c = state.db.lock();
+        (db::known_terms(&c, &lang).map_err(err)?, db::known_stamp(&c, &lang).map_err(err)?)
+    };
+    let lemmatizer = state.dicts.lemmatizer(&lang);
+    let sig = format!("{stamp}:{}:{}", lemmatizer.is_some(), i18n::native());
+    if let Some((s, e)) = state.levels.lock().get(&lang) {
+        if *s == sig {
+            return Ok(e.clone());
+        }
+    }
+    let l = lang.clone();
+    let e = tokio::task::spawn_blocking(move || level::estimate(&l, &known, lemmatizer.as_ref())).await.map_err(err)?;
+    state.levels.lock().insert(lang, (sig, e.clone()));
+    Ok(e)
+}
+
+/// Part des mots d'un texte que l'apprenant connaît déjà (article, paroles) :
+/// de quoi savoir s'il est à sa portée avant d'en faire une leçon.
+#[tauri::command]
+pub async fn text_stats(state: State<'_, AppState>, lang: String, text: String) -> R<db::TextStats> {
+    db::text_stats(&state.db.lock(), &lang, &text).map_err(err)
 }

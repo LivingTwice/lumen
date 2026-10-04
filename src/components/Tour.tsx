@@ -16,7 +16,7 @@ const EASE = [0.16, 1, 0.3, 1] as const;
 type Side = "left" | "right" | "top" | "bottom";
 
 interface Step {
-  id: "page" | "display" | "word" | "panel" | "model" | "why" | "chat" | "status" | "finish" | "player" | "import" | "library" | "progress" | "end";
+  id: "page" | "display" | "word" | "panel" | "model" | "why" | "chat" | "status" | "finish" | "player" | "import" | "discover" | "progress" | "end";
   chapter: number;
   /** élément éclairé ("word" : un mot nouveau de la page) ; sans cible, une scène au milieu */
   target?: string;
@@ -44,7 +44,7 @@ const STEPS: Step[] = [
   { id: "finish", chapter: 2, target: '[data-tour="finish"]', side: ["top", "left", "right"], pad: 8, radius: 16 },
   { id: "player", chapter: 2, target: '[data-tour="player"]', side: ["top"], pad: 8, radius: 18, pass: true },
   { id: "import", chapter: 3, target: '[data-tour="import"]', side: ["right"], pad: 6, radius: 14 },
-  { id: "library", chapter: 3, target: '[data-tour="nav-library"]', side: ["right"], pad: 4, radius: 12 },
+  { id: "discover", chapter: 3, target: '[data-tour="nav-discover"]', side: ["right"], pad: 4, radius: 12 },
   { id: "progress", chapter: 3, target: '[data-tour="nav-progress"]', side: ["right"], pad: 4, radius: 12 },
   { id: "end", chapter: 3, scene: "end" },
 ];
@@ -557,13 +557,13 @@ function StepText({ step, found }: { step: Step; found: boolean }) {
         </p>
       );
       break;
-    case "library":
+    case "discover":
       title = t("Des leçons à votre niveau", "Lessons at your level");
       body = (
         <p>
           {t(
-            "Dans la bibliothèque, l'onglet Découvrir propose chaque jour des vidéos, des podcasts et des articles récents, rangés de A1 à C1.",
-            "In the library, the Discover tab suggests recent videos, podcasts and articles every day, sorted from A1 to C1.",
+            "Découvrir propose chaque jour des vidéos, des podcasts, des chansons et des articles récents, rangés de A1 à C1. Vous pouvez aussi y chercher ce qui vous plaît.",
+            "Discover suggests recent videos, podcasts, songs and articles every day, sorted from A1 to C1. You can also search there for whatever you like.",
           )}
         </p>
       );

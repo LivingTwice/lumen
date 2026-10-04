@@ -6,10 +6,10 @@ import { Orb, Segmented, Switch } from "../components/ui";
 import { api, isTauri } from "../lib/api";
 import { useBackup } from "../lib/backup";
 import { confirmAsk } from "../lib/dialogs";
-import { count, t, type UiLang } from "../lib/i18n";
-import { LANGS, STARTERS, langInfo, langLower, starterCollection, theLang } from "../lib/langs";
+import { count, formatNumber, t, type UiLang } from "../lib/i18n";
+import { LANGS, STARTERS, inLang, langInfo, langLower, starterCollection, theLang } from "../lib/langs";
 import { useDictStatus } from "../lib/dicts";
-import { LEVELS, levelName, useLevel } from "../lib/discover";
+import { LEVELS, levelName, unitsLabel, useLevel } from "../lib/discover";
 import { useLingq } from "../lib/lingq";
 import { PROFILES } from "../lib/profiles";
 import { formatBytes, useApp, type SettingsTab } from "../lib/store";
@@ -21,6 +21,7 @@ import { FontPicker, LayoutPicker, PaperPicker, lineHeightOptions, widthOptions 
 import type { LangCode, ModelRow } from "../lib/types";
 import { BackupSection } from "./BackupSection";
 import { LingqSection } from "./LingqSection";
+import { PodcastSection } from "./PodcastSection";
 
 /* Réglages : un menu de catégories à gauche, une page par catégorie à droite.
    Chaque page ne montre que son domaine ; la recherche du menu retrouve un réglage. */
@@ -90,10 +91,20 @@ const groups = (): { title: string | null; tabs: Tab[] }[] => [
         icon: "sparkle",
         label: t("Découvrir", "Discover"),
         lead: t(
-          "Chaque jour, des vidéos, des podcasts et des articles choisis pour vos langues, rangés par niveau.",
-          "Every day, videos, podcasts and articles chosen for your languages, sorted by level.",
+          "Des vidéos, des podcasts, des chansons et des articles choisis pour vos langues, rangés par niveau ; et la recherche en ligne.",
+          "Videos, podcasts, songs and articles chosen for your languages, sorted by level; and online search.",
         ),
-        keys: "decouvrir sources niveau a1 a2 b1 b2 c1 chaque jour podcasts videos articles discover level daily",
+        keys: "decouvrir sources niveau a1 a2 b1 b2 c1 chaque jour podcasts videos articles chansons musique recherche youtube lemmes mots differents discover level daily songs music search lemmas",
+      },
+      {
+        id: "podcasts",
+        icon: "podcast",
+        label: t("Podcasts", "Podcasts"),
+        lead: t(
+          "Des podcasts écrits pour vous : un sujet, votre niveau, une durée. Gemini, l'IA en ligne de Google, les écrit et les dit ; ils deviennent des leçons avec leur lanterne.",
+          "Podcasts made for you: a topic, your level, a length. Gemini, Google's online AI, writes and voices them; they become lessons with their lantern.",
+        ),
+        keys: "podcasts podcast gemini notebook notebooklm google ai studio cle api voix creer sur mesure sujet niveau duree key voices create custom topic level length",
       },
     ],
   },
@@ -359,6 +370,8 @@ function Pane({ tab }: { tab: SettingsTab }) {
       return <VoicePane />;
     case "discover":
       return <DiscoverPane />;
+    case "podcasts":
+      return <PodcastSection />;
     case "ai":
       return <AiPane />;
     case "videos":
@@ -790,29 +803,34 @@ function DiscoverPane() {
   const lang = useApp((s) => s.lang)();
   const auto = useApp((s) => s.settings.discover_auto) !== "0";
   const setSetting = useApp((s) => s.setSetting);
-  const { level, auto: estimatedLevel, estimated, known, setLevel } = useLevel(lang);
-  const knownWords = count(known, "mot connu", "mots connus", "known word", "known words");
+  const { level, auto: estimatedLevel, estimated, estimate, setLevel } = useLevel(lang);
+  const forms = count(estimate.forms, "mot connu", "mots connus", "known word", "known words");
   return (
     <Section
       note={t(
-        "Lumen regarde ce que publient des chaînes, des podcasts et des journaux choisis pour vos langues, et vous le propose dans la bibliothèque. Il lit seulement des listes publiques, sans rien envoyer de personnel ; une vidéo ou un épisode n'est téléchargé que si vous en faites une leçon.",
-        "Lumen looks at what channels, podcasts and newspapers chosen for your languages publish, and suggests it in the library. It only reads public lists and sends nothing personal; a video or an episode is downloaded only if you make it a lesson.",
+        "Lumen regarde ce que publient des chaînes, des podcasts et des journaux choisis pour vos langues, et vous le propose dans Découvrir. Il lit seulement des listes publiques, sans rien envoyer de personnel ; une vidéo ou un épisode n'est téléchargé que si vous en faites une leçon.",
+        "Lumen looks at what channels, podcasts and newspapers chosen for your languages publish, and suggests it in Discover. It only reads public lists and sends nothing personal; a video or an episode is downloaded only if you make it a lesson.",
       )}
     >
       <div className="set-card">
         <div className="set-row">
           <div className="grow">
-            <strong>{t("Chercher de nouvelles leçons chaque jour", "Look for new lessons every day")}</strong>
-            <span>{t("Sinon, seulement quand vous touchez « Actualiser » dans Découvrir.", "Otherwise, only when you tap “Refresh” in Discover.")}</span>
+            <strong>{t("Chercher de nouvelles leçons en arrière-plan", "Look for new lessons in the background")}</strong>
+            <span>
+              {t(
+                "Les actualités toutes les trois heures, les chaînes et les podcasts deux fois par jour, les chansons chaque jour. Sinon, seulement quand vous touchez « Actualiser » dans Découvrir.",
+                "News every three hours, channels and podcasts twice a day, songs once a day. Otherwise, only when you tap “Refresh” in Discover.",
+              )}
+            </span>
           </div>
-          <Switch on={auto} onChange={(v) => setSetting("discover_auto", v ? "1" : "0")} label={t("Chercher chaque jour", "Look every day")} />
+          <Switch on={auto} onChange={(v) => setSetting("discover_auto", v ? "1" : "0")} label={t("Chercher en arrière-plan", "Look in the background")} />
         </div>
         <div className="set-row">
           <div className="grow">
             <strong>{t(`Votre niveau en ${langLower(lang)}`, `Your level in ${langLower(lang)}`)}</strong>
             <span>
               {estimatedLevel
-                ? t(`Estimé d'après vos ${knownWords}`, `Estimated from your ${knownWords}`)
+                ? t(`Estimé d'après ${unitsLabel(estimate)}`, `Estimated from ${unitsLabel(estimate)}`)
                 : t(`Choisi par vous (estimé : ${levelName(estimated)})`, `Chosen by you (estimated: ${levelName(estimated)})`)}
             </span>
           </div>
@@ -824,8 +842,52 @@ function DiscoverPane() {
             options={LEVELS.map((name, i) => ({ value: String(i + 1), label: name }))}
           />
         </div>
+        <LevelExplained lang={lang} forms={forms} />
       </div>
     </Section>
+  );
+}
+
+/** Comment le niveau est estimé : les formes connues regroupées par mot de base, et le prochain palier. */
+function LevelExplained({ lang, forms }: { lang: LangCode; forms: string }) {
+  const { estimate: e } = useLevel(lang);
+  const span = e.next ? e.next - e.floor : 0;
+  const pct = span ? Math.min(100, Math.max(3, ((e.units - e.floor) / span) * 100)) : 100;
+  let how: string;
+  if (e.unit === "kanji") how = t("En japonais, Lumen compte les kanji que vous connaissez : c'est eux qui ouvrent les textes.", "In Japanese, Lumen counts the kanji you know: they are what opens up texts.");
+  else if (e.unit === "syllables") how = t("En vietnamien, Lumen compte les syllabes que vous connaissez : un mot en compte une ou deux.", "In Vietnamese, Lumen counts the syllables you know: a word has one or two.");
+  else if (e.exact)
+    how = t(
+      `Vos ${forms} sont regroupés par mot de base grâce au dictionnaire, comme « parle », « parlait » et « parlé » ne comptent qu'une fois. Les mots que le dictionnaire ignore (noms propres) comptent pour moitié.`,
+      `Your ${forms} are grouped by base word thanks to the dictionary, the way “speak”, “spoke” and “spoken” count only once. Words the dictionary doesn't know (proper names) count for half.`,
+    );
+  else
+    how = t(
+      `Le dictionnaire ${inLang(lang)} n'est pas encore sur ce Mac : Lumen estime le nombre de mots de base d'après vos ${forms}, selon le nombre de formes qu'ont les mots dans cette langue.`,
+      `The ${langLower(lang)} dictionary isn't on this Mac yet: Lumen estimates the number of base words from your ${forms}, based on how many forms words have in this language.`,
+    );
+  return (
+    <div className="set-row level-explained">
+      <div className="grow">
+        <strong>
+          {unitsLabel(e)} · {levelName(e.level)}
+        </strong>
+        <span>{how}</span>
+        {e.next > 0 && (
+          <>
+            <div className="bar" style={{ marginTop: 10, maxWidth: 360 }}>
+              <i style={{ width: `${pct}%` }} />
+            </div>
+            <span className="num" style={{ marginTop: 6 }}>
+              {t(
+                `${levelName(e.level + 1)} à partir de ${formatNumber(e.next)} : encore ≈ ${formatNumber(e.next - e.units)}`,
+                `${levelName(e.level + 1)} from ${formatNumber(e.next)}: about ${formatNumber(e.next - e.units)} to go`,
+              )}
+            </span>
+          </>
+        )}
+      </div>
+    </div>
   );
 }
 

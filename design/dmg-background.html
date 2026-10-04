@@ -1,26 +1,105 @@
-<!doctype html><html><head><meta charset="utf-8">
+<!doctype html>
+<!-- Fond de la fenêtre du DMG (src-tauri/dmg/background.png), rendu par `node scripts/design.mjs`.
+     660 × 420 points (rendu en 2x) : c'est la zone sous la barre de titre (fenêtre de 660 × 448 dans tauri.conf.json).
+     Icônes de 128 points centrées en (170, 200) et (490, 200) ; Finder écrit leur nom en noir dessous, vers y = 280. -->
+<html><head><meta charset="utf-8">
 <style>
-@font-face{font-family:N;src:url('file:///root/lumen/node_modules/@fontsource-variable/newsreader/files/newsreader-latin-wght-normal.woff2')}
-@font-face{font-family:G;src:url('file:///root/lumen/node_modules/@fontsource-variable/geist/files/geist-latin-wght-normal.woff2')}
+@font-face{font-family:N;src:url('../node_modules/@fontsource-variable/newsreader/files/newsreader-latin-opsz-normal.woff2');font-weight:200 800}
+@font-face{font-family:G;src:url('../node_modules/@fontsource-variable/geist/files/geist-latin-wght-normal.woff2');font-weight:100 900}
 html,body{margin:0;width:660px;height:420px;overflow:hidden}
-body{background:#fbf7f1;position:relative;font-family:G}
-.b{position:absolute;border-radius:50%;filter:blur(60px);opacity:.55}
-.b1{width:380px;height:380px;left:-60px;top:-120px;background:#ffc56b}
-.b2{width:340px;height:340px;right:-80px;top:-40px;background:#ff9f6e}
-.b3{width:320px;height:320px;left:180px;bottom:-200px;background:#f6a3b4;opacity:.45}
-.grain{position:absolute;inset:0;opacity:.06;mix-blend-mode:overlay;background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>")}
-.brand{position:absolute;top:34px;left:0;right:0;display:flex;align-items:center;justify-content:center;gap:12px}
-.orb{width:26px;height:26px;border-radius:50%;background:radial-gradient(circle at 40% 36%,#fff,#fff4df 32%,#ffcf8a 68%,#f5a04e);box-shadow:0 0 18px 4px rgba(255,186,104,.55)}
-.word{font-family:N;font-size:38px;font-weight:450;letter-spacing:-.02em;color:#1d1a17}
-.sub{position:absolute;top:84px;left:0;right:0;text-align:center;font-size:13px;color:rgba(29,26,23,.6)}
-.arrow{position:absolute;left:250px;top:186px;width:160px;height:30px}
-.foot{position:absolute;bottom:22px;left:40px;right:40px;text-align:center;font-size:11px;line-height:1.5;color:rgba(29,26,23,.55)}
-.foot b{color:rgba(29,26,23,.75);font-weight:600}
+body{background:#fbf7f1;position:relative;font-family:G,-apple-system,sans-serif;color:#1d1a17;-webkit-font-smoothing:antialiased}
+
+/* ciel d'aube, comme l'accueil */
+.sky{position:absolute;inset:0;overflow:hidden}
+.b{position:absolute;border-radius:50%;filter:blur(70px)}
+.b1{width:360px;height:300px;left:-90px;top:-150px;background:#ffc56b;opacity:.5}
+.b2{width:340px;height:300px;right:-110px;top:-120px;background:#ff9f6e;opacity:.36}
+.b3{width:300px;height:220px;left:-120px;top:250px;background:#ffe2a0;opacity:.55}
+.b4{width:300px;height:220px;right:-120px;top:240px;background:#f6a3b4;opacity:.3}
+/* l'astre qui se lève derrière l'horizon */
+.sun{position:absolute;left:50%;top:318px;width:520px;height:300px;transform:translateX(-50%);border-radius:50%;
+  background:radial-gradient(closest-side,rgba(255,200,130,.9),rgba(255,178,100,.4) 45%,rgba(255,182,104,0) 100%)}
+.horizon{position:absolute;left:90px;right:90px;top:316px;height:1px;
+  background:linear-gradient(90deg,rgba(232,145,58,0),rgba(232,145,58,.5) 30%,rgba(255,170,80,.75) 50%,rgba(232,145,58,.5) 70%,rgba(232,145,58,0))}
+.horizon::after{content:"";position:absolute;left:20%;right:20%;top:-6px;height:13px;border-radius:50%;
+  background:radial-gradient(closest-side,rgba(255,190,110,.45),rgba(255,190,110,0))}
+.grain{position:absolute;inset:0;opacity:.07;mix-blend-mode:multiply;background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='200' height='200'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/><feColorMatrix type='saturate' values='0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>")}
+
+/* marque */
+.brand{position:absolute;top:30px;left:0;right:0;display:flex;align-items:center;justify-content:center;gap:11px}
+.orb{position:relative;width:22px;height:22px;border-radius:50%;
+  background:radial-gradient(circle at 42% 38%,#fff 0%,#fff1d6 38%,#ffc27a 78%,#f59e4c 100%);
+  box-shadow:0 0 12px 2px rgba(255,186,104,.55)}
+.orb::before{content:"";position:absolute;inset:-60%;border-radius:50%;z-index:-1;
+  background:radial-gradient(closest-side,rgba(255,196,120,.45),rgba(255,196,120,0))}
+.word{font-family:N;font-size:36px;font-weight:460;letter-spacing:-.025em;line-height:1;font-variation-settings:"opsz" 72}
+.sub{position:absolute;top:80px;left:0;right:0;text-align:center;font-size:13px;line-height:18px;color:rgba(29,26,23,.66);letter-spacing:-.005em}
+.sub span{display:block;font-size:12px;color:rgba(29,26,23,.44)}
+
+/* lumière sous chaque icône */
+.pool{position:absolute;border-radius:50%;transform:translate(-50%,-50%)}
+.pool.app{left:170px;top:200px;width:270px;height:270px;
+  background:radial-gradient(closest-side,rgba(255,190,108,.78),rgba(255,180,98,.32) 52%,rgba(255,186,104,0))}
+.pool.dest{left:490px;top:200px;width:220px;height:220px;
+  background:radial-gradient(closest-side,rgba(255,255,255,.9),rgba(255,248,236,.45) 55%,rgba(255,248,236,0))}
+
+.arrow{position:absolute;left:0;top:0}
+
+/* conseil du premier lancement */
+.note{position:absolute;left:50%;top:340px;transform:translateX(-50%);display:flex;align-items:center;gap:12px;
+  padding:10px 18px 10px 14px;border-radius:14px;white-space:nowrap;
+  background:rgba(255,255,255,.58);border:1px solid rgba(255,255,255,.9);
+  box-shadow:0 8px 26px rgba(150,90,40,.12),0 1px 2px rgba(120,80,40,.1),inset 0 0 0 .5px rgba(120,80,40,.08)}
+.note svg{flex:none}
+.note p{margin:0;font-size:10.5px;line-height:15px;color:rgba(29,26,23,.62)}
+.note b{font-weight:560;color:rgba(29,26,23,.82)}
+.note .en{color:rgba(29,26,23,.46)}
+.note .en b{color:rgba(29,26,23,.66)}
 </style></head><body>
-<div class="b b1"></div><div class="b b2"></div><div class="b b3"></div><div class="grain"></div>
+<div class="sky">
+  <div class="b b1"></div><div class="b b2"></div><div class="b b3"></div><div class="b b4"></div>
+  <div class="sun"></div>
+</div>
+<div class="horizon"></div>
+<div class="pool app"></div><div class="pool dest"></div>
+
 <div class="brand"><div class="orb"></div><div class="word">Lumen</div></div>
-<div class="sub">Glissez Lumen dans le dossier Applications</div>
-<svg class="arrow" viewBox="0 0 160 30"><defs><linearGradient id="g" x1="0" x2="1"><stop offset="0" stop-color="#f5a04e" stop-opacity=".35"/><stop offset="1" stop-color="#e8913a"/></linearGradient></defs>
-<path d="M6 15 H146" stroke="url(#g)" stroke-width="2.5" stroke-linecap="round"/><path d="M138 7 L150 15 L138 23" fill="none" stroke="#e8913a" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
-<div class="foot">Premier lancement sur un autre Mac : si macOS refuse d'ouvrir Lumen, allez dans<br><b>Réglages Système › Confidentialité et sécurité</b> puis cliquez sur <b>Ouvrir quand même</b>.</div>
+<div class="sub">Glissez Lumen dans le dossier Applications<span>Drag Lumen into the Applications folder</span></div>
+
+<!-- un trait de lumière qui mène de Lumen à Applications -->
+<svg class="arrow" width="660" height="420" viewBox="0 0 660 420">
+  <defs>
+    <linearGradient id="trail" x1="256" y1="0" x2="404" y2="0" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#f5a04e" stop-opacity="0"/>
+      <stop offset=".55" stop-color="#f0a050" stop-opacity=".55"/>
+      <stop offset="1" stop-color="#e48a32"/>
+    </linearGradient>
+    <radialGradient id="spark"><stop offset="0" stop-color="#ffc77a" stop-opacity=".9"/><stop offset="1" stop-color="#ffc77a" stop-opacity="0"/></radialGradient>
+    <filter id="soft" x="-20%" y="-200%" width="140%" height="500%"><feGaussianBlur stdDeviation="3"/></filter>
+  </defs>
+  <path d="M256 204 Q330 186 404 200" fill="none" stroke="#ffb45e" stroke-opacity=".5" stroke-width="6" stroke-linecap="round" filter="url(#soft)"/>
+  <path d="M256 204 Q330 186 404 200" fill="none" stroke="url(#trail)" stroke-width="2" stroke-linecap="round"/>
+  <circle cx="404" cy="200" r="13" fill="url(#spark)"/>
+  <path d="M394.5 192.2 L405 200 L395.5 209" fill="none" stroke="#e48a32" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+  <g fill="#f3a254">
+    <circle cx="282" cy="191" r="1.2" opacity=".35"/>
+    <circle cx="318" cy="182" r="1.5" opacity=".5"/>
+    <circle cx="352" cy="207" r="1.1" opacity=".4"/>
+    <circle cx="376" cy="185" r="1.7" opacity=".6"/>
+  </g>
+</svg>
+
+<div class="note">
+  <svg width="22" height="22" viewBox="0 0 22 22" aria-hidden="true">
+    <defs><radialGradient id="o" cx="42%" cy="38%"><stop offset="0" stop-color="#fff"/><stop offset=".45" stop-color="#ffe8c4"/><stop offset="1" stop-color="#f5a04e"/></radialGradient></defs>
+    <circle cx="11" cy="11" r="10.5" fill="rgba(255,190,110,.22)"/>
+    <path d="M11 4.6 L16.4 6.7 V10.6 C16.4 14 14.2 16.4 11 17.5 C7.8 16.4 5.6 14 5.6 10.6 V6.7 Z" fill="url(#o)" stroke="#d98a3a" stroke-width="1" stroke-linejoin="round"/>
+    <path d="M8.6 11 L10.3 12.7 L13.5 9.4" fill="none" stroke="#a65a1c" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
+  </svg>
+  <div>
+    <p>Premier lancement bloqué ? <b>Réglages Système › Confidentialité et sécurité › Ouvrir quand même</b></p>
+    <p class="en">Blocked on first launch? <b>System Settings › Privacy &amp; Security › Open Anyway</b></p>
+  </div>
+</div>
+<div class="grain"></div>
 </body></html>
