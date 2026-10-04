@@ -11,7 +11,7 @@ import { Icon, type IconName } from "./Icon";
 const EASE = [0.16, 1, 0.3, 1] as const;
 
 /** Phrase des scènes : la lumière du matin entre dans la chambre, dans la langue étudiée si possible. */
-interface Sample {
+export interface Sample {
   text: string;
   /** statut de chaque mot : 0 nouveau, 1 à 3 en apprentissage, 4 connu */
   st: number[];
@@ -31,11 +31,21 @@ const SAMPLES: Partial<Record<LangCode, Sample>> = {
   en: { text: "The morning light drifts softly into the room.", st: [4, 0, 2, 0, 4, 4, 4, 0], tap: 3, fr: "glisse", en: "floats gently" },
 };
 
+/** La phrase d'exemple de la langue étudiée, sinon l'italienne (aussi l'aperçu de Réglages › Lecture). */
+export function sampleFor(lang: LangCode): { lang: LangCode; sample: Sample } {
+  return SAMPLES[lang] ? { lang, sample: SAMPLES[lang]! } : { lang: "it", sample: SAMPLES.it! };
+}
+
 const WORD = /([\p{L}\p{M}\p{N}]+)/u;
+
+/** Découpe une phrase en morceaux : mots aux indices impairs, le reste entre eux. */
+export function splitWords(text: string): string[] {
+  return text.split(WORD);
+}
 
 /** La phrase d'exemple, mot par mot ; `word` dessine chaque mot selon la scène. */
 function Line({ sample, lang, word }: { sample: Sample; lang: LangCode; word(i: number, text: string): ReactNode }) {
-  const parts = useMemo(() => sample.text.split(WORD), [sample]);
+  const parts = useMemo(() => splitWords(sample.text), [sample]);
   let n = -1;
   return (
     <p className="g-line" lang={lang}>
@@ -229,7 +239,7 @@ interface Role {
   optional: boolean;
 }
 
-const roles = (): Role[] => [
+export const roles = (): Role[] => [
   {
     kind: "llm",
     icon: "sparkle",
@@ -350,7 +360,7 @@ const cards = (): Card[] => [
 export function Guide() {
   const open = useApp((s) => s.guide);
   const close = useApp((s) => s.closeGuide);
-  const go = useApp((s) => s.go);
+  const openSettings = useApp((s) => s.openSettings);
   const lang = useApp((s) => s.lang)();
   const still = !!useReducedMotion();
   const [card, setCard] = useState(0);
@@ -358,8 +368,7 @@ export function Guide() {
   const list = cards();
   const last = card === list.length - 1;
   // la langue étudiée si elle a sa phrase d'exemple, sinon l'italien
-  const sampleLang: LangCode = SAMPLES[lang] ? lang : "it";
-  const sample = SAMPLES[sampleLang]!;
+  const { lang: sampleLang, sample } = sampleFor(lang);
 
   useEffect(() => {
     if (open !== null) {
@@ -398,8 +407,7 @@ export function Guide() {
 
   const seeModels = () => {
     close();
-    go("settings");
-    window.setTimeout(() => document.getElementById("set-ai")?.scrollIntoView({ behavior: "smooth", block: "start" }), 350);
+    openSettings("ai");
   };
 
   const c = list[card];

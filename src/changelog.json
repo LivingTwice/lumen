@@ -1,0 +1,190 @@
+{
+  "_lisezmoi": "Nouveautés montrées après chaque mise à jour (components/News.tsx) et notes de publication. Ajouter ce qui change sous la version \"next\" au fil du travail ; « Publier une version » lui donne son numéro et sa date. Icônes : noms de components/Icon.tsx. Actions : \"tour\" (visite guidée), \"guide\", \"settings:<page>\" (general, langs, reading, voice, discover, ai, videos, backup, lingq, about), \"view:<vue>\" (library, playlists, chat, vocab, progress).",
+  "releases": [
+    {
+      "version": "0.4.0",
+      "date": "2026-10-04",
+      "title": { "fr": "Une lecture plus belle, des Réglages plus clairs", "en": "Lovelier reading, clearer Settings" },
+      "items": [
+        {
+          "icon": "book",
+          "title": { "fr": "Des pages, comme dans un livre", "en": "Pages, like in a book" },
+          "body": {
+            "fr": "Le texte tient dans l'écran : on tourne la page avec les flèches, deux doigts sur le trackpad ou PageDown. Le défilement reste au choix.",
+            "en": "The text fits on the screen: turn the page with the arrows, two fingers on the trackpad or Page Down. Scrolling is still an option."
+          },
+          "action": "settings:reading"
+        },
+        {
+          "icon": "type",
+          "title": { "fr": "Le bouton « Aa »", "en": "The “Aa” button" },
+          "body": {
+            "fr": "Dans une leçon : huit polices, la taille, l'interligne, la largeur des lignes et six couleurs de page, de Papier à Encre en passant par Sépia et Nuit.",
+            "en": "Inside a lesson: eight fonts, size, line spacing, line width and six page colors, from Paper to Ink by way of Sepia and Night."
+          },
+          "action": "settings:reading"
+        },
+        {
+          "icon": "settings",
+          "title": { "fr": "Des Réglages rangés par thème", "en": "Settings sorted by topic" },
+          "body": {
+            "fr": "Chaque domaine a sa page : Lecture, Voix, IA locale, Sauvegarde… Une recherche retrouve n'importe quel réglage.",
+            "en": "Each area has its own page: Reading, Voice, Local AI, Backup… A search finds any setting."
+          },
+          "action": "settings:general"
+        },
+        {
+          "icon": "bulb",
+          "title": { "fr": "Une visite guidée", "en": "A guided tour" },
+          "body": {
+            "fr": "Pas à pas, dans une vraie leçon : les couleurs des mots, le panneau du mot, ce qu'est un modèle d'IA et pourquoi il compte, la lanterne.",
+            "en": "Step by step, inside a real lesson: word colors, the word panel, what an AI model is and why it matters, the lantern."
+          },
+          "action": "tour"
+        },
+        {
+          "icon": "sparkle",
+          "title": { "fr": "Les nouveautés, à chaque mise à jour", "en": "What's new, after every update" },
+          "body": {
+            "fr": "Cette fenêtre s'ouvre après chaque mise à jour. Elle reste à portée de main dans Réglages › À propos.",
+            "en": "This window opens after every update. It stays at hand in Settings › About."
+          }
+        }
+      ]
+    },
+    {
+      "version": "0.3.0",
+      "date": "2026-10-04",
+      "title": { "fr": "Découvrir, vos progrès et la prononciation au toucher", "en": "Discover, your progress and pronunciation on tap" },
+      "items": [
+        {
+          "icon": "sparkle",
+          "title": { "fr": "Découvrir", "en": "Discover" },
+          "body": {
+            "fr": "Vidéos, podcasts et articles récents dans votre langue, rangés par niveau de A1 à C1 : environ 195 sources pour les 31 langues, relues chaque jour.",
+            "en": "Recent videos, podcasts and articles in your language, sorted by level from A1 to C1: about 195 sources across 31 languages, checked every day."
+          },
+          "action": "view:library"
+        },
+        {
+          "icon": "chart",
+          "title": { "fr": "Vos progrès, en détail", "en": "Your progress, in detail" },
+          "body": {
+            "fr": "Temps d'apprentissage, mots lus, écoute, nouveaux mots connus : par jour, semaine ou mois, avec graphique, calendrier et records.",
+            "en": "Learning time, words read, listening, newly known words: by day, week or month, with a chart, a calendar and records."
+          },
+          "action": "view:progress"
+        },
+        {
+          "icon": "flame",
+          "title": { "fr": "Objectif du jour et série", "en": "Daily goal and streak" },
+          "body": {
+            "fr": "Quelques minutes dans une leçon chaque jour allument la flamme. La série se compte langue par langue.",
+            "en": "A few minutes in a lesson each day light the flame. The streak is counted language by language."
+          }
+        },
+        {
+          "icon": "speaker",
+          "title": { "fr": "Le mot touché se fait entendre", "en": "Tapped words speak up" },
+          "body": {
+            "fr": "Leçon en pause, le mot ou le passage touché est prononcé, par la voix naturelle si elle est installée.",
+            "en": "While the lesson is paused, the word or passage you tap is spoken, with the natural voice if it's installed."
+          },
+          "action": "settings:reading"
+        }
+      ]
+    },
+    {
+      "version": "0.2.1",
+      "date": "2026-10-03",
+      "title": { "fr": "Le lien universel et 31 dictionnaires", "en": "The universal link and 31 dictionaries" },
+      "items": [
+        {
+          "icon": "link",
+          "title": { "fr": "Importer depuis n'importe quel lien", "en": "Import from any link" },
+          "body": {
+            "fr": "Article, vidéo, podcast, flux RSS, Apple Podcasts ou Spotify : Lumen regarde ce qu'il y a derrière l'adresse et en fait une leçon.",
+            "en": "Article, video, podcast, RSS feed, Apple Podcasts or Spotify: Lumen looks behind the address and turns it into a lesson."
+          }
+        },
+        {
+          "icon": "globe",
+          "title": { "fr": "Un dictionnaire pour chaque langue", "en": "A dictionary for every language" },
+          "body": {
+            "fr": "Les 31 langues ont leur dictionnaire hors ligne, téléchargé au premier usage.",
+            "en": "All 31 languages have their offline dictionary, downloaded the first time you need it."
+          },
+          "action": "settings:langs"
+        },
+        {
+          "icon": "bulb",
+          "title": { "fr": "Le petit guide", "en": "The short guide" },
+          "body": {
+            "fr": "Le principe de Lumen et le rôle de chaque modèle d'IA, en quatre images animées.",
+            "en": "How Lumen works and what each AI model does, in four animated pictures."
+          },
+          "action": "guide"
+        }
+      ]
+    },
+    {
+      "version": "0.2.0",
+      "date": "2026-10-03",
+      "title": { "fr": "Lumen en anglais", "en": "Lumen in English" },
+      "items": [
+        {
+          "icon": "globe",
+          "title": { "fr": "Français ou anglais", "en": "French or English" },
+          "body": {
+            "fr": "L'interface, les traductions, le chat et les dictionnaires existent aussi en anglais.",
+            "en": "The interface, translations, chat and dictionaries now also exist in English."
+          },
+          "action": "settings:general"
+        }
+      ]
+    },
+    {
+      "version": "0.1.0",
+      "date": "2026-10-03",
+      "title": { "fr": "Chat, playlists, voix naturelle, sauvegarde", "en": "Chat, playlists, natural voice, backup" },
+      "items": [
+        {
+          "icon": "chat",
+          "title": { "fr": "Le chat", "en": "The chat" },
+          "body": {
+            "fr": "Un professeur qui vit sur votre Mac : grammaire, exemples, nuances, sur la leçon que vous lisez.",
+            "en": "A teacher living on your Mac: grammar, examples, nuances, about the lesson you're reading."
+          },
+          "action": "view:chat"
+        },
+        {
+          "icon": "playlist",
+          "title": { "fr": "Les playlists", "en": "Playlists" },
+          "body": {
+            "fr": "Des leçons dans l'ordre choisi, qui s'enchaînent d'elles-mêmes.",
+            "en": "Lessons in the order you choose, playing one after another."
+          },
+          "action": "view:playlists"
+        },
+        {
+          "icon": "speaker",
+          "title": { "fr": "La voix naturelle", "en": "The natural voice" },
+          "body": {
+            "fr": "Dix voix en 31 langues, calculées sur votre Mac, pour prononcer les mots et lire vos leçons.",
+            "en": "Ten voices in 31 languages, computed on your Mac, to pronounce words and read your lessons."
+          },
+          "action": "settings:voice"
+        },
+        {
+          "icon": "cloud",
+          "title": { "fr": "La sauvegarde", "en": "Backup" },
+          "body": {
+            "fr": "Votre progression à l'abri dans iCloud Drive, retrouvée en un clic.",
+            "en": "Your progress kept safe in iCloud Drive, back in one click."
+          },
+          "action": "settings:backup"
+        }
+      ]
+    }
+  ]
+}

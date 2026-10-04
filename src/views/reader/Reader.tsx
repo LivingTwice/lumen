@@ -8,10 +8,13 @@ import { LEVELS, langInfo } from "../../lib/langs";
 import { pronounce } from "../../lib/pronounce";
 import { studyTime, useStudyClock } from "../../lib/progress";
 import { formatNumber, useApp } from "../../lib/store";
-import { paginate, sentenceBounds } from "../../lib/tokenize";
-import type { LessonSummary, OpenedLesson, Term } from "../../lib/types";
+import { fitPages, pageOfToken } from "../../lib/pagefit";
+import { readerLook } from "../../lib/reading";
+import { paginate, sentenceBounds, type PageRange } from "../../lib/tokenize";
+import type { LessonSummary, OpenedLesson, Term, Token } from "../../lib/types";
 import { Player, type PlayerHandle, type PlaybackState } from "./Player";
 import { useChat } from "../../lib/chat";
+import { DisplayMenu } from "./Display";
 import { PlaylistStrip, UpNext, usePlaylist } from "./PlaylistBar";
 import { AsideTabs, ReaderChat, type AsideTab } from "./ReaderChat";
 import { VideoStage } from "./VideoStage";
@@ -25,6 +28,19 @@ interface Range {
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 /** Hauteur (part de la zone visible) de la ligne où l'œil lit : le point de reprise y revient. */
 const READ_LINE = 0.3;
+/** Au-delà, la progression des pages est une barre plutôt que des points. */
+const MAX_DOTS = 16;
+/** Jetons (mots, espaces, ponctuation) au-delà desquels les pages se recomposent après coup. */
+const LONG_LESSON = 5000;
+
+/** Page qui tourne : la suivante arrive de droite (de gauche en arabe), la précédente de l'autre côté. */
+const TURN = {
+  enter: (d: number) => ({ opacity: 0, x: 24 * d, filter: "blur(4px)" }),
+  center: { opacity: 1, x: 0, filter: "blur(0px)" },
+  exit: (d: number) => ({ opacity: 0, x: -24 * d, filter: "blur(4px)" }),
+};
+
+const samePages = (a: PageRange[], b: PageRange[]) => a.length === b.length && a.every((p, i) => p.start === b[i].start && p.end === b[i].end);
 
 /**
  * Repères verticaux de la police de lecture, mesurés une fois par taille.
@@ -78,14 +94,28 @@ export function Reader() {
   const [upNext, setUpNext] = useState<LessonSummary | null>(null);
   // panneau de droite : le mot touché, ou le chat sur la leçon
   const [aside, setAside] = useState<AsideTab>("word");
+  // menu « Aa » : police, taille, couleur de la page, mise en page
+  const [lookOpen, setLookOpen] = useState(false);
+  const closeLook = useCallback(() => setLookOpen(false), []);
+  // sens du dernier changement de page (1 : en avant), pour l'animation
+  const [turn, setTurn] = useState(1);
+
+  const look = readerLook(settings);
+  const paged = look.layout === "pages";
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const pageRef = useRef<HTMLDivElement>(null);
+  // mode pages : zone du texte, bloc invisible où l'on compose les pages, copie du titre
+  const viewRef = useRef<HTMLDivElement>(null);
+  const measureRef = useRef<HTMLDivElement>(null);
+  const ghostRef = useRef<HTMLDivElement>(null);
   const playerRef = useRef<PlayerHandle>(null);
   const drag = useRef<{ start: number; moved: boolean } | null>(null);
   const session = useRef({ read: 0, known: 0, lingqs: 0 });
-  // pages lues pendant cette ouverture : chacune ne compte qu'une fois dans les mots lus
-  const readPages = useRef(new Set<number>());
+  // mots lus pendant cette ouverture : chacun ne compte qu'une fois, même si les pages se recomposent
+  const readToks = useRef(new Uint8Array(0));
+  // jeton à garder sous les yeux quand les pages se recomposent (fenêtre, police, mise en page)
+  const keepTok = useRef(0);
   const pageShownAt = useRef(performance.now());
   const pageNow = useRef(0);
   const lantern = useAnimationControls();
@@ -116,15 +146,19 @@ export function Reader() {
     setUpNext(null);
     setCinema(false);
     session.current = { read: 0, known: 0, lingqs: 0 };
-    readPages.current = new Set();
     api()
       .lessonOpen(lessonId)
       .then((d) => {
         if (!alive) return;
+        readToks.current = new Uint8Array(d.tokens.length);
+        const p = paginate(d.tokens);
+        const pg = Math.min(d.lesson.page, p.length - 1);
+        // reprise : le mot atteint s'il est sur la page enregistrée, sinon le début de cette page
+        const a = d.lesson.anchor;
+        keepTok.current = a >= p[pg].start && a < p[pg].end ? a : p[pg].start;
         setData(d);
         setTerms(d.terms);
-        const p = paginate(d.tokens);
-        setPage(Math.min(d.lesson.page, p.length - 1));
+        setPage(pg);
       })
       .catch(() => {
         if (!alive) return;
@@ -141,7 +175,12 @@ export function Reader() {
 
   const lesson = data?.lesson;
   const tokens = useMemo(() => data?.tokens ?? [], [data]);
-  const pages = useMemo(() => paginate(tokens), [tokens]);
+  // pages d'environ 230 mots : mode défilement, et page enregistrée (avancement de la bibliothèque)
+  const basePages = useMemo(() => paginate(tokens), [tokens]);
+  // mode pages : pages composées à la taille de l'écran
+  const [fitted, setFitted] = useState<{ tokens: Token[]; pages: PageRange[] } | null>(null);
+  const fittedOk = paged && fitted?.tokens === tokens;
+  const pages = fittedOk ? fitted.pages : basePages;
   const pr = pages[page] ?? { start: 0, end: 0, words: 0 };
   const lang = lesson?.lang ?? "en";
   const pl = usePlaylist(lesson);
@@ -161,12 +200,16 @@ export function Reader() {
   const creditPage = useCallback(
     (p: number, sure: boolean) => {
       const r = pages[p];
-      if (!r || !r.words || readPages.current.has(p)) return 0;
+      if (!r || !r.words) return 0;
+      const seen = readToks.current;
+      let fresh = 0;
+      for (let i = r.start; i < r.end; i++) if (tokens[i].w && !seen[i]) fresh++;
+      if (!fresh) return 0;
       if (!sure && performance.now() - pageShownAt.current < Math.min(15, r.words / 4) * 1000) return 0;
-      readPages.current.add(p);
-      return r.words;
+      for (let i = r.start; i < r.end; i++) if (tokens[i].w) seen[i] = 1;
+      return fresh;
     },
-    [pages],
+    [pages, tokens],
   );
   const logRead = useCallback(
     (words: number) => {
@@ -231,26 +274,92 @@ export function Reader() {
 
   // le mot lu à voix haute (voix, audio ou vidéo) devient le point de reprise
   useEffect(() => {
-    if (cursor >= 0) anchorRef.current.want = cursor;
+    if (cursor < 0) return;
+    anchorRef.current.want = cursor;
+    keepTok.current = cursor;
   }, [cursor]);
+
+  // ---------- mode pages : des pages qui tiennent dans l'écran ----------
+  const [fitTick, setFitTick] = useState(0);
+  const lastFit = useRef({ w: 0, h: 0 });
+  useLayoutEffect(() => {
+    if (!paged || !data) return;
+    const view = viewRef.current;
+    const box = measureRef.current;
+    if (!view || !box) return;
+    const cs = getComputedStyle(view);
+    const height = view.clientHeight - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom);
+    const line = look.size * look.lineHeight;
+    // zone cachée (plein écran vidéo) ou minuscule : les pages d'avant restent
+    if (height < line * 2 || box.clientWidth < 60) return;
+    lastFit.current = { w: view.clientWidth, h: view.clientHeight };
+    const fit = () => {
+      // la première page porte le titre de la leçon
+      const head = ghostRef.current?.offsetHeight ?? 0;
+      const next = fitPages(box, tokens, { height, first: Math.max(line * 2, height - head), line });
+      setFitted((prev) => (prev && prev.tokens === tokens && samePages(prev.pages, next) ? prev : { tokens, pages: next }));
+    };
+    // très longue leçon (chapitre de livre) déjà composée : le texte change de taille tout de suite,
+    // les pages suivent quand le curseur s'arrête (les recomposer prend quelques dixièmes de seconde)
+    if (tokens.length > LONG_LESSON && fittedOk) {
+      const timer = window.setTimeout(fit, 140);
+      return () => window.clearTimeout(timer);
+    }
+    fit();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [paged, data?.lesson.id, tokens, look.size, look.lineHeight, look.width, look.font.id, fitTick]);
+
+  // fenêtre, vidéo ou barre latérale qui changent la place du texte ; police arrivée après coup
+  useEffect(() => {
+    const view = viewRef.current;
+    if (!paged || !view) return;
+    let timer = 0;
+    const later = () => {
+      window.clearTimeout(timer);
+      timer = window.setTimeout(() => setFitTick((n) => n + 1), 110);
+    };
+    const ro = new ResizeObserver(() => {
+      const { w, h } = lastFit.current;
+      if (view.clientWidth !== w || view.clientHeight !== h) later();
+    });
+    ro.observe(view);
+    document.fonts?.addEventListener("loadingdone", later);
+    return () => {
+      ro.disconnect();
+      document.fonts?.removeEventListener("loadingdone", later);
+      window.clearTimeout(timer);
+    };
+  }, [paged, data?.lesson.id]);
+
+  // pages recomposées (ou autre mise en page) : on reste sur la page qui porte le même mot
+  useLayoutEffect(() => {
+    if (!data) return;
+    const p = pageOfToken(pages, keepTok.current);
+    setPage((cur) => (cur === p ? cur : p));
+  }, [pages, data]);
 
   // à l'ouverture : retour au mot où l'on s'était arrêté, signalé par un bref halo
   useLayoutEffect(() => {
     if (!data || restoredFor.current === data.lesson.id) return;
+    // en mode pages, on attend les vraies pages et la page qui porte le mot
+    if (paged && !fittedOk) return;
+    if (pageOfToken(pages, keepTok.current) !== page) return;
     restoredFor.current = data.lesson.id;
     const a = data.lesson.anchor;
     const range = pages[page];
     if (!range || a <= range.start || a >= range.end) return;
-    const sc = scrollRef.current;
-    const el = pageRef.current?.querySelector(`[data-i="${a}"]`);
-    if (!sc || !el) return;
-    const top = el.getBoundingClientRect().top - sc.getBoundingClientRect().top + sc.scrollTop;
-    // ce défilement automatique ne doit pas déplacer le point de reprise
-    ignoreScrollUntil.current = performance.now() + 600;
-    sc.scrollTop = Math.max(0, top - sc.clientHeight * READ_LINE);
+    if (!paged) {
+      const sc = scrollRef.current;
+      const el = pageRef.current?.querySelector(`[data-i="${a}"]`);
+      if (!sc || !el) return;
+      const top = el.getBoundingClientRect().top - sc.getBoundingClientRect().top + sc.scrollTop;
+      // ce défilement automatique ne doit pas déplacer le point de reprise
+      ignoreScrollUntil.current = performance.now() + 600;
+      sc.scrollTop = Math.max(0, top - sc.clientHeight * READ_LINE);
+    }
     // avec un média, la lanterne montre déjà l'endroit
     if (!(data.lesson.media_path && data.lesson.position > 0.5)) setResumeAt(a);
-  }, [data, pages, page]);
+  }, [data, pages, page, paged, fittedOk]);
   useEffect(() => {
     if (resumeAt < 0) return;
     const t = window.setTimeout(() => setResumeAt(-1), 2600);
@@ -489,30 +598,67 @@ export function Reader() {
   }, [select]);
 
   // ---------- pages ----------
+  // la page enregistrée reste celle des pages de 230 mots, quelle que soit la mise en page
+  // (la bibliothèque en tire l'avancement) ; la reprise exacte passe par le mot atteint
+  const savePage = useCallback(
+    (p: number) => {
+      const r = pages[p];
+      if (lesson && r) void api().lessonUpdate(lesson.id, { page: pageOfToken(basePages, r.start) });
+    },
+    [lesson, pages, basePages],
+  );
+
   const goPage = useCallback(
     (p: number) => {
       if (!lesson || p < 0 || p >= pages.length) return;
       // en avançant, la page qu'on quitte est lue
       if (p > pageNow.current) logRead(creditPage(pageNow.current, false));
+      setTurn(p >= pageNow.current ? 1 : -1);
       setPage(p);
       setRange(null);
       scrollRef.current?.scrollTo({ top: 0, behavior: "smooth" });
       anchorRef.current.want = pages[p].start;
-      void api().lessonUpdate(lesson.id, { page: p });
+      keepTok.current = pages[p].start;
+      savePage(p);
     },
-    [lesson, pages, logRead, creditPage],
+    [lesson, pages, logRead, creditPage, savePage],
   );
 
   const onPlayerPage = useCallback(
     (p: number) => {
       // la lecture passe à la page suivante : celle qu'elle quitte est lue
       if (p === pageNow.current + 1) logRead(creditPage(pageNow.current, false));
+      setTurn(p >= pageNow.current ? 1 : -1);
       setPage(p);
       setRange(null);
-      if (lesson) void api().lessonUpdate(lesson.id, { page: p });
+      if (pages[p]) keepTok.current = pages[p].start;
+      savePage(p);
     },
-    [lesson, logRead, creditPage],
+    [pages, logRead, creditPage, savePage],
   );
+
+  // mode pages : deux doigts qui glissent sur le trackpad (ou la molette) tournent la page, comme dans Livres
+  const swipe = useRef({ x: 0, y: 0, lock: false, timer: 0 });
+  const onSwipe = (e: React.WheelEvent) => {
+    const s = swipe.current;
+    // un seul tour de page par geste : on attend que l'élan du trackpad retombe
+    window.clearTimeout(s.timer);
+    s.timer = window.setTimeout(() => {
+      s.x = 0;
+      s.y = 0;
+      s.lock = false;
+    }, 240);
+    if (s.lock) return;
+    s.x += e.deltaX;
+    s.y += e.deltaY;
+    let forward: boolean;
+    // de côté : vers la gauche pour avancer (vers la droite en arabe) ; de haut en bas : vers le bas
+    if (Math.abs(s.x) >= 50 && Math.abs(s.x) > Math.abs(s.y)) forward = s.x > 0 !== !!langInfo(lang).rtl;
+    else if (Math.abs(s.y) >= 70) forward = s.y > 0;
+    else return;
+    s.lock = true;
+    goPage(pageNow.current + (forward ? 1 : -1));
+  };
 
   const findNext = async () => {
     if (!lesson) return null;
@@ -547,7 +693,7 @@ export function Reader() {
         await api().activityAdd(lesson.lang, words, 0);
       }
     } catch (e) {
-      if (words) readPages.current.delete(page);
+      if (words) readToks.current.fill(0, pr.start, pr.end);
       setIllum(false);
       toast(errorText(e), "error");
       return;
@@ -577,7 +723,7 @@ export function Reader() {
     const onKey = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement;
       if (t.closest("input, textarea, select, [contenteditable]") || e.metaKey || e.ctrlKey) return;
-      if (useApp.getState().importOpen || simplify || complete) return;
+      if (useApp.getState().importOpen || simplify || complete || lookOpen) return;
       const words: number[] = [];
       for (let i = pr.start; i < pr.end; i++) if (tokens[i].w) words.push(i);
       const cur = range ? words.indexOf(range.a) : -1;
@@ -646,7 +792,7 @@ export function Reader() {
   const [relayout, setRelayout] = useState(0);
   const loaded = !!data;
   useEffect(() => {
-    const el = scrollRef.current;
+    const el = scrollRef.current ?? viewRef.current;
     if (!el) return;
     let w = el.clientWidth;
     let t = 0;
@@ -661,7 +807,7 @@ export function Reader() {
       ro.disconnect();
       window.clearTimeout(t);
     };
-  }, [loaded]);
+  }, [loaded, paged]);
 
   useLayoutEffect(() => {
     const container = pageRef.current;
@@ -703,6 +849,13 @@ export function Reader() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cursor, page, pr.start, pr.end, relayout]);
 
+  // la visite guidée arrête la lecture à voix haute quand elle passe à la suite
+  useEffect(() => {
+    const pause = () => playerRef.current?.pause();
+    window.addEventListener("lumen:pause", pause);
+    return () => window.removeEventListener("lumen:pause", pause);
+  }, []);
+
   if (!lessonId) {
     return (
       <div className="empty" style={{ flex: 1, justifyContent: "center" }}>
@@ -718,7 +871,7 @@ export function Reader() {
 
   if (!data || !lesson) {
     return (
-      <div className="reader">
+      <div className={`reader ${look.className}`} style={look.style}>
         <div className="reader-col">
           <div className="reader-top drag" data-tauri-drag-region />
           <div className="reader-inner" style={{ width: "100%" }}>
@@ -733,8 +886,6 @@ export function Reader() {
   }
 
   // ---------- rendu de la page ----------
-  const fontSize = Number(settings.font_size) || 23;
-  const lineHeight = Number(settings.line_height) || 1.75;
   const markClass = settings.word_style === "line" ? "mark-line" : "mark-tint";
   const paragraphs: React.ReactNode[] = [];
   let current: React.ReactNode[] = [];
@@ -795,9 +946,117 @@ export function Reader() {
   const isLast = page === pages.length - 1;
   const isVideo = lesson.kind === "video" || !!lesson.video_path;
   const sideHidden = settings.reader_sidebar === "0";
+  // en arabe, la page suivante est à gauche
+  const flip = li.rtl ? -1 : 1;
+  const showMini = paged ? page > 0 : scrolled;
+
+  const hint =
+    settings.finish_marks_known !== "0" && newOnPage > 0
+      ? t(
+          `Les ${newOnPage} mots bleus que vous n'avez pas consultés rejoindront vos mots connus.`,
+          `The ${newOnPage} blue word${newOnPage > 1 ? "s" : ""} you didn't look up will join your known words.`,
+        )
+      : isLast
+        ? t("Dernière page de la leçon.", "Last page of the lesson.")
+        : t("Tous les mots de cette page sont déjà rencontrés.", "You have already met every word on this page.");
+  const finishLabel = isLast ? t("Terminer la leçon", "Finish the lesson") : t("Terminer la page", "Finish the page");
+
+  const header = (
+    <header className="reader-head">
+      <div className="reader-crumb">
+        {pl ? (
+          <>
+            <button onClick={() => openPlaylist(null)}>Playlists</button>
+            <span>›</span>
+            <button onClick={() => openPlaylist(pl.id)}>{pl.name}</button>
+          </>
+        ) : (
+          <button onClick={() => go("library")}>{t("Bibliothèque", "Library")}</button>
+        )}
+        {!pl && lesson.collection && (
+          <>
+            <span>›</span>
+            <span>{lesson.collection}</span>
+          </>
+        )}
+      </div>
+      <h1 dir="auto">{lesson.title}</h1>
+      <div className="reader-chips">
+        <span className="chip">{li.name}</span>
+        {paged ? (
+          // pas de nombre qui dépend des pages : ce titre sert aussi à les composer
+          <span className="chip num">{count(lesson.word_count, "mot", "mots", "word", "words")}</span>
+        ) : (
+          <>
+            <span className="chip num">{t(`Page ${page + 1} sur ${pages.length}`, `Page ${page + 1} of ${pages.length}`)}</span>
+            <span className="chip new num">{t(`${newOnPage} nouveau${newOnPage > 1 ? "x" : ""}`, `${newOnPage} new`)}</span>
+            <span className="chip num">{count(pr.words, "mot", "mots", "word", "words")}</span>
+          </>
+        )}
+      </div>
+    </header>
+  );
+
+  const pageEl = (
+    <div
+      ref={pageRef}
+      data-tour="page"
+      className={`page ${markClass} ${illum ? "illuminate" : ""}`}
+      onPointerDown={onPointerDown}
+      onPointerOver={onPointerOver}
+      lang={lang}
+      dir={li.rtl ? "rtl" : undefined}
+    >
+      <motion.div className="lantern" animate={lantern} style={{ opacity: lanternOn ? 1 : 0, transition: "opacity .3s ease" }} />
+      {illum && (
+        <motion.div
+          className="sweep"
+          initial={{ y: -200, opacity: 0 }}
+          animate={{ y: (pageRef.current?.offsetHeight ?? 600) + 40, opacity: [0, 1, 1, 0] }}
+          transition={{ duration: 1.05, ease: [0.4, 0, 0.2, 1] }}
+        />
+      )}
+      {paragraphs}
+    </div>
+  );
+  const turnProps = {
+    custom: turn * flip,
+    variants: TURN,
+    initial: "enter",
+    animate: "center",
+    exit: "exit",
+    transition: { duration: 0.32, ease: [0.2, 0.8, 0.2, 1] },
+  } as const;
+
+  const dots = (
+    <div className="page-dots" aria-hidden="true">
+      {pages.map((_, i) => (
+        <button key={i} className={i === page ? "on" : i < page ? "done" : ""} onClick={() => goPage(i)} tabIndex={-1} />
+      ))}
+    </div>
+  );
+
+  // flèches du mode pages : la précédente et la suivante, de part et d'autre du texte
+  const arrow = (side: "left" | "right") => {
+    const forward = (side === "right") === !li.rtl;
+    const target = page + (forward ? 1 : -1);
+    const off = target < 0 || target >= pages.length;
+    return (
+      <button
+        className={`leaf-arrow ${side} ${off ? "off" : ""}`}
+        onClick={() => goPage(target)}
+        disabled={off}
+        aria-label={forward ? t("Page suivante", "Next page") : t("Page précédente", "Previous page")}
+        title={forward ? t("Page suivante (sans marquer les mots)", "Next page (without marking words)") : t("Page précédente", "Previous page")}
+      >
+        <span className="leaf-arrow-glow" />
+        <Icon name={side} size={30} stroke={1.5} />
+      </button>
+    );
+  };
 
   return (
-    <div className={`reader ${cinema ? "cinema" : ""}`}>
+    <div className={`reader ${cinema ? "cinema" : ""} ${look.className}`} style={look.style}>
       <div className="reader-col">
         <div className="reader-top drag" data-tauri-drag-region>
           {!cinema && (
@@ -823,9 +1082,26 @@ export function Reader() {
               <PlaylistStrip pl={pl} lessonId={lesson.id} playing={() => !!playerRef.current?.isPlaying()} />
             </div>
           ) : (
-            <span className={`title-mini ${scrolled ? "show" : ""}`} data-tauri-drag-region>
+            <span className={`title-mini ${showMini ? "show" : ""}`} data-tauri-drag-region>
               {lesson.title}
             </span>
+          )}
+          {!cinema && (
+            <div className="look-anchor no-drag">
+              <button
+                className={`icon-btn look-btn ${lookOpen ? "on" : ""}`}
+                data-tour="display"
+                onClick={() => setLookOpen((v) => !v)}
+                aria-expanded={lookOpen}
+                aria-label={t("Affichage : police, taille, couleur, mise en page", "Display: font, size, color, layout")}
+                title={t("Affichage : police, taille, couleur, mise en page", "Display: font, size, color, layout")}
+              >
+                <span className="aa">
+                  A<small>a</small>
+                </span>
+              </button>
+              <DisplayMenu open={lookOpen} onClose={closeLook} lang={lang} />
+            </div>
           )}
           <button className="btn sm soft no-drag" onClick={() => setSimplify(true)} title={t("Réécrire ce texte à un niveau plus simple", "Rewrite this text at a simpler level")}>
             <Icon name="sparkle" size={14} /> {t("Simplifier", "Simplify")}
@@ -854,101 +1130,83 @@ export function Reader() {
           />
         )}
 
-        <div className="reader-scroll" ref={scrollRef} onScroll={onReaderScroll}>
-          <div className="reader-inner">
-            <header className="reader-head">
-              <div className="reader-crumb">
-                {pl ? (
-                  <>
-                    <button onClick={() => openPlaylist(null)}>Playlists</button>
-                    <span>›</span>
-                    <button onClick={() => openPlaylist(pl.id)}>{pl.name}</button>
-                  </>
-                ) : (
-                  <button onClick={() => go("library")}>{t("Bibliothèque", "Library")}</button>
-                )}
-                {!pl && lesson.collection && (
-                  <>
-                    <span>›</span>
-                    <span>{lesson.collection}</span>
-                  </>
-                )}
-              </div>
-              <h1 dir="auto">{lesson.title}</h1>
-              <div className="reader-chips">
-                <span className="chip">{li.name}</span>
-                <span className="chip num">{t(`Page ${page + 1} sur ${pages.length}`, `Page ${page + 1} of ${pages.length}`)}</span>
-                <span className="chip new num">{t(`${newOnPage} nouveau${newOnPage > 1 ? "x" : ""}`, `${newOnPage} new`)}</span>
-                <span className="chip num">{count(pr.words, "mot", "mots", "word", "words")}</span>
-              </div>
-            </header>
-
-            <AnimatePresence mode="wait" initial={false}>
-              <motion.div
-                key={page}
-                ref={pageRef}
-                className={`page ${markClass} ${illum ? "illuminate" : ""}`}
-                style={{ ["--read-size" as string]: `${fontSize}px`, ["--read-lh" as string]: lineHeight }}
-                onPointerDown={onPointerDown}
-                onPointerOver={onPointerOver}
-                lang={lang}
-                dir={li.rtl ? "rtl" : undefined}
-                initial={{ opacity: 0, x: 24, filter: "blur(4px)" }}
-                animate={{ opacity: 1, x: 0, filter: "blur(0px)" }}
-                exit={{ opacity: 0, x: -24, filter: "blur(4px)" }}
-                transition={{ duration: 0.32, ease: [0.2, 0.8, 0.2, 1] }}
-              >
-                <motion.div className="lantern" animate={lantern} style={{ opacity: lanternOn ? 1 : 0, transition: "opacity .3s ease" }} />
-                {illum && (
-                  <motion.div
-                    className="sweep"
-                    initial={{ y: -200, opacity: 0 }}
-                    animate={{ y: (pageRef.current?.offsetHeight ?? 600) + 40, opacity: [0, 1, 1, 0] }}
-                    transition={{ duration: 1.05, ease: [0.4, 0, 0.2, 1] }}
-                  />
-                )}
-                {paragraphs}
-              </motion.div>
-            </AnimatePresence>
-
-            <div className="page-end">
-              {pages.length > 1 && (
-                <div className="page-nav">
-                  <button className="icon-btn" onClick={() => goPage(page - 1)} disabled={page === 0} aria-label={t("Page précédente", "Previous page")}>
-                    <Icon name="left" />
-                  </button>
-                  <span className="num">
-                    {page + 1} / {pages.length}
-                  </span>
-                  <button className="icon-btn" onClick={() => goPage(page + 1)} disabled={isLast} aria-label={t("Page suivante sans marquer", "Next page without marking")}>
-                    <Icon name="right" />
-                  </button>
+        {paged ? (
+          <div className="reader-leaves" onWheel={onSwipe}>
+            {arrow("left")}
+            <div className="leaf">
+              <div className="leaf-view" ref={viewRef}>
+                {/* composition des pages : copie invisible du titre et de la page, mêmes styles */}
+                <div className="leaf-ghost" ref={ghostRef} aria-hidden="true" inert>
+                  {header}
                 </div>
-              )}
-              <p>
-                {settings.finish_marks_known !== "0" && newOnPage > 0
-                  ? t(
-                      `Les ${newOnPage} mots bleus que vous n'avez pas consultés rejoindront vos mots connus.`,
-                      `The ${newOnPage} blue word${newOnPage > 1 ? "s" : ""} you didn't look up will join your known words.`,
-                    )
-                  : isLast
-                    ? t("Dernière page de la leçon.", "Last page of the lesson.")
-                    : t("Tous les mots de cette page sont déjà rencontrés.", "You have already met every word on this page.")}
-              </p>
-              <button className="btn primary lg glow" onClick={finishPage} disabled={illum}>
-                {isLast ? t("Terminer la leçon", "Finish the lesson") : t("Terminer la page", "Finish the page")}
-                <Icon name="forward" size={16} stroke={2} />
-              </button>
-            </div>
-            {pages.length > 1 && (
-              <div className="page-dots" aria-hidden="true">
-                {pages.map((_, i) => (
-                  <button key={i} className={i === page ? "on" : i < page ? "done" : ""} onClick={() => goPage(i)} tabIndex={-1} />
-                ))}
+                <div className={`page leaf-measure ${markClass}`} ref={measureRef} lang={lang} dir={li.rtl ? "rtl" : undefined} aria-hidden="true" />
+                <AnimatePresence mode="wait" initial={false} custom={turn * flip}>
+                  <motion.div key={page} className="leaf-page" {...turnProps}>
+                    {page === 0 && header}
+                    {pageEl}
+                  </motion.div>
+                </AnimatePresence>
               </div>
-            )}
+              <footer className="leaf-foot">
+                <div className="leaf-progress">
+                  {pages.length > 1 &&
+                    (pages.length <= MAX_DOTS ? (
+                      dots
+                    ) : (
+                      <div className="leaf-rail" aria-hidden="true">
+                        <i style={{ width: `${((page + 1) / pages.length) * 100}%` }} />
+                      </div>
+                    ))}
+                  {pages.length > 1 && (
+                    <span className="num">
+                      {page + 1} / {pages.length}
+                    </span>
+                  )}
+                </div>
+                <p className="leaf-hint">{hint}</p>
+                <button className="btn primary glow" onClick={finishPage} disabled={illum} data-tour="finish">
+                  {finishLabel}
+                  <Icon name="forward" size={15} stroke={2} />
+                </button>
+              </footer>
+            </div>
+            {arrow("right")}
           </div>
-        </div>
+        ) : (
+          <div className="reader-scroll" ref={scrollRef} onScroll={onReaderScroll}>
+            <div className="reader-inner">
+              {header}
+
+              <AnimatePresence mode="wait" initial={false} custom={turn * flip}>
+                <motion.div key={page} {...turnProps}>
+                  {pageEl}
+                </motion.div>
+              </AnimatePresence>
+
+              <div className="page-end">
+                {pages.length > 1 && (
+                  <div className="page-nav">
+                    <button className="icon-btn" onClick={() => goPage(page - 1)} disabled={page === 0} aria-label={t("Page précédente", "Previous page")}>
+                      <Icon name="left" />
+                    </button>
+                    <span className="num">
+                      {page + 1} / {pages.length}
+                    </span>
+                    <button className="icon-btn" onClick={() => goPage(page + 1)} disabled={isLast} aria-label={t("Page suivante sans marquer", "Next page without marking")}>
+                      <Icon name="right" />
+                    </button>
+                  </div>
+                )}
+                <p>{hint}</p>
+                <button className="btn primary lg glow" onClick={finishPage} disabled={illum} data-tour="finish">
+                  {finishLabel}
+                  <Icon name="forward" size={16} stroke={2} />
+                </button>
+              </div>
+              {pages.length > 1 && dots}
+            </div>
+          </div>
+        )}
 
         <Player
           key={`player-${lesson.id}-${lesson.media_path ?? ""}`}
@@ -1039,7 +1297,7 @@ export function Reader() {
                       className="btn primary lg glow"
                       onClick={() => {
                         // relire, c'est lire encore : les pages comptent de nouveau
-                        readPages.current = new Set();
+                        readToks.current = new Uint8Array(tokens.length);
                         session.current = { read: 0, known: 0, lingqs: 0 };
                         setComplete(null);
                         goPage(0);
@@ -1055,7 +1313,7 @@ export function Reader() {
         </AnimatePresence>
       </div>
 
-      <aside className="word-panel" aria-label={t("Panneau latéral", "Side panel")}>
+      <aside className="word-panel" data-tour="panel" aria-label={t("Panneau latéral", "Side panel")}>
         <div className="wp-top drag" data-tauri-drag-region>
           <AsideTabs value={aside} onChange={setAside} />
         </div>
@@ -1101,7 +1359,7 @@ function SimplifySheet({ open, onClose, lessonTitle, text, lang }: { open: boole
   const toast = useApp((s) => s.toast);
   const bump = useApp((s) => s.bumpLibrary);
   const openLesson = useApp((s) => s.openLesson);
-  const go = useApp((s) => s.go);
+  const openSettings = useApp((s) => s.openSettings);
 
   useEffect(() => {
     if (open) {
@@ -1125,7 +1383,7 @@ function SimplifySheet({ open, onClose, lessonTitle, text, lang }: { open: boole
       setState("idle");
       if (isNoModel(e)) {
         onClose();
-        go("settings");
+        openSettings("ai");
       }
       toast(errorText(e), "error");
     }

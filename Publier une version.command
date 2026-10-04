@@ -26,11 +26,20 @@ SUGGEST="$(node -p '(v=>{const p=v.split(".").map(Number);p[2]++;return p.join("
 echo ""
 read -r -p "  Version actuelle $CURRENT. Nouvelle version [$SUGGEST] : " VERSION
 VERSION="${VERSION:-$SUGGEST}"
-read -r -p "  Ce qui change (une phrase) : " NOTES
-NOTES="${NOTES:-Améliorations et corrections.}"
+# ce qui change : les nouveautés du journal (src/changelog.json), sinon une phrase
+NOTES="$(node scripts/release.mjs preview "$VERSION" 2>/dev/null)"
+if [ -n "$NOTES" ]; then
+  echo ""
+  echo "  Nouveautés de cette version (src/changelog.json) :"
+  echo "$NOTES" | sed -n '1,/^---$/p' | grep -v '^---$' | sed 's/^/    /'
+else
+  read -r -p "  Ce qui change (une phrase) : " NOTES
+  NOTES="${NOTES:-Améliorations et corrections.}"
+fi
 
 step "Numéro de version"
 node scripts/release.mjs bump "$VERSION" || fail "Mise à jour du numéro de version impossible."
+node scripts/release.mjs stamp "$VERSION" || fail "Les nouveautés n'ont pas pu être datées."
 
 step "Compilation de la version $VERSION"
 npm run app:build -- --bundles app || fail "La compilation a échoué."

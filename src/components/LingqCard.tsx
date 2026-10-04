@@ -6,16 +6,17 @@ import { t } from "../lib/i18n";
 /** Avancement de l'import LingQ dans la barre latérale, hors des Réglages. */
 export function LingqCard() {
   const { phase, stage, done, total } = useLingq();
-  const view = useApp((s) => s.view);
-  const go = useApp((s) => s.go);
-  const visible = phase === "importing" && view !== "settings";
+  // cachée seulement sur la page LingQ des Réglages, qui montre déjà l'avancement
+  const here = useApp((s) => s.view === "settings" && s.settingsTab === "lingq");
+  const openSettings = useApp((s) => s.openSettings);
+  const visible = phase === "importing" && !here;
   return (
     <AnimatePresence>
       {visible && (
         <motion.button
           className="update-card"
           style={{ textAlign: "left", cursor: "pointer" }}
-          onClick={() => go("settings")}
+          onClick={() => openSettings("lingq")}
           initial={{ opacity: 0, y: 12, scale: 0.97 }}
           animate={{ opacity: 1, y: 0, scale: 1 }}
           exit={{ opacity: 0, y: 8 }}

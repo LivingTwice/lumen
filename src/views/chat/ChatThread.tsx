@@ -23,7 +23,7 @@ export function ChatThread({ compact = false, lessonNow = null }: { compact?: bo
   const draftLesson = useChat((s) => s.draftLesson);
   const appLang = useApp((s) => s.lang)();
   const lang = useChat((s) => s.lang) ?? appLang;
-  const go = useApp((s) => s.go);
+  const openSettings = useApp((s) => s.openSettings);
   const messages = thread?.messages ?? [];
   const mine = pending && pending.chatId === thread?.chat.id ? pending : null;
   const lesson = attachedLesson({ thread, draftLesson });
@@ -58,7 +58,7 @@ export function ChatThread({ compact = false, lessonNow = null }: { compact?: bo
             <motion.div className="chat-error" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }}>
               <span>{error.text}</span>
               {error.noModel && (
-                <button className="btn sm soft" onClick={() => go("settings")}>
+                <button className="btn sm soft" onClick={() => openSettings("ai")}>
                   {t("Installer un modèle", "Install a model")}
                 </button>
               )}

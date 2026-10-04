@@ -28,14 +28,8 @@ export function LingqSection() {
   const canStart = chosen.length > 0 && (lq.vocab || lq.lessons);
 
   return (
+    // le titre et la présentation sont dans l'en-tête de la page des Réglages
     <section className="set-section">
-      <h2>LingQ</h2>
-      <p>
-        {t(
-          "Retrouvez dans Lumen tout votre parcours LingQ : mots connus et ignorés, LingQ avec leurs traductions et leurs notes, et les leçons de tous vos cours avec leur audio.",
-          "Bring your whole LingQ journey into Lumen: known and ignored words, LingQs with their translations and notes, and the lessons of all your courses with their audio.",
-        )}
-      </p>
 
       <div className="set-card">
         <div className="set-row">

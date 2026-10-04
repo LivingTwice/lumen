@@ -1,0 +1,567 @@
+/* ==========================================================================
+   Visite guidée : un voile du soir, une lumière sur ce dont on parle, une carte
+   ========================================================================== */
+
+:root {
+  --tour-veil: rgba(30, 20, 10, 0.5);
+}
+:root[data-theme="dark"] {
+  --tour-veil: rgba(0, 0, 0, 0.6);
+}
+
+.tour {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  pointer-events: none;
+}
+/* ce qui n'est pas éclairé ne se touche pas */
+.tour-block {
+  position: fixed;
+  pointer-events: auto;
+}
+
+/* la lumière : un trou dans le voile (l'ombre immense de l'élément fait le voile) */
+.tour-hole {
+  position: fixed;
+  left: 0;
+  top: 0;
+  pointer-events: none;
+  box-shadow: 0 0 0 200vmax var(--tour-veil);
+}
+.tour-ring {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  box-shadow:
+    0 0 0 1.5px var(--light-strong),
+    0 0 28px 4px var(--light-soft),
+    inset 0 0 24px var(--light-veil);
+  opacity: 0;
+  transition: opacity 0.45s ease;
+}
+.tour-ring.on {
+  opacity: 1;
+}
+/* un mot à toucher : la lumière appelle */
+.tour-hole.wait .tour-ring {
+  animation: tour-call 1.8s ease-in-out infinite;
+}
+.tour-hole.wait::after {
+  content: "";
+  position: absolute;
+  inset: -2px;
+  border-radius: inherit;
+  border: 2px solid var(--light);
+  animation: tour-ripple 1.8s ease-out infinite;
+}
+@keyframes tour-call {
+  0%,
+  100% {
+    box-shadow: 0 0 0 1.5px var(--light-strong), 0 0 20px 3px var(--light-soft);
+  }
+  50% {
+    box-shadow: 0 0 0 2.5px var(--light-strong), 0 0 0 8px var(--light-veil), 0 0 40px 10px var(--light-soft);
+  }
+}
+@keyframes tour-ripple {
+  0% {
+    transform: scale(1);
+    opacity: 0.85;
+  }
+  100% {
+    transform: scale(1.45);
+    opacity: 0;
+  }
+}
+
+/* les scènes au milieu : le voile s'épaissit et floute l'application */
+.tour-dim {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background: radial-gradient(70% 70% at 50% 45%, transparent, var(--tour-veil));
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+}
+
+/* ---------- la carte ---------- */
+
+.tour-card {
+  position: fixed;
+  pointer-events: auto;
+  padding: 15px 18px 14px;
+  border-radius: 20px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-l), 0 0 60px var(--light-veil);
+  color: var(--text);
+}
+.tour-card.scene {
+  padding: 16px 20px;
+  border-radius: 26px;
+}
+
+.tour-progress {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.tour-chapter {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.tour-chapter .num {
+  width: 18px;
+  height: 18px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  font-size: 10.5px;
+  letter-spacing: 0;
+  color: var(--on-light);
+  background: linear-gradient(150deg, var(--flame-top), var(--light-strong));
+}
+.tour-seeds {
+  display: flex;
+  gap: 7px;
+}
+.tour-chap {
+  display: flex;
+  gap: 3px;
+}
+.tour-chap i {
+  position: relative;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--chip-hover);
+}
+.tour-chap i.done {
+  background: color-mix(in srgb, var(--light-strong) 55%, transparent);
+}
+.tour-chap i b {
+  position: absolute;
+  inset: -1px;
+  border-radius: 50%;
+  background: var(--light);
+  box-shadow: 0 0 8px var(--light);
+}
+
+.tour-text h3 {
+  font-size: 24px;
+  margin-bottom: 7px;
+}
+.tour-text p {
+  font-size: 13.5px;
+  line-height: 1.55;
+  color: var(--muted);
+}
+.tour-text > * + * {
+  margin-top: 10px;
+}
+.tour-card.scene .tour-text {
+  text-align: center;
+}
+.tour-card.scene .tour-text h3 {
+  font-size: 29px;
+}
+.tour-card.scene .tour-text p {
+  max-width: 56ch;
+  margin-left: auto;
+  margin-right: auto;
+}
+.tour-text p.tour-note {
+  color: var(--text);
+}
+
+.tour-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: var(--faint);
+}
+
+.tour-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.tour-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.tour-legend .sw {
+  width: 18px;
+  height: 11px;
+  border-radius: 4px;
+}
+.tour-legend .sw.s0 {
+  background: var(--w-new);
+  box-shadow: inset 0 -2px 0 var(--w-new-line);
+}
+.tour-legend .sw.s1 {
+  background: var(--w-l1);
+}
+.tour-legend .sw.s4 {
+  box-shadow: inset 0 0 0 1px var(--border-strong);
+}
+
+.tour-tap {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: color-mix(in srgb, var(--light-strong) 70%, var(--text));
+}
+.tour-tap .tour-dot,
+.tour-state.busy .tour-dot {
+  background: var(--light-strong);
+  animation: pulse 1.6s ease-in-out infinite;
+}
+
+/* l'état réel du modèle sur ce Mac */
+.tour-state {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 9px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: var(--chip);
+  font-size: 12.5px;
+  color: var(--text);
+  text-align: left;
+}
+.tour-card.scene .tour-state {
+  max-width: 440px;
+  margin-left: auto;
+  margin-right: auto;
+}
+.tour-state.ok {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+}
+.tour-state.ok .tour-dot {
+  background: var(--ok);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 18%, transparent);
+}
+.tour-state-line {
+  align-self: stretch;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.tour-state-line .num {
+  margin-left: auto;
+  color: var(--muted);
+}
+.tour-state .bar {
+  align-self: stretch;
+  height: 5px;
+}
+
+.tour-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 16px;
+}
+.tour-skip {
+  border: 0;
+  padding: 4px 2px;
+  background: transparent;
+  font-size: 12px;
+  color: var(--faint);
+}
+.tour-skip:hover {
+  color: var(--muted);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.tour-foot-actions {
+  display: flex;
+  gap: 6px;
+}
+
+/* ---------- les scènes ---------- */
+
+.tour-stage {
+  position: relative;
+  height: 220px;
+  margin: 0 -6px 16px;
+  border-radius: 18px;
+  overflow: hidden;
+  background:
+    radial-gradient(70% 90% at 50% 120%, var(--light-soft), transparent 70%),
+    radial-gradient(40% 50% at 50% 100%, var(--light-veil), transparent 80%),
+    var(--panel);
+  box-shadow: inset 0 0 0 1px var(--border);
+}
+
+/* qu'est-ce qu'un modèle : des phrases de toutes les langues nourrissent la lumière du Mac */
+.tm-word {
+  position: absolute;
+  left: 50%;
+  top: 90px;
+  font-family: var(--font-read);
+  font-size: 15px;
+  white-space: nowrap;
+  color: var(--text);
+  opacity: 0;
+  animation: tm-absorb 5.2s cubic-bezier(0.5, 0, 0.75, 0.4) infinite;
+}
+@keyframes tm-absorb {
+  0% {
+    transform: translate(calc(-50% + var(--dx)), calc(-50% + var(--dy))) scale(1);
+    opacity: 0;
+    filter: blur(2px);
+  }
+  18% {
+    opacity: 0.85;
+    filter: blur(0);
+  }
+  70% {
+    opacity: 0.55;
+  }
+  100% {
+    transform: translate(-50%, -50%) scale(0.2);
+    opacity: 0;
+  }
+}
+.tm-mac {
+  position: absolute;
+  left: calc(50% - 90px);
+  top: 34px;
+  width: 180px;
+}
+.tm-screen {
+  position: relative;
+  height: 112px;
+  display: grid;
+  place-items: center;
+  border-radius: 12px 12px 5px 5px;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--bg-elev) 82%, transparent);
+  box-shadow: inset 0 0 0 1.5px var(--border-strong), var(--shadow-m);
+}
+.tm-base {
+  height: 9px;
+  margin: 0 -18px;
+  border-radius: 1px 1px 10px 10px;
+  background: var(--border-strong);
+}
+.tm-halo,
+.tm-core {
+  grid-area: 1 / 1;
+  border-radius: 50%;
+}
+.tm-halo {
+  width: 120px;
+  height: 120px;
+  background: radial-gradient(closest-side, var(--light-soft), transparent);
+  animation: breathe 5s ease-in-out infinite;
+}
+.tm-core {
+  width: 34px;
+  height: 34px;
+  background: radial-gradient(circle at 40% 35%, var(--flame-core-top), var(--light) 55%, var(--light-strong));
+  box-shadow: 0 0 22px var(--light), 0 0 50px var(--light-soft);
+  animation: tm-pulse 2.6s ease-in-out infinite;
+}
+.tm-core.ready {
+  box-shadow: 0 0 26px var(--light), 0 0 70px var(--light-soft);
+}
+@keyframes tm-pulse {
+  0%,
+  100% {
+    transform: scale(0.92);
+  }
+  50% {
+    transform: scale(1.06);
+  }
+}
+.tm-offline {
+  position: absolute;
+  right: 9px;
+  bottom: 7px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 9.5px;
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.tm-offline i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--ok);
+}
+.tm-name {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 176px;
+  text-align: center;
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+/* pourquoi c'est important : tous les sens, puis le bon */
+.tour-stage.why {
+  height: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  padding: 22px 20px 20px;
+}
+.tw-line {
+  margin: 0;
+  text-align: center;
+  font-family: var(--font-read);
+  font-size: 22px;
+  line-height: 1.6;
+}
+.tw-word {
+  padding: 0.04em 0.18em;
+  border-radius: 0.24em;
+  background: var(--w-new);
+  box-shadow: 0 0 0 2px var(--accent), 0 0 18px var(--accent-soft);
+}
+.tw-cols {
+  display: grid;
+  grid-template-columns: 1.15fr 1fr;
+  gap: 12px;
+  text-align: left;
+}
+.tw-col {
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: var(--bg-elev);
+  box-shadow: inset 0 0 0 1px var(--border);
+  opacity: 0.45;
+  transition: opacity 0.5s ease, box-shadow 0.6s ease, background 0.6s ease;
+}
+.tw-col.on {
+  opacity: 1;
+}
+.tw-col .eyebrow {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-bottom: 8px;
+}
+.tw-col ol {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.tw-sense {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 6px;
+  border-radius: 8px;
+  font-size: 13px;
+  transition: opacity 0.5s ease, background-color 0.5s ease, box-shadow 0.5s ease;
+}
+.tw-sense .n {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  font-size: 10px;
+  font-weight: 600;
+  background: var(--chip);
+  color: var(--muted);
+}
+.tw-sense.pick {
+  font-weight: 600;
+  background: var(--light-veil);
+  box-shadow: inset 0 0 0 1.5px var(--light-strong);
+}
+.tw-sense.dim {
+  opacity: 0.35;
+}
+.tw-col.ai.on {
+  background: radial-gradient(120% 100% at 0% 0%, var(--light-veil), transparent 70%), var(--bg-elev);
+  box-shadow: inset 0 0 0 1.5px var(--light-strong), 0 0 30px var(--light-soft);
+}
+.tw-col.ai .eyebrow {
+  color: color-mix(in srgb, var(--light-strong) 70%, var(--text));
+}
+.tw-ctx {
+  display: block;
+  font-family: var(--font-read);
+  font-size: 21px;
+  line-height: 1.35;
+}
+.tw-ctx.typing::after {
+  content: "";
+  display: inline-block;
+  width: 2px;
+  height: 1em;
+  margin-left: 2px;
+  vertical-align: -0.12em;
+  background: var(--light-strong);
+  animation: tw-blink 0.9s steps(1) infinite;
+}
+@keyframes tw-blink {
+  50% {
+    opacity: 0;
+  }
+}
+
+/* la fin : l'astre se lève (formes de news.css), plus haut et plus grand */
+.tour-stage.end {
+  height: 180px;
+}
+.tour-stage.end .news-sun {
+  bottom: -18px;
+  width: 124px;
+  height: 124px;
+  margin-left: -62px;
+}
+.te-known {
+  position: absolute;
+  top: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 4px 11px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+  background: var(--bg-elev);
+  box-shadow: 0 0 0 1px var(--border), 0 0 20px var(--light-veil);
+}
+
+@media (max-width: 680px) {
+  .tw-cols {
+    grid-template-columns: 1fr;
+  }
+}

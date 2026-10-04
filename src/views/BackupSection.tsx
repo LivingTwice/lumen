@@ -159,14 +159,8 @@ export function BackupSection() {
   };
 
   return (
-    <section className="set-section" id="set-backup">
-      <h2>{t("Sauvegarde", "Backup")}</h2>
-      <p>
-        {t(
-          "Une copie de votre progression dans votre iCloud Drive : mots, expressions, leçons, playlists, conversations et réglages. Si ce Mac est effacé ou remplacé, vous la retrouvez en un clic. Elle ne passe par aucun serveur : seul votre compte iCloud la reçoit.",
-          "A copy of your progress in your iCloud Drive: words, phrases, lessons, playlists, conversations and settings. If this Mac is wiped or replaced, you get it back in one click. It goes through no server: only your iCloud account receives it.",
-        )}
-      </p>
+    // le titre et la présentation sont dans l'en-tête de la page des Réglages
+    <section className="set-section">
 
       <div className="set-card">
         <div className="set-row backup-hero">

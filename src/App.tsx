@@ -2,6 +2,8 @@ import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useRef, useState } from "react";
 import { Icon } from "./components/Icon";
 import { Guide } from "./components/Guide";
+import { News, useNewsOnUpdate } from "./components/News";
+import { Tour } from "./components/Tour";
 import { Sidebar } from "./components/Sidebar";
 import { Orb, Toasts } from "./components/ui";
 import { isTauri } from "./lib/api";
@@ -91,6 +93,8 @@ export function App() {
 
   useTheme();
   const dropping = useFileDrop(ready && !!onboarded);
+  // après une mise à jour : ce qui a changé
+  useNewsOnUpdate();
 
   useEffect(() => {
     if (isTauri && navigator.userAgent.includes("Mac")) document.documentElement.classList.add("vibrant");
@@ -161,6 +165,8 @@ export function App() {
       </main>
       <ImportSheet />
       <Guide />
+      <News />
+      <Tour />
       <Toasts />
       <AnimatePresence>
         {dropping && (

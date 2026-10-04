@@ -4,7 +4,7 @@ resolver = "2"
 
 [package]
 name = "lumen"
-version = "0.3.0"
+version = "0.4.0"
 description = "Lumen : apprendre les langues en lisant et en écoutant"
 authors = ["Ulysse Rives"]
 edition = "2021"

@@ -30,6 +30,7 @@ export function Sidebar() {
   const openLesson = useApp((s) => s.openLesson);
   const openPlaylist = useApp((s) => s.openPlaylist);
   const openImport = useApp((s) => s.openImport);
+  const openSettings = useApp((s) => s.openSettings);
   const known = useApp((s) => s.knownCount);
   const streak = useApp((s) => s.streak);
   const models = useApp((s) => s.models);
@@ -113,8 +114,7 @@ export function Sidebar() {
             role="menuitem"
             onClick={() => {
               setMenu(false);
-              go("settings");
-              window.setTimeout(() => document.getElementById("set-langs")?.scrollIntoView({ behavior: "smooth", block: "start" }), 350);
+              openSettings("langs");
             }}
           >
             <span className="lang-badge add" style={{ width: 24, height: 24, borderRadius: 7 }}>
@@ -137,6 +137,7 @@ export function Sidebar() {
               disabled={disabled}
               style={disabled ? { opacity: 0.45, cursor: "default" } : undefined}
               aria-current={active ? "page" : undefined}
+              data-tour={`nav-${n.view}`}
             >
               {active && <motion.span layoutId="nav-pill" className="nav-pill" transition={{ type: "spring", stiffness: 500, damping: 40 }} />}
               <Icon name={n.icon} />
@@ -169,7 +170,7 @@ export function Sidebar() {
       </nav>
 
       <div style={{ padding: "16px 12px 0" }}>
-        <button className="btn primary glow" style={{ width: "100%" }} onClick={() => openImport()}>
+        <button className="btn primary glow" style={{ width: "100%" }} onClick={() => openImport()} data-tour="import">
           <Icon name="plus" size={16} stroke={2} />
           {t("Importer", "Import")}
         </button>
@@ -192,7 +193,7 @@ export function Sidebar() {
         <UpdateCard />
         <LingqCard />
         <BackupCard />
-        <button className="ai-card" style={{ textAlign: "left", cursor: "pointer" }} onClick={() => go("settings")}>
+        <button className="ai-card" style={{ textAlign: "left", cursor: "pointer" }} onClick={() => openSettings("ai")}>
           <span className="eyebrow">{t("IA locale", "Local AI")}</span>
           <span className="ai-row">
             <span className={`dot ${llm ? "ok" : busy ? "busy" : ""}`} />

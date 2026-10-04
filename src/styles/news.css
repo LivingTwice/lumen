@@ -1,0 +1,286 @@
+/* ==========================================================================
+   Nouveautés : la fenêtre qui s'ouvre après une mise à jour
+   ========================================================================== */
+
+.news {
+  width: min(620px, 100%);
+  max-height: calc(100vh - 80px);
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 26px;
+  box-shadow: var(--shadow-l), 0 0 90px var(--light-veil);
+  overflow: hidden;
+}
+
+/* le ciel : un astre se lève derrière l'horizon, des poussières de lumière montent */
+.news-sky {
+  position: relative;
+  height: 138px;
+  flex-shrink: 0;
+  overflow: hidden;
+  background:
+    radial-gradient(55% 130% at 50% 100%, var(--light-soft), transparent 70%),
+    linear-gradient(180deg, var(--panel), var(--bg-elev));
+}
+.news-sun {
+  position: absolute;
+  left: 50%;
+  bottom: -42px;
+  width: 100px;
+  height: 100px;
+  margin-left: -50px;
+}
+.news-sun > span {
+  position: absolute;
+  border-radius: 50%;
+}
+.news-rays {
+  inset: -70px;
+  background: repeating-conic-gradient(from 0deg, var(--light-veil) 0deg 5deg, transparent 5deg 15deg);
+  -webkit-mask-image: radial-gradient(closest-side, #000 28%, transparent 76%);
+  mask-image: radial-gradient(closest-side, #000 28%, transparent 76%);
+  animation: news-spin 80s linear infinite;
+}
+.news-halo {
+  inset: -34px;
+  background: radial-gradient(closest-side, var(--light-soft), transparent);
+  animation: breathe 6s ease-in-out infinite;
+}
+.news-core {
+  inset: 20px;
+  background: radial-gradient(circle at 40% 35%, var(--flame-core-top), var(--light) 55%, var(--light-strong));
+  box-shadow: 0 0 30px var(--light), 0 0 80px var(--light-soft);
+}
+@keyframes news-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.news-horizon {
+  position: absolute;
+  left: 6%;
+  right: 6%;
+  bottom: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--light-strong), transparent);
+  opacity: 0.55;
+}
+.news-mote {
+  position: absolute;
+  bottom: -4px;
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: var(--light);
+  box-shadow: 0 0 6px var(--light);
+  opacity: 0;
+  animation-name: news-rise;
+  animation-timing-function: linear;
+  animation-iteration-count: infinite;
+}
+@keyframes news-rise {
+  0% {
+    transform: translateY(0);
+    opacity: 0;
+  }
+  15% {
+    opacity: 0.9;
+  }
+  100% {
+    transform: translateY(-150px);
+    opacity: 0;
+  }
+}
+.news-close {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+}
+
+.news-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 4px 30px 10px;
+  /* le texte qui défile se fond sous l'horizon */
+  -webkit-mask-image: linear-gradient(to bottom, transparent, #000 18px);
+  mask-image: linear-gradient(to bottom, transparent, #000 18px);
+}
+.news-head {
+  padding: 16px 0 20px;
+  text-align: center;
+}
+.news-head .eyebrow {
+  display: block;
+}
+.news-head h2 {
+  position: relative;
+  display: inline-block;
+  margin: 6px 0 6px;
+  font-size: 40px;
+}
+/* un reflet passe une fois sur le nom de la version */
+.news-sheen {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  color: transparent;
+  background: linear-gradient(105deg, transparent 38%, var(--light) 48%, var(--flame-core-top) 50%, var(--light) 52%, transparent 62%);
+  background-size: 260% 100%;
+  background-position: 120% 0;
+  -webkit-background-clip: text;
+  background-clip: text;
+  animation: news-sheen 2.4s ease-in-out 1s both;
+}
+@keyframes news-sheen {
+  from {
+    background-position: 120% 0;
+  }
+  to {
+    background-position: -20% 0;
+  }
+}
+.news-title {
+  max-width: 44ch;
+  margin: 0 auto;
+  font-size: 15px;
+  line-height: 1.45;
+}
+.news-date {
+  display: block;
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--faint);
+}
+
+.news-items {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.news-item {
+  display: flex;
+  gap: 14px;
+  padding: 12px;
+  border-radius: 14px;
+  transition: background-color 0.2s ease;
+}
+.news-item:hover {
+  background: var(--chip);
+}
+.news-ic {
+  width: 36px;
+  height: 36px;
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  border-radius: 11px;
+  color: var(--on-light);
+  background: linear-gradient(150deg, var(--flame-top), var(--light-strong));
+  box-shadow: 0 6px 18px var(--light-soft);
+}
+.news-body {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.news-body strong {
+  font-size: 14.5px;
+  font-weight: 600;
+}
+.news-body > span {
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+.news-act {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 3px;
+  padding: 2px 0;
+  border: 0;
+  background: transparent;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: color-mix(in srgb, var(--light-strong) 72%, var(--text));
+}
+.news-act:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+/* versions précédentes : plus discrètes */
+.news-older {
+  margin: 16px 12px 0;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+.news-older-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+  margin-bottom: 9px;
+}
+.news-older-head strong {
+  font-family: var(--font-display);
+  font-size: 18px;
+  font-weight: 500;
+}
+.news-older-head span {
+  font-size: 13px;
+  color: var(--muted);
+}
+.news-older-head .news-date {
+  margin: 0 0 0 auto;
+}
+.news-older ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+.news-older li {
+  display: flex;
+  gap: 9px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+.news-older li .icon {
+  flex-shrink: 0;
+  margin-top: 2px;
+  color: var(--light-strong);
+}
+.news-older li > span {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.news-older li strong {
+  font-weight: 600;
+  color: var(--text);
+}
+
+.news-foot {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 20px 16px 32px;
+  border-top: 1px solid var(--border);
+}
+.news-hint {
+  flex: 1;
+  font-size: 12px;
+  color: var(--faint);
+}

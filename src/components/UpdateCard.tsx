@@ -1,12 +1,23 @@
 import { AnimatePresence, motion } from "motion/react";
 import { useUpdate } from "../lib/updater";
 import { Icon } from "./Icon";
-import { t } from "../lib/i18n";
+import { t, uiLang } from "../lib/i18n";
+
+/** Titres des nouveautés annoncées par la mise à jour (notes du manifeste : { fr: [...], en: [...] }). */
+function noteTitles(notes: string): string[] {
+  try {
+    const list = JSON.parse(notes)?.[uiLang()];
+    return Array.isArray(list) ? list.filter((x): x is string => typeof x === "string") : [];
+  } catch {
+    return [];
+  }
+}
 
 /** Carte discrète en bas de la barre latérale quand une mise à jour existe. */
 export function UpdateCard() {
-  const { phase, version, progress, dismissed, install, restart, dismiss, error } = useUpdate();
+  const { phase, version, notes, progress, dismissed, install, restart, dismiss, error } = useUpdate();
   const visible = !dismissed && ["available", "downloading", "ready"].includes(phase);
+  const titles = noteTitles(notes);
   return (
     <AnimatePresence>
       {visible && (
@@ -26,6 +37,14 @@ export function UpdateCard() {
               </button>
             )}
           </div>
+          {phase === "available" && titles.length > 0 && (
+            <ul className="update-notes">
+              {titles.slice(0, 3).map((x) => (
+                <li key={x}>{x}</li>
+              ))}
+              {titles.length > 3 && <li className="more">{t(`et ${titles.length - 3} de plus`, `and ${titles.length - 3} more`)}</li>}
+            </ul>
+          )}
           {phase === "available" && (
             <button className="btn sm primary glow" onClick={install}>
               <Icon name="download" size={14} /> {t("Mettre à jour", "Update")}

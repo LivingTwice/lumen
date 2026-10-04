@@ -61,7 +61,7 @@ export function WordPanel({ lang, sel, term, onStatus, onTranslation, onSelectPh
   const setSetting = useApp((s) => s.setSetting);
   const openGuide = useApp((s) => s.openGuide);
   const guideSeen = settings.guide_seen === "1";
-  const go = useApp((s) => s.go);
+  const openSettings = useApp((s) => s.openSettings);
   const llmReady = useApp((s) => s.models.some((m) => m.kind === "llm" && m.installed));
   const llmDownloading = useApp((s) => s.models.some((m) => m.kind === "llm" && !!s.downloads[m.id] && !s.downloads[m.id].error));
   const [dict, setDict] = useState<DictResult | null>(null);
@@ -374,7 +374,7 @@ export function WordPanel({ lang, sel, term, onStatus, onTranslation, onSelectPh
                     )
                   : t("La traduction en contexte demande un modèle d'IA locale.", "Translation in context needs a local AI model.")}
                 {!llmDownloading && (
-                  <button className="btn sm soft" onClick={() => go("settings")}>
+                  <button className="btn sm soft" onClick={() => openSettings("ai")}>
                     {t("Installer un modèle", "Install a model")}
                   </button>
                 )}
@@ -484,7 +484,7 @@ export function WordPanel({ lang, sel, term, onStatus, onTranslation, onSelectPh
               />
             </div>
 
-            <div className="wp-block">
+            <div className="wp-block" data-tour="status">
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
                 <span className="eyebrow">{t("Statut", "Status")}</span>
                 <span className="muted" style={{ fontSize: 12 }}>

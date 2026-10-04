@@ -20,7 +20,14 @@ export function AsideTabs({ value, onChange }: { value: AsideTab; onChange(v: As
   return (
     <div className="aside-tabs no-drag" role="tablist" aria-label={t("Panneau", "Panel")}>
       {tabs.map((tab) => (
-        <button key={tab.v} role="tab" aria-selected={value === tab.v} className={value === tab.v ? "on" : ""} onClick={() => onChange(tab.v)}>
+        <button
+          key={tab.v}
+          role="tab"
+          aria-selected={value === tab.v}
+          className={value === tab.v ? "on" : ""}
+          onClick={() => onChange(tab.v)}
+          data-tour={tab.v === "chat" ? "chat-tab" : undefined}
+        >
           {value === tab.v && <motion.span layoutId="aside-tab" className="aside-tab-pill" transition={{ type: "spring", stiffness: 500, damping: 38 }} />}
           <Icon name={tab.v === "word" ? "text" : "chat"} size={14} />
           {tab.label}

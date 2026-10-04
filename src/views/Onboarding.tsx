@@ -238,9 +238,14 @@ export function Onboarding() {
     const wait = 950 - (performance.now() - started);
     if (wait > 0) await new Promise((res) => setTimeout(res, wait));
     if (offerBackup) await setSetting("backup_on", saveCloud ? "1" : "0");
+    // les nouveautés de cette version ne concernent pas qui découvre Lumen
+    const version = useApp.getState().info?.version.match(/\d+\.\d+\.\d+/)?.[0];
+    if (version) await setSetting("seen_version", version);
     await setSetting("onboarded", "1");
     setReplay(false);
     openLesson(first);
+    // puis la visite guidée, dans cette première leçon
+    void useApp.getState().startTour();
     // macOS demande l'accès à iCloud Drive maintenant, juste après le choix
     if (offerBackup && saveCloud) void useBackup.getState().save();
   };

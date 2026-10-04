@@ -181,6 +181,9 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player({ lesson, 
   const cursorRef = useRef(-1);
   const pageRef = useRef(page);
   pageRef.current = page;
+  // pages du moment : elles se recomposent (fenêtre, police) pendant que la voix lit
+  const pagesRef = useRef(pages);
+  pagesRef.current = pages;
   const listenSecs = useRef(0);
   // lu une seule fois, à l'ouverture de la leçon
   const autoplayRef = useRef(!!autoplay);
@@ -225,7 +228,7 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player({ lesson, 
       useApp.getState().toast(t("La lanterne suit maintenant la voix, mot à mot", "The lantern now follows the voice, word by word"), "light");
     } catch (e) {
       useApp.getState().toast(errorText(e), "error");
-      if (isNoModel(e)) useApp.getState().go("settings");
+      if (isNoModel(e)) useApp.getState().openSettings("ai");
     } finally {
       setResync(null);
     }
@@ -258,13 +261,10 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player({ lesson, 
     }
   }, [lesson.timings, tokens]);
 
-  const pageOf = useCallback(
-    (i: number) => {
-      const p = pages.findIndex((r) => i >= r.start && i < r.end);
-      return p === -1 ? pageRef.current : p;
-    },
-    [pages],
-  );
+  const pageOf = useCallback((i: number) => {
+    const p = pagesRef.current.findIndex((r) => i >= r.start && i < r.end);
+    return p === -1 ? pageRef.current : p;
+  }, []);
 
   const setCursor = useCallback(
     (i: number) => {
@@ -355,10 +355,10 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player({ lesson, 
       // le mot touché se tait : la leçon reprend la parole
       stopPronunciation();
       const p = pageOf(start);
-      const range = pages[p];
+      const range = pagesRef.current[p];
       let a = start;
       while (a < range.end && !tokens[a].w) a++;
-      if (a >= range.end) return;
+      if (a >= range.end) return false;
       const base = tokens[a].s;
       const text = lesson.text.slice(base, tokens[range.end - 1].e);
       const words = tokens.map((t, i) => ({ t, i })).filter((x) => x.t.w && x.i >= a && x.i < range.end);
@@ -378,10 +378,15 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player({ lesson, 
         },
         onEnd(completed) {
           speakRef.current = null;
-          if (completed && p < pages.length - 1) {
+          // la suite : le premier mot après la page lue, dans les pages du moment
+          const next = range.end;
+          if (completed && next < tokens.length) {
             window.setTimeout(() => {
-              onPage(p + 1);
-              speakFrom(pages[p + 1].start);
+              onPage(pageOf(next));
+              if (speakFromRef.current(next)) return;
+              setPlaying(false);
+              setCursor(-1);
+              finishedRef.current?.();
             }, 650);
           } else {
             setPlaying(false);
@@ -392,9 +397,12 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player({ lesson, 
           }
         },
       });
+      return true;
     },
-    [lesson, tokens, pages, rate, settings, onPage, pageOf, setCursor],
+    [lesson, tokens, rate, settings, onPage, pageOf, setCursor],
   );
+  const speakFromRef = useRef(speakFrom);
+  speakFromRef.current = speakFrom;
 
   // ---------- commandes ----------
   const toggleRef = useRef<() => void>(() => {});
@@ -615,7 +623,7 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player({ lesson, 
     <>
       {hasMedia && !single && <audio ref={audioRef} src={api().mediaUrl(lesson.media_path!)} preload="auto" {...masterEvents} />}
       {video && videoHost ? createPortal(video, videoHost) : video && <div style={{ display: "none" }}>{video}</div>}
-      <div className={`player ${canResync ? "has-resync" : ""}`}>
+      <div className={`player ${canResync ? "has-resync" : ""}`} data-tour="player">
         <button className={`play-btn ${playing ? "playing" : ""}`} onClick={toggle} aria-label={playing ? t("Pause", "Pause") : t("Lecture", "Play")} disabled={!hasMedia && !ttsAvailable()}>
           <Icon name={playing ? "pause" : "play"} size={18} />
         </button>

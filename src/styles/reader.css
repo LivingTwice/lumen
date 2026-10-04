@@ -6,6 +6,96 @@
   flex: 1;
   min-height: 0;
   display: flex;
+  transition: background-color 0.4s ease, color 0.4s ease;
+}
+
+/* ---------- couleur de la page (menu « Aa ») ----------
+   La leçon prend la palette claire ou sombre de Lumen (paper-light, paper-dark,
+   dans app.css), puis le fond et l'encre de sa couleur. Le reste de l'app ne change pas.
+   L'aperçu de Réglages › Lecture (.look-preview) prend les mêmes couleurs. */
+.reader.paper-light,
+.reader.paper-dark,
+.look-preview.paper-light,
+.look-preview.paper-dark {
+  background: var(--bg);
+  color: var(--text);
+}
+.reader.paper-paper,
+.look-preview.paper-paper {
+  --bg: #fcfaf5;
+  --bg-elev: #fffefb;
+  --bg-sunk: #f3efe6;
+  --panel: #f8f5ee;
+  --raised: #fffefb;
+  --text: #1f1b16;
+  --muted: #645b51;
+  --faint: #918677;
+  --border: rgba(60, 44, 24, 0.1);
+  --border-strong: rgba(60, 44, 24, 0.18);
+  --chip: rgba(60, 44, 24, 0.055);
+  --chip-hover: rgba(60, 44, 24, 0.095);
+}
+.reader.paper-sepia,
+.look-preview.paper-sepia {
+  --bg: #f3e7cf;
+  --bg-elev: #f9f0de;
+  --bg-sunk: #eadcc0;
+  --panel: #efe1c5;
+  --raised: #faf2e2;
+  --text: #433423;
+  --muted: #7a6650;
+  --faint: #a08a6f;
+  --border: rgba(80, 55, 25, 0.13);
+  --border-strong: rgba(80, 55, 25, 0.22);
+  --chip: rgba(80, 55, 25, 0.07);
+  --chip-hover: rgba(80, 55, 25, 0.12);
+  /* sur le papier jaune, le bleu des mots nouveaux doit rester bleu */
+  --w-new: rgba(64, 86, 214, 0.15);
+}
+.reader.paper-dusk,
+.look-preview.paper-dusk {
+  --bg: #2b2724;
+  --bg-elev: #36312d;
+  --bg-sunk: #24211e;
+  --panel: #302b27;
+  --raised: #403a35;
+  --text: #ebe3d7;
+  --muted: #b2a797;
+  --faint: #847a6d;
+  --border: rgba(255, 240, 220, 0.08);
+  --border-strong: rgba(255, 240, 220, 0.15);
+  --chip: rgba(255, 240, 220, 0.07);
+  --chip-hover: rgba(255, 240, 220, 0.11);
+}
+.reader.paper-night,
+.look-preview.paper-night {
+  --bg: #17130f;
+  --bg-elev: #221c17;
+  --bg-sunk: #120f0c;
+  --panel: #1c1813;
+  --raised: #2d261f;
+  --text: #eadfce;
+  --muted: #ad9f8b;
+  --faint: #7c705f;
+  --border: rgba(255, 230, 200, 0.075);
+  --border-strong: rgba(255, 230, 200, 0.14);
+  --chip: rgba(255, 230, 200, 0.065);
+  --chip-hover: rgba(255, 230, 200, 0.1);
+}
+.reader.paper-ink,
+.look-preview.paper-ink {
+  --bg: #050505;
+  --bg-elev: #131312;
+  --bg-sunk: #000000;
+  --panel: #0b0b0a;
+  --raised: #1f1e1c;
+  --text: #d6d0c6;
+  --muted: #958f86;
+  --faint: #67625b;
+  --border: rgba(255, 255, 255, 0.07);
+  --border-strong: rgba(255, 255, 255, 0.13);
+  --chip: rgba(255, 255, 255, 0.06);
+  --chip-hover: rgba(255, 255, 255, 0.1);
 }
 .reader-col {
   flex: 1;
@@ -50,7 +140,7 @@
   scroll-behavior: smooth;
 }
 .reader-inner {
-  max-width: 720px;
+  max-width: calc(var(--col-w, 624px) + 96px);
   margin: 0 auto;
   padding: 18px 48px 40px;
 }
@@ -94,7 +184,7 @@
 
 .page {
   position: relative;
-  font-family: var(--font-read);
+  font-family: var(--read-font, var(--font-read));
   font-size: var(--read-size, 23px);
   line-height: var(--read-lh, 1.75);
   font-optical-sizing: auto;
@@ -357,6 +447,489 @@ span.player-voice .icon-btn {
     background: transparent;
     box-shadow: none;
   }
+}
+
+/* ---------- mode pages : le texte tient dans l'écran, des flèches pour tourner ---------- */
+
+.reader-leaves {
+  /* marge où la lanterne et les halos débordent sans être coupés */
+  --bleed: 28px;
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: clamp(40px, 5vw, 80px) minmax(0, var(--col-w, 624px)) clamp(40px, 5vw, 80px);
+  justify-content: center;
+}
+.leaf {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  padding-top: 8px;
+  container-type: inline-size;
+}
+.leaf-view {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  margin: 0 calc(var(--bleed) * -1);
+  padding: 14px var(--bleed) 6px;
+}
+.leaf-page {
+  position: relative;
+}
+/* copies invisibles qui servent à composer les pages (mêmes largeur et styles) */
+.leaf-ghost,
+.leaf-measure {
+  position: absolute;
+  top: 0;
+  left: var(--bleed);
+  right: var(--bleed);
+  visibility: hidden;
+  pointer-events: none;
+}
+.leaf-foot {
+  flex-shrink: 0;
+  /* hauteur fixe : elle compte dans celle des pages */
+  height: 70px;
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  border-top: 1px solid var(--border);
+}
+.leaf-progress {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 12.5px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.leaf-progress .page-dots {
+  padding: 0;
+}
+.leaf-rail {
+  width: 92px;
+  height: 4px;
+  border-radius: 4px;
+  background: var(--chip-hover);
+  overflow: hidden;
+}
+.leaf-rail i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--light-strong), var(--light));
+  box-shadow: 0 0 8px var(--light);
+  transition: width 0.45s var(--ease-out);
+}
+.leaf-hint {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.4;
+  color: var(--muted);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.leaf-foot .btn {
+  flex-shrink: 0;
+}
+@container (max-width: 560px) {
+  .leaf-hint {
+    display: none;
+  }
+}
+
+/* flèches : discrètes, elles s'éclairent au survol */
+.leaf-arrow {
+  position: relative;
+  align-self: center;
+  justify-self: center;
+  /* centrées sur le texte, pas sur le bas de page */
+  margin-bottom: 70px;
+  width: 52px;
+  height: 128px;
+  padding: 0;
+  border: 0;
+  border-radius: 18px;
+  background: transparent;
+  color: var(--faint);
+  display: grid;
+  place-items: center;
+  transition: color 0.25s ease, opacity 0.3s ease;
+}
+.leaf-arrow .icon {
+  position: relative;
+  transition: transform 0.35s var(--ease-spring);
+}
+.leaf-arrow-glow {
+  position: absolute;
+  inset: 18px -6px;
+  border-radius: 50%;
+  background: radial-gradient(closest-side, var(--light-soft), transparent);
+  opacity: 0;
+  transform: scale(0.6);
+  transition: opacity 0.3s ease, transform 0.45s var(--ease-out);
+}
+.leaf-arrow:hover:not(:disabled) {
+  color: var(--text);
+}
+.leaf-arrow:hover:not(:disabled) .leaf-arrow-glow {
+  opacity: 1;
+  transform: scale(1);
+}
+.leaf-arrow.left:hover:not(:disabled) .icon {
+  transform: translateX(-3px);
+}
+.leaf-arrow.right:hover:not(:disabled) .icon {
+  transform: translateX(3px);
+}
+.leaf-arrow.left:active:not(:disabled) .icon {
+  transform: translateX(-5px) scale(0.92);
+}
+.leaf-arrow.right:active:not(:disabled) .icon {
+  transform: translateX(5px) scale(0.92);
+}
+.leaf-arrow.off {
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* ---------- menu « Aa » : affichage de la leçon ---------- */
+
+.look-anchor {
+  position: relative;
+}
+.look-btn.on {
+  color: var(--text);
+  background: var(--light-veil);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--light-strong) 40%, transparent), 0 0 16px var(--light-soft);
+}
+.look-btn .aa {
+  font-family: var(--font-display);
+  font-size: 18px;
+  font-weight: 500;
+  line-height: 1;
+  letter-spacing: -0.01em;
+}
+.look-btn .aa small {
+  font-size: 14px;
+}
+.look-pop {
+  position: absolute;
+  z-index: 40;
+  top: calc(100% + 8px);
+  right: -4px;
+  width: 356px;
+  max-height: calc(100vh - 110px);
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 16px 16px 14px;
+  border-radius: 20px;
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--bg-elev) 96%, transparent);
+  backdrop-filter: blur(22px) saturate(1.3);
+  -webkit-backdrop-filter: blur(22px) saturate(1.3);
+  box-shadow: var(--shadow-l), 0 -40px 90px -50px var(--light-soft);
+  color: var(--text);
+  transform-origin: top right;
+  cursor: default;
+}
+.look-pop section {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+.look-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 28px;
+}
+.look-head h3 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 21px;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+}
+.look-reset {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 9px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  font-size: 12.5px;
+  color: var(--muted);
+  transition: color 0.2s ease, background-color 0.2s ease;
+}
+.look-reset:hover {
+  color: var(--text);
+  background: var(--chip);
+}
+/* contour lumineux du choix (glisse d'une option à l'autre) */
+.look-ring {
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  border: 1.5px solid var(--light-strong);
+  box-shadow: 0 0 0 3px var(--light-veil), 0 0 18px var(--light-soft);
+  pointer-events: none;
+}
+
+.look-layouts {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+.look-layout {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 10px 11px 11px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  transition: border-color 0.2s ease, background-color 0.25s ease;
+}
+.look-layout:hover {
+  border-color: var(--border-strong);
+}
+.look-layout.on {
+  border-color: transparent;
+  background: var(--light-veil);
+}
+.ll-art {
+  width: 76px;
+  height: 48px;
+  overflow: visible;
+}
+.ll-sheet {
+  fill: var(--bg-elev);
+  stroke: var(--border-strong);
+}
+.ll-line {
+  stroke: var(--faint);
+  stroke-width: 2;
+  stroke-linecap: round;
+  opacity: 0.6;
+}
+.ll-arrow {
+  fill: none;
+  stroke: var(--faint);
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  transition: transform 0.35s var(--ease-spring), stroke 0.25s ease;
+}
+.ll-track {
+  stroke: var(--chip-hover);
+  stroke-width: 3;
+  stroke-linecap: round;
+}
+.ll-thumb {
+  stroke: var(--faint);
+  stroke-width: 3;
+  stroke-linecap: round;
+  transition: transform 0.7s var(--ease-out), stroke 0.25s ease;
+}
+.look-layout.on .ll-arrow.lit,
+.look-layout.on .ll-thumb {
+  stroke: var(--light-strong);
+}
+.look-layout:hover .ll-arrow.lit {
+  transform: translateX(2px);
+}
+.look-layout:hover .ll-thumb {
+  transform: translateY(19px);
+}
+.ll-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.ll-text strong {
+  font-size: 13px;
+  font-weight: 600;
+}
+.ll-text span {
+  font-size: 11.5px;
+  line-height: 1.3;
+  color: var(--muted);
+}
+
+.look-fonts {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+}
+.look-font {
+  position: relative;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  padding: 9px 4px 7px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: transparent;
+  color: var(--text);
+  transition: border-color 0.2s ease, background-color 0.25s ease;
+}
+.look-font:hover {
+  border-color: var(--border-strong);
+  background: var(--chip);
+}
+.look-font.on {
+  border-color: transparent;
+  background: var(--light-veil);
+}
+.lf-sample {
+  font-size: 24px;
+  font-weight: 400;
+  line-height: 1.15;
+}
+.lf-name {
+  max-width: 100%;
+  font-size: 10.5px;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.look-font.on .lf-name {
+  color: var(--text);
+}
+
+.look-size {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.look-size .range {
+  flex: 1;
+  accent-color: var(--light-strong);
+}
+.ls-a {
+  width: 30px;
+  height: 30px;
+  font-family: var(--read-font, var(--font-read));
+  line-height: 1;
+}
+.ls-a.small {
+  font-size: 13px;
+}
+.ls-a.big {
+  font-size: 21px;
+}
+.ls-value {
+  min-width: 24px;
+  text-align: right;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+.look-papers {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 4px;
+}
+.look-paper {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 0 0;
+  border: 0;
+  background: transparent;
+  font-size: 10.5px;
+  color: var(--muted);
+}
+.look-paper.on {
+  color: var(--text);
+}
+.lp-dot {
+  position: relative;
+  width: 38px;
+  height: 38px;
+}
+.lp-swatch {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-size: 14.5px;
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.12);
+  transition: box-shadow 0.25s ease;
+}
+.lp-swatch.auto {
+  display: flex;
+  overflow: hidden;
+  background: linear-gradient(135deg, #f7f7f4 50%, #16171a 50%);
+}
+.lp-half {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  font-style: normal;
+}
+.lp-half.day {
+  justify-content: flex-end;
+  color: #17181c;
+}
+.lp-half.night {
+  justify-content: flex-start;
+  color: #ecebe7;
+}
+.look-paper:hover .lp-swatch {
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.12), 0 0 0 3px var(--chip-hover);
+}
+.lp-ring {
+  position: absolute;
+  inset: -4px;
+  border-radius: 50%;
+  border: 1.5px solid var(--light-strong);
+  box-shadow: 0 0 14px var(--light-soft);
+  pointer-events: none;
+}
+.lp-name {
+  white-space: nowrap;
+}
+
+.look-rows {
+  gap: 10px;
+}
+.look-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 13px;
+}
+.look-row > span {
+  color: var(--muted);
+  font-weight: 500;
+}
+.look-row .segmented button {
+  height: 27px;
+  padding: 0 10px;
+  font-size: 12px;
 }
 
 /* ---------- bas de page ---------- */
@@ -747,7 +1320,8 @@ span.player-voice .icon-btn {
   background: #070605;
   color: #ddd;
 }
-.reader.cinema .reader-scroll {
+.reader.cinema .reader-scroll,
+.reader.cinema .reader-leaves {
   display: none;
 }
 .reader.cinema .player {
@@ -797,7 +1371,7 @@ span.player-voice .icon-btn {
   position: relative;
   z-index: 1;
   margin: 0;
-  font-family: var(--font-read);
+  font-family: var(--read-font, var(--font-read));
   font-size: clamp(22px, min(3cqw, 5cqh), 40px);
   line-height: 1.5;
   color: #f6f0e8;
@@ -906,7 +1480,7 @@ span.player-voice .icon-btn {
   gap: 10px;
 }
 .wp-word h2 {
-  font-family: var(--font-read);
+  font-family: var(--read-font, var(--font-read));
   font-size: 34px;
   font-weight: 500;
   line-height: 1.12;
@@ -1037,7 +1611,7 @@ span.player-voice .icon-btn {
   margin-top: 4px;
 }
 .wp-sentence {
-  font-family: var(--font-read);
+  font-family: var(--read-font, var(--font-read));
   font-size: 16.5px;
   line-height: 1.55;
   font-style: italic;

@@ -25,7 +25,12 @@ Lumen est une application Mac pour apprendre les langues en lisant et en écouta
 
 ### Lecture
 
-- Texte découpé en **pages** (~230 mots), mots colorés selon leur **statut** : nouveau (absent de la table `terms`), 1, 2, 3 (en apprentissage), 4 (connu), 5 (ignoré).
+- Mots colorés selon leur **statut** : nouveau (absent de la table `terms`), 1, 2, 3 (en apprentissage), 4 (connu), 5 (ignoré).
+- **Deux mises en page** (réglage `reader_layout`) :
+  - **Pages** (par défaut, comme sur LingQ) : le texte tient dans l'écran, sans défilement. Flèches de part et d'autre du texte (la suivante à gauche en arabe), deux doigts sur le trackpad ou molette (un tour de page par geste, `onSwipe`), PageUp et PageDown. Les pages sont **composées par mesure** (`lib/pagefit.ts`) : le texte est mis en page dans un bloc invisible de même largeur et même police (`.leaf-measure`), la page s'arrête à la fin d'une phrase si elle est remplie aux 3/5 (`SENTENCE_FILL`), sinon à la fin d'une ligne ; chaque page est recomposée depuis son premier mot. Le titre de la leçon n'est que sur la première page (copie invisible `.leaf-ghost` pour mesurer sa hauteur). Recomposées quand la place change (fenêtre, vidéo, barre latérale : `ResizeObserver`), quand une police arrive (`loadingdone`) ou que l'affichage change ; après coup (140 ms) pour une leçon de plus de 5 000 jetons déjà composée (`LONG_LESSON`). On reste sur la page qui porte le même mot (`keepTok` : mot lu à voix haute, sinon début de la page). Bas de page de hauteur fixe (progression, conseil, « Terminer la page »).
+  - **Défilement** : pages d'environ 230 mots (`paginate`) qu'on fait défiler, puis « Terminer la page » ou les flèches du bas.
+  - La page enregistrée (`page`) reste toujours celle des pages de 230 mots (`savePage`) : la bibliothèque en tire l'avancement ; la reprise exacte passe par `anchor`. Les mots lus se comptent par mot (`readToks`), pas par page : recomposer les pages ne compte rien deux fois.
+- **Affichage** (bouton « Aa » de la barre du haut, `views/reader/Display.tsx`, aussi dans Réglages › Lecture) : mise en page, police (`read_font` : Literata, Newsreader, New York, Georgia, Palatino, Geist, Système, Arrondie ; montrées dans l'écriture de la langue, `glyphSample`), taille (`font_size`, 16 à 40), couleur de la page (`read_paper` : Auto, Papier, Sépia, Crépuscule, Nuit, Encre), interligne, largeur des lignes (`read_width`), marquage des mots. Tout s'applique en direct ; « Rétablir » revient aux valeurs d'origine (`LOOK_DEFAULTS` de `lib/reading.ts`). La couleur de la page ne touche que la leçon (colonne de lecture et panneau du mot) : la racine du lecteur prend la palette claire ou sombre de Lumen (`.paper-light`, `.paper-dark` dans `app.css`) puis le fond et l'encre de sa couleur (`.paper-sepia`… dans `reader.css`). Variables CSS posées sur la racine du lecteur (`--read-size`, `--read-lh`, `--read-font`, `--col-w`), partagées par la page et sa mesure.
 - Sélection d'un mot au clic ; de **plusieurs mots** en glissant, par Maj + clic ou Maj + ← → (bande de surlignage continue, espaces compris). Jusqu'à 5 mots : sens en contexte (`aiWord`) ; au-delà : traduction globale du passage (`aiSentence`). Une sélection n'est jamais enregistrée d'office.
 - **Expressions** (comme les LingQ de phrase) : bouton « Créer l'expression » (8 mots au plus, `EXPR_MAX_WORDS` dans `WordPanel.tsx`). L'expression devient un terme (clé avec espaces), repérée dans toutes les leçons par un trait continu à la couleur de son niveau ; toucher un de ses mots affiche un rappel qui l'ouvre.
 - **Panneau du mot** (`WordPanel`) : dictionnaire hors ligne (forme de base et description de la forme, sens), puis sens précis en contexte par l'IA, en streaming. Traduction de la phrase entière. Une sélection de quelques mots est aussi cherchée dans le dictionnaire (4 mots au plus, 10 caractères en japonais). Japonais et vietnamien : la suite de la phrase (`after`) donne le plus long mot du dictionnaire qui commence au jeton touché (見 + つけなかった → 見つける, « học » + « sinh » → học sinh), puis le kanji et ses lectures. Dictionnaire en téléchargement : le panneau l'indique (`pending`) et se complète à son arrivée (événement `dict`).
@@ -33,7 +38,7 @@ Lumen est une application Mac pour apprendre les langues en lisant et en écouta
 - **Reprise exacte**, même après fermeture de l'app : page (`page`), mot atteint (`anchor`, mot lu à voix haute ou mot sur la ligne de lecture à 30 % de la hauteur) et seconde atteinte dans l'audio ou la vidéo (`position`). Écriture au plus une fois par seconde, puis à chaque pause, saut ou sortie. À l'ouverture : retour au mot avec un bref halo, ou lanterne sur le mot et média calé à la seconde. Leçon terminée ou média écouté jusqu'au bout : on repart du début. La dernière leçon ouverte (réglage `last_lesson`) reste « en cours » d'un lancement à l'autre.
 - **Barre latérale repliable** dans une leçon (bouton en haut à gauche) : elle glisse et s'efface, la colonne de lecture s'élargit, la lanterne se recale. Le choix est mémorisé (réglage `reader_sidebar`) ; hors leçon, la barre est toujours là.
 - **Simplifier** : l'IA réécrit la leçon au niveau A1, A2, B1 ou B2 et crée une nouvelle leçon.
-- **Raccourcis** : flèches (mot suivant ou précédent), Maj + flèches (étendre la sélection), `1` `2` `3` (statut), `K` ou `4` (connu), `X` (ignorer), `0` (remettre à nouveau), Espace (lecture audio), Entrée (terminer la page), `C` (chat sur la leçon), Échap (fermer, quitter le plein écran), PageUp et PageDown.
+- **Raccourcis** : flèches (mot suivant ou précédent), Maj + flèches (étendre la sélection), `1` `2` `3` (statut), `K` ou `4` (connu), `X` (ignorer), `0` (remettre à nouveau), Espace (lecture audio), Entrée (terminer la page), `C` (chat sur la leçon), Échap (fermer, quitter le plein écran), PageUp et PageDown. Clavier ignoré tant que le menu « Aa » est ouvert (Échap le ferme sans toucher la sélection).
 
 ### Écoute
 
@@ -112,10 +117,12 @@ Lumen est une application Mac pour apprendre les langues en lisant et en écouta
 - **Bibliothèque** : leçons par langue et collection, pourcentage de mots connus, mots nouveaux, avancement (bande de lumière au bas de la couverture, à la seconde près pour l'audio et la vidéo).
 - **Couvertures** (`components/Cover.tsx`) : image choisie par l'utilisateur (petit bouton au survol, réduite à 1 280 px en JPEG puis copiée dans `media/`, colonne `cover_path`), sinon miniature YouTube (`maxresdefault` puis `hqdefault`), sinon œuvre SVG générée et reproductible (aube, halo, aurore ou prisme, graine = identifiant, couleurs = teinte) avec grain photographique.
 - **Vocabulaire** : recherche, filtres (tous, en apprentissage, connus, ignorés, expressions), changement de statut, export CSV compatible Anki.
-- **Réglages** : langue de l'interface, thème (suit le Mac par défaut), typographie de lecture, voix, modèles IA (téléchargement avec reprise, suppression), vidéos en ligne (navigateur pour les cookies, état des composants), Découvrir (lecture quotidienne, niveau), sauvegarde, import LingQ, mises à jour, « Revoir l'accueil ».
-- **Petit guide** (`components/Guide.tsx`, `styles/guide.css`) : quatre cartes illustrées et animées pour les néophytes : les couleurs des mots, toucher puis terminer la page, la lanterne, l'IA locale et ses quatre rôles (le traducteur Qwen3.5, l'oreille Whisper, la plume Qwen3-ASR, la voix Supertonic, avec leur état sur ce Mac). Phrase d'exemple « la lumière du matin » dans la langue étudiée (`SAMPLES` : `it es de pt ru fr en`, sinon l'italien). Proposé une seule fois par une carte du panneau du mot (réglage `guide_seen`), puis par le lien « Comment marche Lumen ? » ; aussi dans Réglages › À propos et par « Qu'est-ce qu'un modèle ? » (Réglages › IA locale, ouvre la carte des modèles). État `guide` du store (`openGuide(carte)`, `closeGuide`). Le guide capte le clavier (phase de capture) : Entrée ou les flèches ne touchent jamais la page derrière. Scènes figées si macOS réduit les animations.
-- **Accueil** (`Onboarding`) : aube animée (ciel en parallaxe, astre qui se lève à l'horizon, poussières de lumière, révélation lettre par lettre). Clair = aube, sombre = nuit chaude. **Jamais de fond bleu.** Étapes : bienvenue, langues, profil IA (avec « Qu'est-ce qu'un modèle ? » qui se déplie), prêt (avec l'interrupteur de sauvegarde), puis éclosion lumineuse vers la première leçon. Depuis la bienvenue, « retrouver ma progression » : sauvegardes trouvées, restauration, profil IA (les modèles ne voyagent pas), « Bon retour ».
-- **Mises à jour automatiques** : vérification 8 s après le démarrage puis toutes les 6 h, carte discrète dans la barre latérale, installation en un clic puis redémarrage.
+- **Réglages** (`views/Settings.tsx`) : un menu de catégories à gauche, **une page par catégorie** à droite (pas une longue page à faire défiler). Pages : Général (langue de l'interface, thème en trois petites fenêtres clair, sombre, partagée), et par groupes « Apprendre » (Langues, Lecture avec un aperçu de la page tel qu'il sera dans une leçon, Voix, Découvrir), « Sur ce Mac » (IA locale, Vidéos en ligne), « Vos données » (Sauvegarde, LingQ), puis À propos (version, nouveautés, visite guidée, petit guide, accueil, mises à jour, dossier des données, crédits). Recherche dans le menu (mots-clés des deux langues dans `keys`, sans accents) : elle ouvre d'elle-même la première page trouvée ; ↑ ↓ passent d'une page à l'autre. Petits voyants dans le menu (modèle à installer ou en téléchargement, sauvegarde en échec, import LingQ, mise à jour disponible). Page ouverte : `settingsTab` du store ; **pour mener à un réglage, `openSettings("ai")`** (pas `go("settings")` suivi d'un défilement). Fenêtre étroite : le menu ne garde que ses icônes (requête de conteneur `settings`). `BackupSection` et `LingqSection` n'ont plus de titre : l'en-tête de la page le porte.
+- **Petit guide** (`components/Guide.tsx`, `styles/guide.css`) : quatre cartes illustrées et animées pour les néophytes : les couleurs des mots, toucher puis terminer la page, la lanterne, l'IA locale et ses quatre rôles (le traducteur Qwen3.5, l'oreille Whisper, la plume Qwen3-ASR, la voix Supertonic, avec leur état sur ce Mac). Phrase d'exemple « la lumière du matin » dans la langue étudiée (`SAMPLES` : `it es de pt ru fr en`, sinon l'italien). Proposé une seule fois par une carte du panneau du mot (réglage `guide_seen`, mis à `1` par la visite guidée qui le remplace), puis par le lien « Comment marche Lumen ? » ; aussi dans Réglages › À propos et par « Qu'est-ce qu'un modèle ? » (Réglages › IA locale, ouvre la carte des modèles). État `guide` du store (`openGuide(carte)`, `closeGuide`). Le guide capte le clavier (phase de capture) : Entrée ou les flèches ne touchent jamais la page derrière. Scènes figées si macOS réduit les animations.
+- **Accueil** (`Onboarding`) : aube animée (ciel en parallaxe, astre qui se lève à l'horizon, poussières de lumière, révélation lettre par lettre). Clair = aube, sombre = nuit chaude. **Jamais de fond bleu.** Étapes : bienvenue, langues, profil IA (avec « Qu'est-ce qu'un modèle ? » qui se déplie), prêt (avec l'interrupteur de sauvegarde), puis éclosion lumineuse vers la première leçon, où commence la visite guidée. Depuis la bienvenue, « retrouver ma progression » : sauvegardes trouvées, restauration, profil IA (les modèles ne voyagent pas), « Bon retour ».
+- **Visite guidée** (`components/Tour.tsx`, `styles/tour.css`) : après l'accueil (et « Revoir l'accueil »), dans la première leçon ; rejouable par Réglages › À propos (`startTour` : leçon en cours, sinon la plus récente de la langue, sinon sa leçon d'accueil). Un voile du soir couvre l'application ; une lumière (trou dans le voile : immense `box-shadow` d'un élément animé par motion) glisse d'un élément à l'autre, une carte l'explique à côté (placée du premier côté où elle tient). Quatre chapitres, 14 étapes (`STEPS`) : la page et ses couleurs, « Aa », **un mot à toucher** (`wait` : seul le mot éclairé se touche, la visite continue quand on l'a touché ; mot nouveau en minuscules, pas un nom propre), le panneau du mot ; l'IA : scène « Qu'est-ce qu'un modèle ? » (des salutations de toutes les langues nourrissent une lumière dans un Mac, état réel du modèle choisi avec sa progression ou un bouton pour le télécharger), scène « Pourquoi c'est important » (un mot à plusieurs sens dans la langue étudiée, `WHY` : `it es de pt ru fr en`, sinon l'italien ; le dictionnaire donne tous les sens, le modèle écrit le bon), l'onglet Chat ; apprendre : statut du mot (`pass` : utilisable), « Terminer la page », la lecture (`pass` ; l'événement `lumen:pause` arrête la voix en passant à la suite) ; ensuite : Importer, Bibliothèque (Découvrir), Progrès, scène de fin. Éléments éclairés repérés par `data-tour` (`page`, `display`, `panel`, `chat-tab`, `status`, `finish`, `player`, `import`, `nav-<vue>`) : les garder en renommant ou déplaçant ces éléments. Élément introuvable : la carte se met au milieu. Clavier capté (Entrée, flèches, Échap pour quitter). Réglage `tour_done`, état `tour` du store (`startTour`, `setTourStep`, `endTour`).
+- **Nouveautés** (`components/News.tsx`, `styles/news.css`, données dans **`src/changelog.json`**, lecture dans `lib/changelog.ts`) : après une mise à jour, une fenêtre (astre qui se lève, reflet sur le numéro de version) montre ce qui a changé depuis la dernière version vue (réglage `seen_version`, écrit à la fermeture ; une installation d'avant les nouveautés voit celles de la version installée ; une installation neuve ne voit rien : l'accueil retient la version). Chaque nouveauté : icône, titre, texte, bouton facultatif (`action` : `tour`, `guide`, `settings:<page>`, `view:<vue>`). Versions sautées : listées plus bas, plus discrètes. Tout l'historique : Réglages › À propos › « Voir les nouveautés ». Jamais pendant l'accueil ni la visite. Une version sans nouveauté retient simplement son numéro.
+- **Mises à jour automatiques** : vérification 8 s après le démarrage puis toutes les 6 h, carte discrète dans la barre latérale (avec les titres des nouveautés annoncées, lus dans les notes du manifeste), installation en un clic puis redémarrage.
 
 ## Architecture
 
@@ -162,8 +169,10 @@ src/
   components/
     Sidebar.tsx           Navigation, langue active, compteur de mots connus, carte de mise à jour
     AddToPlaylist.tsx     Feuille « Ajouter à une playlist » (depuis la bibliothèque)
-    UpdateCard.tsx        Carte « Lumen X est disponible »
+    UpdateCard.tsx        Carte « Lumen X est disponible » (et les titres de ses nouveautés)
     Guide.tsx             Petit guide : quatre cartes animées (principe, page, lanterne, modèles d'IA)
+    Tour.tsx              Visite guidée : voile, lumière sur les éléments data-tour, cartes, scènes de l'IA
+    News.tsx              Nouveautés après une mise à jour, et tout l'historique
     BackupCard.tsx        Proposition de sauvegarde, alerte de sauvegarde interrompue
     LingqCard.tsx         Avancement de l'import LingQ dans la barre latérale
     Cover.tsx             Couvertures (image choisie, miniature YouTube, œuvre générée, mosaïque des playlists)
@@ -180,11 +189,14 @@ src/
     importers.ts          Extraction : web, EPUB, PDF, sous-titres
     tts.ts                Voix du système, événements de frontière de mot
     updater.ts            Store des mises à jour (check, install, restart)
+    changelog.ts          Nouveautés : versions pas encore vues, comparaison des versions, actions des boutons
     lingq.ts              Store de l'import LingQ (analyse, import, progression)
     dicts.ts              État du dictionnaire d'une langue (useDictStatus : prêt, en téléchargement, livré)
     pronounce.ts          Prononciation des mots : voix naturelle (préparée, en cache) ou voix du système
     playlists.ts          Playlists : leçons dans l'ordre, durée, reprise, lancement de l'écoute
     progress.ts           Progrès : temps actif dans les leçons (useStudyClock), objectifs du jour, durées
+    reading.ts            Affichage des leçons : polices, couleurs de page, largeurs, variables CSS (readerLook)
+    pagefit.ts            Mode pages : découpe de la leçon en pages qui tiennent dans l'écran (mesure dans le DOM)
     discover.ts           Store de Découvrir : flux par langue, lecture demandée, niveau estimé ou choisi, nouveautés
     chat.ts               Store du chat : conversations, réponse en cours, leçon jointe, questions proposées
     backup.ts             Store de la sauvegarde : état, sauvegarde, liste, restauration, relecture de toute l'app
@@ -203,11 +215,12 @@ src/
     ImportSheet.tsx       Feuille d'import (texte, lien universel et son choix, fichiers, audio et vidéo ; étapes de progression)
     Vocabulary.tsx        Vocabulaire
     Progress.tsx          Progrès : série et objectif du jour, périodes, graphique, mots connus, calendrier
-    Settings.tsx          Réglages
+    Settings.tsx          Réglages : menu des catégories, recherche, une page par catégorie
     LingqSection.tsx      Réglages › LingQ (clé API, analyse du compte, import)
     BackupSection.tsx     Réglages › Sauvegarde (activation, médias, emplacement, restauration)
     reader/
-      Reader.tsx          Lecteur : pages, sélection, raccourcis, lanterne, Simplifier
+      Reader.tsx          Lecteur : pages (mode pages ou défilement), sélection, raccourcis, lanterne, Simplifier
+      Display.tsx         Menu « Aa » : mise en page, police, taille, couleur de la page (sélecteurs repris dans Réglages)
       WordPanel.tsx       Panneau du mot (dictionnaire + IA)
       Player.tsx          Lecture audio/vidéo/voix, synchronisation, poignée impérative
       VideoStage.tsx      Cadre vidéo, sous-titres interactifs, mode cinéma
@@ -221,6 +234,9 @@ src/
     chat.css              Chat (vue, panneau du lecteur, champ, réflexion)
     guide.css             Petit guide et son invitation dans le panneau du mot
     discover.css          Découvrir (onglet lumineux, bandeau, rayons, cartes, pastilles de niveau)
+    news.css              Nouveautés (ciel, astre, liste)
+    tour.css              Visite guidée (voile, lumière, carte, scènes)
+  changelog.json          Nouveautés de chaque version, en français et en anglais (version "next" : en préparation)
 
 src-tauri/
   tauri.conf.json         Fenêtre, bundle (DMG, ressources, sidecar), updater (clé publique, URL)
@@ -254,7 +270,7 @@ src-tauri/
 
 scripts/
   mac-env.sh              Vérifie et installe les outils, prépare la clé de signature
-  release.mjs             bump (numéro de version partout) et manifest (latest.json)
+  release.mjs             bump (numéro de version partout), preview et stamp (nouveautés de changelog.json), manifest (latest.json)
   build-sidecar.mjs       Compile lumen-whisper sous le nom attendu par Tauri
 tools/build_dicts.py      Dictionnaires : livrés (Wiktionnaire français), --en (dictionaries-en-1), --v2 (dictionaries-2 : --split, --ud, --check, --keys)
 design/                   Icône (SVG, PNG 1024), fond du DMG
@@ -347,12 +363,16 @@ Si la commande demande une nouvelle permission (plugin, fenêtre), l'ajouter à 
 - Le lecteur doit rester confortable : pas d'animation qui distrait pendant la lecture.
 - **motion et CSS ne se partagent jamais `transform`** : un élément animé par motion (`layout`, `initial`/`animate`) ne porte ni `transition` CSS sur `transform` ni survol en `transform` ; on l'enveloppe (`.lesson-cell` animée autour de `.lesson-card` et de son survol). Liste filtrée : `AnimatePresence mode="popLayout"` (enfants qui transmettent leur `ref`), `layout="position"`, transition `layout` sans délai ; le décalage d'une carte à l'autre ne vaut que pour la première apparition. Les polices sont chargées avant le premier affichage (`fontsReady` dans `main.tsx`) pour que rien ne change de hauteur à leur arrivée.
 - État global dans `store.ts` ; état local dans le composant. Réglages persistés par `setSetting(clé, valeur)` (chaînes), valeurs par défaut dans `DEFAULTS`.
+- **Nouveau réglage** : sur la page des Réglages qui lui revient (`Pane` de `Settings.tsx`), et ses mots dans les `keys` de cette page pour que la recherche le trouve.
+- **Chaque changement visible** pour l'utilisateur ajoute (ou complète) une nouveauté sous la version `"next"` de `src/changelog.json`, en français et en anglais, avec son icône et, si utile, son bouton (`action`). Pas de version `"next"` : la créer en tête de `releases`. Les corrections invisibles n'y vont pas.
 - Les composants qui dépendent d'une leçon (`Player`, `VideoStage`) sont rendus avec `key={lesson.id}` pour repartir à zéro d'une leçon à l'autre.
+- **Mode pages** : `compose` (`pagefit.ts`) reproduit le rendu de la page (paragraphes, mots en `.w`). Un changement du rendu qui touche la hauteur ou la largeur du texte (marges des paragraphes, `padding`/`margin` des mots, nouvel élément dans la page) se reporte dans `compose`, sinon les pages déborderaient. Le bas de page (`.leaf-foot`) et le titre de la première page ne doivent pas dépendre du découpage (sinon recomposition sans fin). Le lecteur audio lit les pages du moment (`pagesRef` dans `Player.tsx`) : elles peuvent changer pendant que la voix lit.
 - **WebKit** (moteur de la fenêtre Lumen) : ne pas étirer (`align-items: stretch`) un élément qui tient sa hauteur d'`aspect-ratio` dans un conteneur flex dont la hauteur change ; au retour, WebKit garde l'ancienne hauteur étirée (c'est ce qui faisait disparaître la vidéo après le plein écran). Vérifier une mise en page délicate dans WebKit, pas seulement dans Chrome.
 
 ### Versions, signature, publication
 
 - **Ne jamais modifier le numéro de version à la main** : `node scripts/release.mjs bump X.Y.Z` met à jour `package.json`, `tauri.conf.json` et `Cargo.toml` ensemble (le script de publication le fait).
+- **Nouveautés à la publication** : « Publier une version » lit la version `"next"` de `src/changelog.json` (`release.mjs preview`) pour les notes de la version GitHub (français puis anglais), sinon demande une phrase comme avant ; puis `release.mjs stamp` lui donne le numéro et la date du jour (dans le texte du fichier, sans le remettre en forme) ; `manifest` met les titres des nouveautés dans `latest.json` (`{ fr: [...], en: [...] }`) pour la carte de mise à jour.
 - La **clé privée** des mises à jour est `~/.tauri/lumen-updater.key` : ne jamais la copier dans le projet, ne jamais la committer, ne jamais la régénérer (les Lumen installés refuseraient toutes les mises à jour suivantes).
 - `plugins.updater.pubkey` dans `tauri.conf.json` est inscrite par `mac-env.sh` : ne pas la remplacer.
 - Mises à jour publiées sur `LivingTwice/lumen-releases` (public), code source sur `LivingTwice/lumen` (privé). URL lue par l'app : `https://github.com/LivingTwice/lumen-releases/releases/latest/download/latest.json`, plateforme `darwin-aarch64`.

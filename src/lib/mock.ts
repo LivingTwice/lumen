@@ -3,6 +3,7 @@
 // par le backend Rust.
 import type { Api, TermUpdate } from "./api";
 import { t } from "./i18n";
+import pkg from "../../package.json";
 import { LANGS, STARTERS, bundledDict } from "./langs";
 import { tokenize, normalize } from "./tokenize";
 import type {
@@ -358,7 +359,7 @@ export function createMockApi(): Api {
   const mock: Api = {
     async appInfo() {
       return {
-        version: t("0.1.0 (aperçu navigateur)", "0.1.0 (browser preview)"),
+        version: t(`${pkg.version} (aperçu navigateur)`, `${pkg.version} (browser preview)`),
         data_dir: t("(navigateur)", "(browser)"),
         platform: "web",
         ytdlp: false,

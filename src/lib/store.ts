@@ -2,8 +2,13 @@ import { create } from "zustand";
 import { api, errorText } from "./api";
 import { formatNumber as fmtNumber, locale, setUiLang, systemUiLang, t, type UiLang } from "./i18n";
 import type { AppInfo, DiscoverItem, DownloadEvent, LangCode, ModelRow, Streak } from "./types";
+import { LOOK_DEFAULTS } from "./reading";
+import { STARTERS, starterCollection } from "./langs";
 
 export type View = "library" | "playlists" | "reader" | "chat" | "vocab" | "progress" | "settings";
+
+/** Catégories des Réglages, chacune sur sa propre page. */
+export type SettingsTab = "general" | "langs" | "reading" | "voice" | "discover" | "ai" | "videos" | "backup" | "lingq" | "about";
 
 export interface Toast {
   id: number;
@@ -22,9 +27,8 @@ export const DEFAULTS: Record<string, string> = {
   // langue de l'interface, des traductions et du chat ("fr" ou "en", choisie au premier lancement)
   ui_lang: "",
   theme: "system",
-  font_size: "23",
-  line_height: "1.75",
-  word_style: "tint",
+  // affichage des leçons : mise en page (pages par défaut), police, taille, couleur de la page…
+  ...LOOK_DEFAULTS,
   auto_sentence: "1",
   // le mot touché ou le passage surligné se fait entendre (seulement leçon en pause)
   auto_pronounce: "1",
@@ -42,6 +46,10 @@ export const DEFAULTS: Record<string, string> = {
   onboarded: "",
   // petit guide : "1" une fois ouvert ou écarté (son invitation ne revient plus)
   guide_seen: "",
+  // visite guidée : "1" une fois finie ou passée (elle ne se lance d'elle-même qu'après l'accueil)
+  tour_done: "",
+  // nouveautés : dernière version dont l'utilisateur a vu les nouveautés
+  seen_version: "",
   // sauvegarde : "" tant que l'utilisateur n'a pas choisi ; dossier vide = iCloud Drive
   backup_on: "",
   backup_dir: "",
@@ -80,11 +88,25 @@ interface AppStore {
   replay: boolean;
   /** petit guide ouvert, sur cette carte (null : fermé) */
   guide: number | null;
+  /** page ouverte dans les Réglages */
+  settingsTab: SettingsTab;
+  /** visite guidée en cours, à cette étape (null : pas de visite) */
+  tour: number | null;
+  /** fenêtre des nouveautés : celles de la mise à jour, ou tout l'historique (null : fermée) */
+  news: "update" | "all" | null;
 
   init(): Promise<void>;
   setReplay(v: boolean): void;
   openGuide(card?: number): void;
   closeGuide(): void;
+  /** ouvre les Réglages, sur une page précise ou sur la dernière consultée */
+  openSettings(tab?: SettingsTab): void;
+  /** lance la visite guidée dans une leçon (la leçon en cours, sinon la première de la langue) */
+  startTour(): Promise<void>;
+  setTourStep(step: number): void;
+  endTour(): void;
+  openNews(which: "update" | "all"): void;
+  closeNews(): void;
   setting(key: string): string;
   setSetting(key: string, value: string): Promise<void>;
   lang(): LangCode;
@@ -133,6 +155,9 @@ export const useApp = create<AppStore>((set, get) => ({
   streak: null,
   replay: false,
   guide: null,
+  settingsTab: "general",
+  tour: null,
+  news: null,
 
   setReplay(v) {
     set({ replay: v });
@@ -145,6 +170,50 @@ export const useApp = create<AppStore>((set, get) => ({
   closeGuide() {
     set({ guide: null });
     if (get().settings.guide_seen !== "1") void get().setSetting("guide_seen", "1");
+  },
+
+  openSettings(tab) {
+    set(tab ? { view: "settings", settingsTab: tab } : { view: "settings" });
+  },
+
+  async startTour() {
+    let id = get().lessonId;
+    if (!id) {
+      // pas de leçon en cours : la plus récente de la langue, sinon sa leçon d'accueil
+      const lang = get().lang();
+      const list = await api().lessonsList(lang);
+      id = list.find((x) => x.opened_at)?.id ?? list[0]?.id ?? null;
+      if (!id) {
+        const s = STARTERS[lang];
+        id = await api().lessonCreate({ lang, title: s.title, text: s.text, collection: starterCollection(), kind: "text" });
+        get().bumpLibrary();
+      }
+    }
+    set({ guide: null, news: null });
+    get().openLesson(id);
+    // la visite remplace l'invitation du petit guide dans le panneau du mot
+    if (get().settings.guide_seen !== "1") void get().setSetting("guide_seen", "1");
+    set({ tour: 0 });
+  },
+
+  setTourStep(step) {
+    set({ tour: step });
+  },
+
+  endTour() {
+    set({ tour: null });
+    if (get().settings.tour_done !== "1") void get().setSetting("tour_done", "1");
+  },
+
+  openNews(which) {
+    set({ news: which });
+  },
+
+  closeNews() {
+    set({ news: null });
+    // les nouveautés de cette version sont vues : elles ne reviennent plus d'elles-mêmes
+    const v = get().info?.version.match(/\d+\.\d+\.\d+/)?.[0];
+    if (v && get().settings.seen_version !== v) void get().setSetting("seen_version", v);
   },
 
   async init() {

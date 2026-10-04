@@ -18,8 +18,11 @@
   --sidebar-w: 244px;
   --panel-w: 360px;
   --titlebar-h: 52px;
+}
 
-  /* clair */
+/* clair ; aussi dans une leçon dont la page est claire (Papier, Sépia), même Lumen en sombre */
+:root,
+.paper-light {
   --bg: #f7f7f4;
   --bg-elev: #ffffff;
   --bg-sunk: #efefeb;
@@ -73,7 +76,9 @@
   color-scheme: light;
 }
 
-:root[data-theme="dark"] {
+/* sombre ; aussi dans une leçon dont la page est sombre (Crépuscule, Nuit, Encre), même Lumen en clair */
+:root[data-theme="dark"],
+.paper-dark {
   --bg: #121316;
   --bg-elev: #1b1c21;
   --bg-sunk: #0e0f12;
@@ -569,6 +574,35 @@ p {
   box-shadow: 0 0 10px var(--light);
   animation: pulse 2s ease-in-out infinite;
   flex-shrink: 0;
+}
+/* titres des nouveautés annoncées, avant d'installer */
+.update-notes {
+  list-style: none;
+  margin: -2px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 11.5px;
+  line-height: 1.35;
+  color: var(--muted);
+}
+.update-notes li {
+  position: relative;
+  padding-left: 12px;
+}
+.update-notes li::before {
+  content: "";
+  position: absolute;
+  left: 2px;
+  top: 0.5em;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--light-strong);
+}
+.update-notes li.more::before {
+  display: none;
 }
 .update-dot.warn {
   background: var(--danger);

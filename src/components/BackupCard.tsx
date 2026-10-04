@@ -12,14 +12,15 @@ const SNOOZE = 7 * 86400;
 export function BackupCard() {
   const status = useBackup((s) => s.status);
   const saving = useBackup((s) => s.saving);
-  const view = useApp((s) => s.view);
-  const go = useApp((s) => s.go);
+  // l'alerte se tait sur la page Sauvegarde des Réglages, qui dit déjà ce qui se passe
+  const here = useApp((s) => s.view === "settings" && s.settingsTab === "backup");
+  const showSettings = useApp((s) => s.openSettings);
   const toast = useApp((s) => s.toast);
   const snooze = useApp((s) => Number(s.settings.backup_snooze) || 0);
   const setSetting = useApp((s) => s.setSetting);
 
   const offer = !!status && !status.decided && !!status.dir && Date.now() / 1000 - snooze > SNOOZE;
-  const failing = !!status?.enabled && !!status.error && !saving && !status.running && view !== "settings";
+  const failing = !!status?.enabled && !!status.error && !saving && !status.running && !here;
 
   const activate = async () => {
     if (!(await useBackup.getState().enable(true))) return;
@@ -28,8 +29,7 @@ export function BackupCard() {
   };
 
   const openSettings = () => {
-    go("settings");
-    window.setTimeout(() => document.getElementById("set-backup")?.scrollIntoView({ behavior: "smooth", block: "start" }), 350);
+    showSettings("backup");
   };
 
   return (
