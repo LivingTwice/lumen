@@ -1497,8 +1497,8 @@ function SimplifySheet({ open, onClose, lessonTitle, text, lang }: { open: boole
       <div className="import-pane">
         <p className="muted">
           {t(
-            "L'IA locale réécrit la leçon avec des phrases plus courtes et un vocabulaire plus courant, en gardant le sens. Une nouvelle leçon est créée : l'originale reste intacte.",
-            "The local AI rewrites the lesson with shorter sentences and more common vocabulary, keeping the meaning. A new lesson is created: the original stays intact.",
+            "L'IA réécrit la leçon avec des phrases plus courtes et un vocabulaire plus courant, en gardant le sens. Une nouvelle leçon est créée : l'originale reste intacte.",
+            "The AI rewrites the lesson with shorter sentences and more common vocabulary, keeping the meaning. A new lesson is created: the original stays intact.",
           )}
         </p>
         <div className="field">

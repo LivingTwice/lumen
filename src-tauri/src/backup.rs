@@ -52,6 +52,9 @@ const LOCAL_ONLY: [&str; 3] = ["lingq_key", "gemini_key", "backup_dir"];
 /// Réglages de ce Mac conservés quand on restaure une sauvegarde (la langue de
 /// l'interface aussi : celle qu'on vient de choisir à l'accueil reste).
 const KEEP_ON_RESTORE: [&str; 8] = ["lingq_key", "gemini_key", "backup_dir", "backup_on", "backup_audio", "backup_video", "backup_snooze", "ui_lang"];
+/// IA en ligne (`online_*` : clés, fournisseur, modèle, adresse) : ni sauvegardée
+/// ni remplacée par une restauration, comme les réglages ci-dessus.
+const LOCAL_PREFIX: &str = "online_";
 /// Leçons d'accueil : un profil qui n'a qu'elles n'a encore rien à sauvegarder.
 /// Leur collection dépend de la langue de l'interface au premier lancement.
 const STARTER_COLLECTIONS: [&str; 2] = ["Pour commencer", "Getting started"];
@@ -261,6 +264,9 @@ const PROVIDERS: [(&str, &str, &str); 9] = [
 /// Dossiers des anciennes versions de ces services, directement dans le dossier personnel.
 const HOME_FOLDERS: [(&str, &str); 5] = [("Dropbox", "dropbox"), ("Google Drive", "gdrive"), ("OneDrive", "onedrive"), ("pCloud Drive", "pcloud"), ("Nextcloud", "nextcloud")];
 
+/// Windows : dossiers que ces services créent dans le dossier personnel (en plus des précédents).
+const WINDOWS_FOLDERS: [(&str, &str); 3] = [("Box", "box"), ("SynologyDrive", "synology"), ("MEGA", "mega")];
+
 /// « Mon Drive » selon la langue du Mac : Google Drive n'accepte rien à la racine d'un compte.
 const MY_DRIVE: [&str; 14] = [
     "My Drive", "Mon Drive", "Meine Ablage", "Mi unidad", "Il mio Drive", "Meu Drive", "Mijn Drive", "Min enhet", "Mit drev", "Mój dysk", "Мой диск",
@@ -292,7 +298,12 @@ fn cloud_storage_place(entry: &str, path: PathBuf) -> Place {
 /// Dossiers de Dropbox d'après son propre fichier de réglages (dossier déplacé,
 /// compte personnel et compte d'équipe).
 fn dropbox_paths(home: &Path) -> Vec<(String, bool)> {
-    let Ok(raw) = fs::read_to_string(home.join(".dropbox/info.json")) else { return Vec::new() };
+    // Windows : dans AppData (itinérant ou local) plutôt que dans le dossier personnel
+    let mut files = vec![home.join(".dropbox").join("info.json")];
+    if cfg!(windows) {
+        files.extend(["APPDATA", "LOCALAPPDATA"].iter().filter_map(|k| std::env::var_os(k)).map(|d| PathBuf::from(d).join("Dropbox").join("info.json")));
+    }
+    let Some(raw) = files.iter().find_map(|f| fs::read_to_string(f).ok()) else { return Vec::new() };
     let Ok(info) = serde_json::from_str::<serde_json::Value>(&raw) else { return Vec::new() };
     ["personal", "business"]
         .iter()
@@ -332,6 +343,9 @@ pub fn places() -> Vec<Place> {
             found.push(Place { kind: kind.into(), name, account: None, path: p.display().to_string() });
         }
     }
+    if cfg!(windows) {
+        windows_places(&home, &mut found);
+    }
     // Google Drive sur les macOS d'avant le dossier CloudStorage
     let volume = Path::new("/Volumes/GoogleDrive");
     if !found.iter().any(|f| f.kind == "gdrive") && volume.is_dir() {
@@ -341,6 +355,72 @@ pub fn places() -> Vec<Place> {
     found.sort_by(|a, b| rank(&a.kind).cmp(&rank(&b.kind)).then_with(|| a.name.cmp(&b.name)).then_with(|| a.account.cmp(&b.account)));
     out.extend(found);
     out
+}
+
+/// Windows : OneDrive (personnel et professionnel, d'après les variables que
+/// pose son app), Google Drive (lecteur G: ou dossier « Mon Drive » en miroir),
+/// Box, Synology Drive, MEGA.
+fn windows_places(home: &Path, found: &mut Vec<Place>) {
+    // un emplacement qui existe, et une seule fois
+    fn add(found: &mut Vec<Place>, p: Place) {
+        if Path::new(&p.path).is_dir() && !found.iter().any(|f| f.path == p.path) {
+            found.push(p);
+        }
+    }
+    for (var, business) in [("OneDriveConsumer", false), ("OneDrive", false), ("OneDriveCommercial", true)] {
+        if let Some(dir) = std::env::var_os(var) {
+            let path = PathBuf::from(dir);
+            let account = business.then(|| onedrive_account(&path)).flatten();
+            add(found, Place { kind: "onedrive".into(), name: "OneDrive".into(), account, path: path.display().to_string() });
+        }
+    }
+    if let Ok(dir) = fs::read_dir(home) {
+        for e in dir.flatten() {
+            let name = e.file_name().to_string_lossy().to_string();
+            let p = e.path();
+            if name.starts_with("OneDrive - ") {
+                add(found, Place { kind: "onedrive".into(), name: "OneDrive".into(), account: onedrive_account(&p), path: p.display().to_string() });
+            } else if MY_DRIVE.contains(&name.as_str()) {
+                // Google Drive en miroir : le dossier « Mon Drive » lui-même
+                add(found, Place { kind: "gdrive".into(), name: "Google Drive".into(), account: None, path: p.display().to_string() });
+            }
+        }
+    }
+    for letter in drive_letters() {
+        let root = PathBuf::from(format!("{letter}:\\"));
+        if gdrive_root(&root) {
+            add(found, Place { kind: "gdrive".into(), name: "Google Drive".into(), account: None, path: root.display().to_string() });
+        }
+    }
+    for (folder, kind) in WINDOWS_FOLDERS {
+        if !found.iter().any(|f| f.kind == kind) {
+            let name = provider(kind).map_or(folder, |p| p.2).to_string();
+            add(found, Place { kind: kind.into(), name, account: None, path: home.join(folder).display().to_string() });
+        }
+    }
+}
+
+/// Lecteurs locaux de ce PC (Google Drive en est un), sans le lecteur de Windows.
+#[cfg(windows)]
+fn drive_letters() -> Vec<char> {
+    let system = std::env::var("SystemDrive").ok().and_then(|d| d.chars().next()).unwrap_or('C');
+    crate::win::local_drives().into_iter().filter(|l| !l.eq_ignore_ascii_case(&system)).collect()
+}
+
+#[cfg(not(windows))]
+fn drive_letters() -> Vec<char> {
+    Vec::new()
+}
+
+/// « OneDrive - Contoso » : le compte professionnel (Contoso).
+fn onedrive_account(path: &Path) -> Option<String> {
+    let n = path.file_name()?.to_string_lossy().to_string();
+    n.strip_prefix("OneDrive - ").map(|a| a.trim().to_string()).filter(|a| !a.is_empty())
+}
+
+/// Lecteur de Google Drive sous Windows (G: par défaut) : sa racine contient « Mon Drive ».
+fn gdrive_root(p: &Path) -> bool {
+    cfg!(windows) && p.parent().is_none() && MY_DRIVE.iter().any(|m| p.join(m).is_dir())
 }
 
 /// Le nuage, le disque ou le dossier d'un emplacement de sauvegarde (réglage
@@ -357,6 +437,11 @@ pub fn place_of(custom: &str) -> Place {
         if let Some(entry) = parts.get(i + 2) {
             let root: PathBuf = parts[..=i + 2].iter().collect();
             return cloud_storage_place(entry, root);
+        }
+    }
+    if cfg!(windows) {
+        if let Some(place) = windows_place_of(p, &parts) {
+            return place;
         }
     }
     if let Some(home) = home() {
@@ -383,12 +468,44 @@ pub fn place_of(custom: &str) -> Place {
     Place { kind: "folder".into(), name, account: None, path: custom.to_string() }
 }
 
+/// Windows : OneDrive (personnel ou « OneDrive - Contoso »), Google Drive (lecteur
+/// ou « Mon Drive » en miroir), Box…, ou un autre lecteur (clé USB, disque).
+fn windows_place_of(p: &Path, parts: &[String]) -> Option<Place> {
+    let home = home();
+    let rel = home.as_ref().and_then(|h| p.strip_prefix(h).ok());
+    let first = rel.and_then(|r| r.components().next()).map(|c| c.as_os_str().to_string_lossy().to_string()).unwrap_or_default();
+    let under = |folder: &str| home.as_ref().map(|h| h.join(folder).display().to_string()).unwrap_or_default();
+    if first == "OneDrive" || first.starts_with("OneDrive - ") {
+        let path = under(&first);
+        return Some(Place { kind: "onedrive".into(), name: "OneDrive".into(), account: onedrive_account(Path::new(&path)), path });
+    }
+    if MY_DRIVE.contains(&first.as_str()) {
+        return Some(Place { kind: "gdrive".into(), name: "Google Drive".into(), account: None, path: under(&first) });
+    }
+    if let Some((folder, kind)) = WINDOWS_FOLDERS.iter().find(|(f, _)| *f == first) {
+        let name = provider(kind).map_or(*folder, |p| p.2).to_string();
+        return Some(Place { kind: (*kind).into(), name, account: None, path: under(folder) });
+    }
+    // « G:\Mon Drive\… » : composants « G: », « \ », « Mon Drive »
+    let drive = parts.first().filter(|d| d.len() == 2 && d.ends_with(':'))?;
+    let root = format!("{drive}\\");
+    if parts.get(2).is_some_and(|d| MY_DRIVE.contains(&d.as_str())) {
+        return Some(Place { kind: "gdrive".into(), name: "Google Drive".into(), account: None, path: root });
+    }
+    // un autre lecteur que celui de Windows : clé USB, disque externe
+    let system = std::env::var("SystemDrive").unwrap_or_else(|_| "C:".into());
+    if !drive.eq_ignore_ascii_case(&system) {
+        return Some(Place { kind: "drive".into(), name: crate::tr!("Disque {drive}", "Drive {drive}"), account: None, path: root });
+    }
+    None
+}
+
 /// Dossier à retenir (`backup_dir`) pour un nuage choisi. Google Drive
 /// n'accepte rien à la racine d'un compte : on prend « Mon Drive ». C'est ici
 /// que macOS peut demander l'accès au nuage, au moment où l'utilisateur le choisit.
 pub fn place_dir(path: &str) -> Result<String, String> {
     let p = Path::new(path.trim());
-    let gdrive = p.file_name().is_some_and(|n| n.to_string_lossy().starts_with("GoogleDrive-")) || p == Path::new("/Volumes/GoogleDrive");
+    let gdrive = p.file_name().is_some_and(|n| n.to_string_lossy().starts_with("GoogleDrive-")) || p == Path::new("/Volumes/GoogleDrive") || gdrive_root(p);
     if !gdrive {
         return if p.is_dir() {
             Ok(p.display().to_string())
@@ -405,6 +522,11 @@ pub fn place_dir(path: &str) -> Result<String, String> {
     };
     let mut dirs: Vec<String> = fs::read_dir(p)
         .map_err(|e| match e.kind() {
+            io::ErrorKind::PermissionDenied if cfg!(windows) => crate::i18n::t(
+                "Lumen n'a pas accès à Google Drive. Ouvrez Google Drive, vérifiez que vous êtes connecté, puis réessayez.",
+                "Lumen has no access to Google Drive. Open Google Drive, check that you're signed in, then try again.",
+            )
+            .into(),
             io::ErrorKind::PermissionDenied => crate::i18n::t(
                 "Lumen n'a pas accès à Google Drive. Autorisez-le dans Réglages Système › Confidentialité et sécurité › Fichiers et dossiers, puis réessayez.",
                 "Lumen has no access to Google Drive. Allow it in System Settings › Privacy & Security › Files and Folders, then try again.",
@@ -432,6 +554,12 @@ fn short_hash(s: &str) -> String {
     hex::encode(Sha256::digest(s.as_bytes()))[..12].to_string()
 }
 
+#[cfg(windows)]
+fn hardware_uuid() -> Option<String> {
+    crate::win::machine_guid()
+}
+
+#[cfg(not(windows))]
 fn hardware_uuid() -> Option<String> {
     if !cfg!(target_os = "macos") {
         return None;
@@ -470,7 +598,8 @@ fn device_name() -> String {
                 }
             }
         }
-        std::env::var("COMPUTERNAME").unwrap_or_else(|_| crate::i18n::t("Ce Mac", "This Mac").into())
+        // Windows : le nom de l'appareil (Paramètres › Système › Informations système)
+        std::env::var("COMPUTERNAME").unwrap_or_else(|_| if cfg!(windows) { crate::i18n::t("Ce PC", "This PC") } else { crate::i18n::t("Ce Mac", "This Mac") }.into())
     })
     .clone()
 }
@@ -500,7 +629,7 @@ fn folder_key(p: &Path) -> Option<String> {
 fn folder_name(device_name: &str, key: &str) -> String {
     let clean: String = device_name.chars().map(|c| if matches!(c, '/' | ':' | '\\' | '(' | ')') || c.is_control() { ' ' } else { c }).collect();
     let clean: String = clean.split_whitespace().collect::<Vec<_>>().join(" ").chars().take(60).collect();
-    format!("{} ({key})", if clean.is_empty() { "Mac" } else { &clean })
+    format!("{} ({key})", if !clean.is_empty() { &clean } else if cfg!(windows) { "PC" } else { "Mac" })
 }
 
 /// Dossiers de sauvegarde (un par Mac et par profil).
@@ -531,6 +660,12 @@ fn is_day(s: &str) -> bool {
 
 fn file_name(p: &Path) -> String {
     p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()
+}
+
+/// Nom du fichier d'un chemin écrit par un autre ordinateur : « /Users/…/a.m4a »
+/// (Mac) comme « C:\\Users\\…\\a.m4a » (PC), quel que soit le système qui le lit.
+fn stored_name(p: &str) -> String {
+    p.rsplit(['/', '\\']).next().unwrap_or_default().to_string()
 }
 
 // ---------- fichiers ----------
@@ -712,6 +847,7 @@ fn run_in(data_dir: &Path, opts: &Options, device: &str, scratch: &Path) -> Resu
         for k in LOCAL_ONLY {
             c.execute("DELETE FROM settings WHERE key=?1", [k])?;
         }
+        c.execute("DELETE FROM settings WHERE substr(key, 1, ?2) = ?1", params![LOCAL_PREFIX, LOCAL_PREFIX.len() as i64])?;
         let out = (counts(&c)?, media_refs(&c)?);
         c.execute_batch("VACUUM;")?;
         out
@@ -990,7 +1126,7 @@ fn restore_in(live: &Mutex<Connection>, data_dir: &Path, root: &Path, snap: &Pat
         let mut fixed: [Option<String>; 3] = [None, None, None];
         for (i, p) in paths.iter().enumerate() {
             let Some(p) = p else { continue };
-            let name = file_name(Path::new(p));
+            let name = stored_name(p);
             let local = found
                 .entry(name.clone())
                 .or_insert_with(|| {
@@ -1022,6 +1158,12 @@ fn restore_in(live: &Mutex<Connection>, data_dir: &Path, root: &Path, snap: &Pat
         for k in KEEP_ON_RESTORE {
             if let Some(v) = db::setting(&l, k) {
                 db::setting_set(&c, k, &v)?;
+            }
+        }
+        c.execute("DELETE FROM settings WHERE substr(key, 1, ?2) = ?1", params![LOCAL_PREFIX, LOCAL_PREFIX.len() as i64])?;
+        for (k, v) in db::settings_all(&l)? {
+            if k.starts_with(LOCAL_PREFIX) {
+                db::setting_set(&c, &k, &v)?;
             }
         }
     }
@@ -1112,6 +1254,13 @@ fn prefs(c: &Connection) -> Prefs {
 }
 
 fn no_place() -> String {
+    if cfg!(windows) {
+        return crate::i18n::t(
+            "Choisissez où sauvegarder : OneDrive, un autre nuage ou un dossier (Réglages › Sauvegarde).",
+            "Choose where to back up: OneDrive, another cloud or a folder (Settings › Backup).",
+        )
+        .into();
+    }
     crate::i18n::t(
         "iCloud Drive n'est pas activé sur ce Mac. Activez-le dans Réglages Système › votre nom › iCloud, ou choisissez un autre dossier.",
         "iCloud Drive isn't turned on on this Mac. Turn it on in System Settings › your name › iCloud, or choose another folder.",
@@ -1123,11 +1272,15 @@ fn no_place() -> String {
 /// selon l'emplacement : iCloud Drive, un autre nuage, un disque ou un dossier.
 fn io_message(io: &io::Error, place: &Place) -> Option<String> {
     if matches!(io.raw_os_error(), Some(28) | Some(112)) {
-        return Some(crate::i18n::t("Il n'y a plus assez d'espace disque sur ce Mac.", "There isn't enough disk space left on this Mac.").into());
+        return Some(if cfg!(windows) { crate::i18n::t("Il n'y a plus assez d'espace disque sur ce PC.", "There isn't enough disk space left on this PC.") } else { crate::i18n::t("Il n'y a plus assez d'espace disque sur ce Mac.", "There isn't enough disk space left on this Mac.") }.into());
     }
     let cloud = !matches!(place.kind.as_str(), "drive" | "folder");
     let name = &place.name;
     match io.kind() {
+        io::ErrorKind::PermissionDenied if cloud && cfg!(windows) => Some(crate::tr!(
+            "Lumen n'a pas accès à {name}. Ouvrez {name}, vérifiez que vous êtes connecté, puis réessayez.",
+            "Lumen has no access to {name}. Open {name}, check that you're signed in, then try again."
+        )),
         io::ErrorKind::PermissionDenied if cloud => Some(crate::tr!(
             "Lumen n'a pas accès à {name}. Autorisez-le dans Réglages Système › Confidentialité et sécurité › Fichiers et dossiers, puis réessayez.",
             "Lumen has no access to {name}. Allow it in System Settings › Privacy & Security › Files and Folders, then try again."
@@ -1135,6 +1288,10 @@ fn io_message(io: &io::Error, place: &Place) -> Option<String> {
         io::ErrorKind::PermissionDenied => Some(crate::i18n::t("Lumen ne peut pas écrire dans ce dossier. Choisissez-en un autre.", "Lumen can't write to this folder. Choose another one.").into()),
         // iCloud Drive absent : `no_place` le dit déjà
         io::ErrorKind::NotFound if place.kind == "icloud" => None,
+        io::ErrorKind::NotFound if cloud && cfg!(windows) => Some(crate::tr!(
+            "Le dossier {name} est introuvable. {name} est-il toujours installé et connecté sur ce PC ?",
+            "The {name} folder can't be found. Is {name} still installed and signed in on this PC?"
+        )),
         io::ErrorKind::NotFound if cloud => Some(crate::tr!(
             "Le dossier {name} est introuvable. {name} est-il toujours installé et connecté sur ce Mac ?",
             "The {name} folder can't be found. Is {name} still installed and signed in on this Mac?"
@@ -1319,6 +1476,13 @@ pub fn restore_for(state: &AppState, key: &str, day: Option<&str>, on: impl Fn(I
 mod tests {
     use super::*;
 
+    #[test]
+    fn media_names_from_any_computer() {
+        assert_eq!(stored_name("/Users/lea/Library/Application Support/app.lumen.reader/media/20260101.audio.m4a"), "20260101.audio.m4a");
+        assert_eq!(stored_name("C:\\Users\\Léa\\AppData\\Roaming\\app.lumen.reader\\media\\20260101.cover.jpg"), "20260101.cover.jpg");
+        assert_eq!(stored_name("a.m4a"), "a.m4a");
+    }
+
     fn temp(name: &str) -> PathBuf {
         let p = std::env::temp_dir().join(format!("lumen-backup-{name}-{}", std::process::id()));
         let _ = fs::remove_dir_all(&p);
@@ -1380,6 +1544,8 @@ mod tests {
         db::terms_mark_known(&mut ca, "it", &["faro".into(), "alto".into()], 3).unwrap();
         db::term_set(&ca, &db::TermUpdate { lang: "it".into(), term: "è alto".into(), status: 2, translation: Some("est haut".into()), note: None, lemma: None, context: None }).unwrap();
         db::setting_set(&ca, "lingq_key", "secret").unwrap();
+        db::setting_set(&ca, "online_on", "1").unwrap();
+        db::setting_set(&ca, "online_key_deepseek", "sk-secret").unwrap();
         db::setting_set(&ca, "langs", "it").unwrap();
         // le profil de l'apprenant : il voyage avec la progression
         db::setting_set(&ca, "user_name", "Léa").unwrap();
@@ -1397,12 +1563,15 @@ mod tests {
         // ni la clé LingQ ni le cache ne quittent ce Mac
         let s = snapshot_settings(&folder);
         assert_eq!((s.get("lingq_key"), s.get("profile_id")), (None, Some(&m.profile)));
+        // ni l'IA en ligne de ce Mac (sa clé, son choix)
+        assert_eq!((s.get("online_on"), s.get("online_key_deepseek")), (None, None));
 
         // second Mac : sa propre clé LingQ, sauvegarde coupée
         let b = temp("b");
         fs::write(b.join("device-id"), "bbbbbbbbbbbb").unwrap();
         let cb = db::open(&db::path(&b)).unwrap();
         db::setting_set(&cb, "lingq_key", "autre").unwrap();
+        db::setting_set(&cb, "online_key_mistral", "m-key").unwrap();
         db::setting_set(&cb, "backup_on", "0").unwrap();
         let live = Mutex::new(cb);
         let found = list(&b, &root, None).unwrap();
@@ -1425,6 +1594,7 @@ mod tests {
         assert_eq!(l.video_path, None);
         assert_eq!(db::stats(&cb, "it").unwrap().phrases, 1);
         assert_eq!(db::setting(&cb, "lingq_key").as_deref(), Some("autre"));
+        assert_eq!((db::setting(&cb, "online_key_mistral").as_deref(), db::setting(&cb, "online_on")), (Some("m-key"), None));
         assert_eq!(db::setting(&cb, "backup_on").as_deref(), Some("0"));
         assert_eq!(db::setting(&cb, "profile_id"), Some(m.profile.clone()));
         assert_eq!(db::setting(&cb, "user_name").as_deref(), Some("Léa"));
@@ -1493,6 +1663,8 @@ mod tests {
     /// Sauvegarde puis restauration d'une copie de vraies données, dans un dossier
     /// jetable (rien n'est écrit dans le dossier d'origine ni dans iCloud) :
     /// `LUMEN_BACKUP_DATA="$HOME/Library/Application Support/app.lumen.reader" cargo test --lib backup_live -- --ignored --nocapture`
+    // liens symboliques du Mac : essai réservé au Mac
+    #[cfg(unix)]
     #[test]
     #[ignore]
     fn backup_live() {
@@ -1551,6 +1723,22 @@ mod tests {
         assert_eq!(cloud_state(&std::env::temp_dir()).0, "local");
     }
 
+    // les nuages tels que Windows les range (sur un PC seulement)
+    #[cfg(windows)]
+    #[test]
+    fn windows_cloud_places() {
+        let home = home().unwrap();
+        let p = place_of(&home.join("OneDrive - Contoso").join("Lumen").display().to_string());
+        assert_eq!((p.kind.as_str(), p.account.as_deref()), ("onedrive", Some("Contoso")));
+        assert_eq!(place_of(&home.join("OneDrive").join("Documents").display().to_string()).kind, "onedrive");
+        assert_eq!(place_of(&home.join("Mon Drive").join("Lumen").display().to_string()).kind, "gdrive");
+        let p = place_of("G:\\Mon Drive\\Lumen");
+        assert_eq!((p.kind.as_str(), p.path.as_str()), ("gdrive", "G:\\"));
+        assert_eq!(place_of("Z:\\Sauvegardes").kind, "drive");
+        assert_eq!(place_of(&home.join("Sauvegardes").display().to_string()).kind, "folder");
+        assert_eq!(onedrive_account(Path::new("C:\\Users\\x\\OneDrive - Contoso")).as_deref(), Some("Contoso"));
+    }
+
     #[test]
     fn folder_names_and_keys() {
         assert_eq!(folder_name("MacBook Pro de Léa: travail/maison", "abc123def456"), "MacBook Pro de Léa travail maison (abc123def456)");
@@ -1562,6 +1750,8 @@ mod tests {
         assert_eq!(root("/Volumes/Clé/Lumen").unwrap(), PathBuf::from("/Volumes/Clé/Lumen"));
     }
 
+    // les nuages tels que macOS les range (chemins du Mac)
+    #[cfg(not(windows))]
     #[test]
     fn cloud_places() {
         // dossiers de ~/Library/CloudStorage : service et compte

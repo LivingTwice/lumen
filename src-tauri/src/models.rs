@@ -44,8 +44,8 @@ pub const CATALOG: &[ModelInfo] = &[
         id: "qwen3.5-0.8b",
         kind: "llm",
         name: "Qwen3.5 0.8B",
-        detail: "Très rapide, pour les Mac avec 8 Go de mémoire",
-        detail_en: "Very fast, for Macs with 8 GB of memory",
+        detail: if cfg!(windows) { "Très rapide, pour les PC avec 8 Go de mémoire" } else { "Très rapide, pour les Mac avec 8 Go de mémoire" },
+        detail_en: if cfg!(windows) { "Very fast, for PCs with 8 GB of memory" } else { "Very fast, for Macs with 8 GB of memory" },
         size: 533_000_000,
         url: "https://huggingface.co/unsloth/Qwen3.5-0.8B-GGUF/resolve/main/Qwen3.5-0.8B-Q4_K_M.gguf",
         file: "Qwen3.5-0.8B-Q4_K_M.gguf",
@@ -300,8 +300,15 @@ async fn extract_archive(archive: &Path, dir: &Path, final_path: &Path) -> Resul
     let tmp = dir.join(".extraction");
     let _ = tokio::fs::remove_dir_all(&tmp).await;
     tokio::fs::create_dir_all(&tmp).await?;
-    let out = tokio::process::Command::new("tar").arg("-xjf").arg(archive).arg("-C").arg(&tmp).output().await?;
-    if !out.status.success() {
+    #[cfg(not(windows))]
+    let ok = tokio::process::Command::new("tar").arg("-xjf").arg(archive).arg("-C").arg(&tmp).output().await?.status.success();
+    // Windows : décompressé ici (le tar de Windows 10 ne lit pas toujours le bzip2)
+    #[cfg(windows)]
+    let ok = {
+        let (from, to) = (archive.to_path_buf(), tmp.clone());
+        tokio::task::spawn_blocking(move || unpack_tar_bz2(&from, &to, None)).await?.is_ok()
+    };
+    if !ok {
         let _ = tokio::fs::remove_dir_all(&tmp).await;
         let _ = tokio::fs::remove_file(archive).await;
         return Err(anyhow!(crate::i18n::t("archive illisible, réessayez le téléchargement", "unreadable archive, try the download again")));
@@ -313,4 +320,75 @@ async fn extract_archive(archive: &Path, dir: &Path, final_path: &Path) -> Resul
     tokio::fs::rename(&src, final_path).await?;
     let _ = tokio::fs::remove_dir_all(&tmp).await;
     Ok(())
+}
+
+/// Décompresse une archive .tar.bz2 dans `dest` (`only` : seulement ces chemins
+/// de l'archive). Sous Windows, à la place de `tar` ; les chemins qui sortiraient
+/// de `dest` sont refusés par la bibliothèque.
+#[cfg(any(windows, test))]
+pub(crate) fn unpack_tar_bz2(archive: &Path, dest: &Path, only: Option<&[String]>) -> Result<()> {
+    std::fs::create_dir_all(dest)?;
+    let file = std::fs::File::open(archive)?;
+    let mut tar = tar::Archive::new(bzip2::read::BzDecoder::new(std::io::BufReader::new(file)));
+    let mut found = 0;
+    for entry in tar.entries()? {
+        let mut entry = entry?;
+        let path = entry.path()?.to_string_lossy().replace('\\', "/");
+        if let Some(list) = only {
+            if !list.iter().any(|w| w == &path) {
+                continue;
+            }
+        }
+        if !entry.unpack_in(dest)? {
+            return Err(anyhow!("archive : chemin refusé ({path})"));
+        }
+        found += 1;
+    }
+    if found == 0 {
+        return Err(anyhow!(crate::i18n::t("archive illisible, réessayez le téléchargement", "unreadable archive, try the download again")));
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Archive .tar.bz2 de deux fichiers, comme celles des modèles et du moteur de voix.
+    fn archive(dir: &Path) -> PathBuf {
+        let path = dir.join("a.tar.bz2");
+        let enc = bzip2::write::BzEncoder::new(std::fs::File::create(&path).unwrap(), bzip2::Compression::default());
+        let mut b = tar::Builder::new(enc);
+        for (name, body) in [("moteur/bin/outil.exe", "outil"), ("moteur/lib/biblio.dll", "biblio"), ("moteur/LISEZMOI", "rien")] {
+            let mut h = tar::Header::new_gnu();
+            h.set_size(body.len() as u64);
+            h.set_mode(0o755);
+            h.set_cksum();
+            b.append_data(&mut h, name, body.as_bytes()).unwrap();
+        }
+        b.into_inner().unwrap().finish().unwrap();
+        path
+    }
+
+    #[test]
+    fn unpacks_tar_bz2_like_tar() {
+        let dir = std::env::temp_dir().join(format!("lumen-untar-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let a = archive(&dir);
+        // tout, comme `tar -xjf`
+        let all = dir.join("tout");
+        unpack_tar_bz2(&a, &all, None).unwrap();
+        assert_eq!(std::fs::read_to_string(all.join("moteur/lib/biblio.dll")).unwrap(), "biblio");
+        assert!(all.join("moteur/LISEZMOI").exists());
+        // seulement l'outil et sa bibliothèque, comme pour le moteur de voix
+        let some = dir.join("choix");
+        let wanted = vec!["moteur/bin/outil.exe".to_string(), "moteur/lib/biblio.dll".to_string()];
+        unpack_tar_bz2(&a, &some, Some(&wanted)).unwrap();
+        assert!(some.join("moteur/bin/outil.exe").exists());
+        assert!(!some.join("moteur/LISEZMOI").exists());
+        // rien de ce qu'on cherche : erreur
+        assert!(unpack_tar_bz2(&a, &dir.join("vide"), Some(&["autre".to_string()])).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

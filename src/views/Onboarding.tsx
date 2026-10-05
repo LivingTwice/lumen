@@ -7,6 +7,7 @@ import { api, errorText } from "../lib/api";
 import { formatWhen, isCloud, pickBackupFolder, placeDir, reloadProgress, restoreStage, useBackup } from "../lib/backup";
 import { count, t, type UiLang } from "../lib/i18n";
 import { LANGS, STARTERS, featuredLangs, langLower, starterCollection, type LangInfo } from "../lib/langs";
+import { inFolder } from "../lib/platform";
 import { PROFILES } from "../lib/profiles";
 import { formatBytes, formatNumber, useApp } from "../lib/store";
 import type { BackupInfo, BackupRestored, LangCode } from "../lib/types";
@@ -224,7 +225,7 @@ export function Onboarding() {
   };
 
   // la sauvegarde d'un autre Mac peut être dans un autre nuage que celui de ce Mac
-  const otherPlaces = (places ?? []).filter((p) => (p.kind === "icloud" ? !backup?.icloud : !(backup?.dir ?? "").startsWith(`${p.path}/`)));
+  const otherPlaces = (places ?? []).filter((p) => (p.kind === "icloud" ? !backup?.icloud : !inFolder(backup?.dir ?? "", p.path) || backup?.dir === p.path));
   const searchIn = async (p: NonNullable<typeof places>[number]) => {
     const dir = await placeDir(p);
     if (dir === null) return;

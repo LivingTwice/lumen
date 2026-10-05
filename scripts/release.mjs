@@ -3,6 +3,7 @@
 //   node scripts/release.mjs preview 0.2.0   (notes de la version, tirées de src/changelog.json)
 //   node scripts/release.mjs stamp 0.2.0     (la version "next" du journal prend ce numéro et la date du jour)
 //   node scripts/release.mjs manifest 0.2.0 "Notes" aarch64 Proprio/depot
+//     (avec la version Windows si scripts/build-windows.mjs l'a compilée et signée)
 import { readFileSync, writeFileSync, mkdirSync, copyFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 
@@ -83,8 +84,19 @@ if (cmd === "bump") {
       },
     },
   };
-  writeFileSync(join(outDir, "latest.json"), JSON.stringify(manifest, null, 2) + "\n");
   console.log(`  ok : ${name}`);
+  // la version Windows (scripts/build-windows.mjs), si elle est compilée et signée pour la mise à jour
+  const winName = `Lumen_${version}_x64-setup.exe`;
+  const winExe = join("src-tauri/target/windows/x86_64-pc-windows-msvc/release/bundle/nsis", winName);
+  if (existsSync(winExe) && existsSync(winExe + ".sig")) {
+    copyFileSync(winExe, join(outDir, winName));
+    manifest.platforms["windows-x86_64"] = {
+      signature: readFileSync(winExe + ".sig", "utf8").trim(),
+      url: `https://github.com/${repo}/releases/download/v${version}/${winName}`,
+    };
+    console.log(`  ok : ${winName}`);
+  }
+  writeFileSync(join(outDir, "latest.json"), JSON.stringify(manifest, null, 2) + "\n");
 } else {
   console.error("Commande inconnue");
   process.exit(1);

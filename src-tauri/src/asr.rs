@@ -73,7 +73,7 @@ pub fn transcribe(
     let be = backend()?;
     let model = engine.exclusive(|| LlamaModel::load_from_file(be, model_path, &LlamaModelParams::default().with_n_gpu_layers(999)))
         .map_err(|e| anyhow!(crate::tr!("modèle de transcription illisible : {e}", "unreadable transcription model: {e}")))?;
-    let threads = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4).min(8) as i32;
+    let threads = crate::ai::threads();
     let params = MtmdContextParams {
         use_gpu: true,
         print_timings: false,

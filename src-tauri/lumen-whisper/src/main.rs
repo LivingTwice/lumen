@@ -315,6 +315,35 @@ fn refine(words: &mut [Word], env: &Envelope, duration: f64) {
     }
 }
 
+/// Fils de calcul (8 au plus). Sous Windows, où Whisper calcule sur le
+/// processeur, un par cœur physique : l'hyperthreading le ralentit.
+fn threads() -> i32 {
+    let n = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4);
+    #[cfg(windows)]
+    let n = physical_cores().unwrap_or(n);
+    n.min(8) as i32
+}
+
+#[cfg(windows)]
+fn physical_cores() -> Option<usize> {
+    use windows_sys::Win32::System::SystemInformation::{GetLogicalProcessorInformation, RelationProcessorCore, SYSTEM_LOGICAL_PROCESSOR_INFORMATION};
+    let size = std::mem::size_of::<SYSTEM_LOGICAL_PROCESSOR_INFORMATION>();
+    let mut len = 0u32;
+    unsafe {
+        GetLogicalProcessorInformation(std::ptr::null_mut(), &mut len);
+        if (len as usize) < size {
+            return None;
+        }
+        let mut buf: Vec<SYSTEM_LOGICAL_PROCESSOR_INFORMATION> = vec![std::mem::zeroed(); len as usize / size + 1];
+        if GetLogicalProcessorInformation(buf.as_mut_ptr(), &mut len) == 0 {
+            return None;
+        }
+        let n = (len as usize / size).min(buf.len());
+        let cores = buf[..n].iter().filter(|i| i.Relationship == RelationProcessorCore).count();
+        (cores > 0).then_some(cores)
+    }
+}
+
 fn run() -> Result<()> {
     let args: Vec<String> = std::env::args().collect();
     if args.len() < 4 {
@@ -349,7 +378,7 @@ fn run() -> Result<()> {
     let eot = ctx.token_eot();
     let mut state = ctx.create_state().map_err(|e| anyhow!("{e:?}"))?;
 
-    let threads = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4).min(8) as i32;
+    let threads = threads();
     let mut params = FullParams::new(SamplingStrategy::BeamSearch { beam_size: 3, patience: -1.0 });
     params.set_n_threads(threads);
     params.set_language(Some(lang.as_str()));

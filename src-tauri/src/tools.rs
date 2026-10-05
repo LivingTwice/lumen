@@ -21,6 +21,9 @@ fn home() -> String {
 /// Emplacements usuels des outils installés par Homebrew ou à la main
 /// (une app lancée depuis le Finder n'hérite pas du PATH du Terminal).
 fn system_candidates(name: &str) -> Vec<PathBuf> {
+    if cfg!(windows) {
+        return windows_candidates(name);
+    }
     let h = home();
     vec![
         PathBuf::from(format!("/opt/homebrew/bin/{name}")),
@@ -30,6 +33,31 @@ fn system_candidates(name: &str) -> Vec<PathBuf> {
         PathBuf::from(format!("{h}/.deno/bin/{name}")),
         PathBuf::from(format!("/usr/bin/{name}")),
     ]
+}
+
+/// Windows : outils installés par winget, Scoop, Chocolatey, l'installateur de
+/// Node ou celui de Deno, puis les dossiers du PATH (une app Windows en hérite).
+fn windows_candidates(name: &str) -> Vec<PathBuf> {
+    let exe = format!("{name}.exe");
+    let env = |k: &str| std::env::var_os(k).map(PathBuf::from);
+    let mut out = Vec::new();
+    if let Some(p) = env("LOCALAPPDATA") {
+        out.push(p.join("Microsoft").join("WinGet").join("Links").join(&exe));
+    }
+    if let Some(h) = env("USERPROFILE") {
+        out.push(h.join("scoop").join("shims").join(&exe));
+        out.push(h.join(".deno").join("bin").join(&exe));
+    }
+    if let Some(p) = env("ProgramData") {
+        out.push(p.join("chocolatey").join("bin").join(&exe));
+    }
+    if let Some(p) = env("ProgramFiles") {
+        out.push(p.join("nodejs").join(&exe));
+    }
+    if let Some(path) = std::env::var_os("PATH") {
+        out.extend(std::env::split_paths(&path).map(|d| d.join(&exe)));
+    }
+    out
 }
 
 fn ytdlp_asset() -> &'static str {
@@ -73,7 +101,7 @@ pub fn find_ytdlp(data_dir: &Path) -> Option<PathBuf> {
 
 /// Version majeure de Node (yt-dlp exige Node 22 ou plus).
 fn node_major(path: &Path) -> Option<u32> {
-    let out = std::process::Command::new(path).arg("--version").output().ok()?;
+    let out = crate::proc::command(path).arg("--version").output().ok()?;
     let v = String::from_utf8_lossy(&out.stdout);
     v.trim().trim_start_matches('v').split('.').next()?.parse().ok()
 }
@@ -174,7 +202,7 @@ async fn maybe_self_update(data_dir: &Path) {
     if fresh {
         return;
     }
-    let _ = tokio::time::timeout(Duration::from_secs(90), tokio::process::Command::new(&m).arg("-U").output()).await;
+    let _ = tokio::time::timeout(Duration::from_secs(90), crate::proc::tokio_command(&m).arg("-U").output()).await;
     let _ = std::fs::write(stamp, b"");
 }
 

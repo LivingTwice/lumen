@@ -1,4 +1,4 @@
-import type { AppInfo, BackupInfo, BackupPlace, BackupRestored, BackupStatus, ChatEvent, ChatOptions, ChatPatch, ChatReply, ChatSummary, ChatThread, DictResult, DictStatus, DiscoverFeed, DiscoverReport, DownloadEvent, GeminiModels, GoalReached, ImportEvent, LangCode, LessonSummary, LevelEstimate, LinkInfo, LinkMedia, LingqEvent, LingqLang, LingqPlan, LingqReport, Lyrics, MediaStream, ModelRow, NewLesson, OpenedLesson, Playlist, PlaylistPatch, PodcastRequest, SearchPage, SearchPlatform, SongItem, Stats, Term, TermQuery, TextStats, WordAnswer, VoicedLesson } from "./types";
+import type { AppInfo, BackupInfo, BackupPlace, BackupRestored, BackupStatus, ChatEvent, ChatOptions, ChatPatch, ChatReply, ChatSummary, ChatThread, DictResult, DictStatus, DiscoverFeed, DiscoverReport, DownloadEvent, GeminiModels, GoalReached, ImportEvent, LangCode, LessonSummary, LevelEstimate, LinkInfo, LinkMedia, LingqEvent, LingqLang, LingqPlan, LingqReport, Lyrics, MediaStream, ModelRow, NewLesson, OnlineCheck, OpenedLesson, Playlist, PlaylistPatch, PodcastRequest, SearchPage, SearchPlatform, SongItem, Stats, Term, TermQuery, TextStats, WordAnswer, VoicedLesson } from "./types";
 
 export const isTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
@@ -122,6 +122,8 @@ export interface Api {
   importSong(lang: LangCode, song: SongItem, onEvent: (e: ImportEvent) => void): Promise<number>;
   /** vérifie une clé Gemini ; renvoie les modèles qu'elle ouvre */
   geminiCheck(key: string): Promise<GeminiModels>;
+  /** vérifie une clé d'IA en ligne (`url` : serveur compatible) ; modèles, modèle retenu, temps de réponse */
+  onlineCheck(provider: string, key: string, url?: string, model?: string): Promise<OnlineCheck>;
   /** Gemini écrit et dit un podcast sur mesure, qui devient une leçon (étapes « script », « studio ») */
   podcastCreate(lang: LangCode, request: PodcastRequest, onEvent: (e: ImportEvent) => void): Promise<number>;
   /** niveau estimé d'après les mots connus regroupés par lemme */
@@ -221,6 +223,7 @@ async function createTauriApi(): Promise<Api> {
     lyricsFind: (artist, title, album, duration) => invoke("lyrics_find", { artist, title, album, duration }),
     importSong: (lang, song, onEvent) => invoke("import_song", { lang, song, onEvent: ch<ImportEvent>(onEvent) }),
     geminiCheck: (key) => invoke("gemini_check", { key }),
+    onlineCheck: (provider, key, url, model) => invoke("online_check", { provider, key, url: url ?? null, model: model ?? null }),
     podcastCreate: (lang, request, onEvent) => invoke("podcast_create", { lang, request, onEvent: ch<ImportEvent>(onEvent) }),
     levelEstimate: (lang) => invoke("level_estimate", { lang }),
     textStats: (lang, text) => invoke("text_stats", { lang, text }),

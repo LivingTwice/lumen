@@ -14,13 +14,17 @@ mod lingq;
 mod lyrics;
 mod media;
 mod models;
+mod online;
 mod podcast;
+mod proc;
 mod search;
 mod state;
 mod text;
 mod tools;
 mod user;
 mod voice;
+#[cfg(windows)]
+mod win;
 
 use std::collections::HashMap;
 
@@ -129,6 +133,7 @@ pub fn run() {
             commands::lyrics_find,
             commands::import_song,
             commands::gemini_check,
+            commands::online_check,
             commands::podcast_create,
             commands::level_estimate,
             commands::text_stats,

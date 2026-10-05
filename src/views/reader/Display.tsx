@@ -3,7 +3,7 @@ import { useEffect, useRef } from "react";
 import { Icon } from "../../components/Icon";
 import { Segmented } from "../../components/ui";
 import { t } from "../../lib/i18n";
-import { glyphSample, LOOK_DEFAULTS, PAPERS, READ_FONTS, readFont, SIZE_MAX, SIZE_MIN, type ReaderLayout } from "../../lib/reading";
+import { glyphSample, LOOK_DEFAULTS, PAPERS, readFont, readFonts, SIZE_MAX, SIZE_MIN, type ReaderLayout } from "../../lib/reading";
 import { useApp } from "../../lib/store";
 
 const RING = { type: "spring", stiffness: 520, damping: 40 } as const;
@@ -61,7 +61,7 @@ export function FontPicker({ value, onChange, lang, id }: { value: string; onCha
   const sample = glyphSample(lang);
   return (
     <div className="look-fonts" role="radiogroup" aria-label={t("Police", "Font")}>
-      {READ_FONTS.map((f) => (
+      {readFonts().map((f) => (
         <button key={f.id} role="radio" aria-checked={value === f.id} className={`look-font ${value === f.id ? "on" : ""}`} onClick={() => onChange(f.id)} title={f.label}>
           {value === f.id && <motion.span layoutId={`${id}-font`} className="look-ring" transition={RING} />}
           <span className="lf-sample" style={{ fontFamily: f.stack }} lang={lang}>

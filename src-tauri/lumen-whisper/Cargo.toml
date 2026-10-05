@@ -3,6 +3,7 @@ name = "lumen-whisper"
 version = "0.1.0"
 edition = "2021"
 description = "Transcription locale pour Lumen (processus séparé pour isoler whisper.cpp)"
+license = "GPL-3.0-or-later"
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }
@@ -15,3 +16,7 @@ whisper-rs = { version = "0.16", features = ["metal"] }
 
 [target.'cfg(not(target_os = "macos"))'.dependencies]
 whisper-rs = { version = "0.16" }
+
+# Windows : compter les cœurs réels du processeur (déjà compilé pour Tauri)
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_System_SystemInformation"] }

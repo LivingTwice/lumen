@@ -2,6 +2,7 @@ import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useRef, useState } from "react";
 import { Icon } from "../../components/Icon";
 import { api, errorText, isNoModel } from "../../lib/api";
+import { useOnline } from "../../lib/online";
 import { askAbout } from "../../lib/chat";
 import { t } from "../../lib/i18n";
 import { preparePronunciation, pronounce } from "../../lib/pronounce";
@@ -64,6 +65,9 @@ export function WordPanel({ lang, sel, term, onStatus, onTranslation, onSelectPh
   const openSettings = useApp((s) => s.openSettings);
   const llmReady = useApp((s) => s.models.some((m) => m.kind === "llm" && m.installed));
   const llmDownloading = useApp((s) => s.models.some((m) => m.kind === "llm" && !!s.downloads[m.id] && !s.downloads[m.id].error));
+  // traduction confiée à l'IA en ligne (Réglages › IA) : fournisseur et modèle font partie de la demande
+  const online = useOnline();
+  const onlineKey = online.words ? `${online.provider.id}:${online.model}:${online.ready}` : "";
   const [dict, setDict] = useState<DictResult | null>(null);
   const [ai, setAi] = useState("");
   const [aiNote, setAiNote] = useState("");
@@ -152,7 +156,7 @@ export function WordPanel({ lang, sel, term, onStatus, onTranslation, onSelectPh
       window.clearTimeout(slowTimer);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [key, sentence, lang, llmReady]);
+  }, [key, sentence, lang, llmReady, onlineKey]);
 
   useEffect(() => {
     setMine(term?.translation ?? "");
@@ -372,7 +376,10 @@ export function WordPanel({ lang, sel, term, onStatus, onTranslation, onSelectPh
                       "Le modèle de traduction se télécharge. La traduction en contexte apparaîtra ici dès qu'il sera prêt.",
                       "The translation model is downloading. The translation in context will appear here as soon as it's ready.",
                     )
-                  : t("La traduction en contexte demande un modèle d'IA locale.", "Translation in context needs a local AI model.")}
+                  : t(
+                      "La traduction en contexte demande une IA : un modèle sur ce Mac, ou une IA en ligne avec votre clé.",
+                      "Translation in context needs an AI: a model on this Mac, or an online AI with your key.",
+                    )}
                 {!llmDownloading && (
                   <button className="btn sm soft" onClick={() => openSettings("ai")}>
                     {t("Installer un modèle", "Install a model")}
@@ -380,13 +387,22 @@ export function WordPanel({ lang, sel, term, onStatus, onTranslation, onSelectPh
                 )}
               </div>
             ) : aiState === "error" ? (
-              <div className="wp-note">{aiError}</div>
+              <div className="wp-note" style={{ display: "flex", flexDirection: "column", gap: 10, alignItems: "flex-start" }}>
+                {aiError}
+                {online.words && (
+                  <button className="btn sm soft" onClick={() => openSettings("ai")}>
+                    {t("Réglages de l'IA", "AI settings")}
+                  </button>
+                )}
+              </div>
             ) : aiState === "loading" ? (
               <>
                 <div className="skeleton" style={{ height: 28, width: "60%" }} />
                 {slow && (
                   <span className="muted" style={{ fontSize: 12.5 }}>
-                    {t("L'IA locale s'éveille… La toute première fois, cela prend quelques secondes.", "The local AI is waking up… The very first time, it takes a few seconds.")}
+                    {online.words
+                      ? t(`${online.provider.name} réfléchit… La réponse arrive d'Internet.`, `${online.provider.name} is thinking… The answer is coming over the Internet.`)
+                      : t("L'IA locale s'éveille… La toute première fois, cela prend quelques secondes.", "The local AI is waking up… The very first time, it takes a few seconds.")}
                   </span>
                 )}
               </>
@@ -516,8 +532,12 @@ export function WordPanel({ lang, sel, term, onStatus, onTranslation, onSelectPh
         </motion.div>
       </AnimatePresence>
       <div className="wp-foot">
-        <span className="dot ok" />
-        {aiState === "nomodel" ? t("Dictionnaire hors ligne", "Offline dictionary") : t("Traduit sur votre Mac · aucune donnée envoyée", "Translated on your Mac · no data sent")}
+        <span className={`dot ${online.words ? "online" : "ok"}`} />
+        {aiState === "nomodel"
+          ? t("Dictionnaire hors ligne", "Offline dictionary")
+          : online.words
+            ? t(`Traduit en ligne par ${online.provider.name} · la phrase lui est envoyée`, `Translated online by ${online.provider.name} · the sentence is sent to it`)
+            : t("Traduit sur votre Mac · aucune donnée envoyée", "Translated on your Mac · no data sent")}
       </div>
     </div>
   );

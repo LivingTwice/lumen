@@ -1,6 +1,7 @@
 import type { CSSProperties } from "react";
 import { t } from "./i18n";
 import { langInfo } from "./langs";
+import { isWindows } from "./platform";
 
 /**
  * Affichage des leçons : mise en page, police, taille, couleur de la page,
@@ -15,13 +16,15 @@ export interface ReadFont {
   /** pile de polices : celles du Mac d'abord, des secours pour Windows et le navigateur */
   stack: string;
   kind: "serif" | "sans";
+  /** police du Mac seulement : pas proposée sous Windows (elle y prendrait l'allure d'une autre) */
+  mac?: boolean;
 }
 
 /** Polices de lecture : celles livrées avec Lumen et celles de macOS. */
 export const READ_FONTS: ReadFont[] = [
   { id: "literata", label: "Literata", stack: '"Literata Variable", Georgia, serif', kind: "serif" },
   { id: "newsreader", label: "Newsreader", stack: '"Newsreader Variable", "Literata Variable", Georgia, serif', kind: "serif" },
-  { id: "newyork", label: "New York", stack: 'ui-serif, "New York", Georgia, serif', kind: "serif" },
+  { id: "newyork", label: "New York", stack: 'ui-serif, "New York", Georgia, serif', kind: "serif", mac: true },
   { id: "georgia", label: "Georgia", stack: 'Georgia, "Times New Roman", serif', kind: "serif" },
   { id: "palatino", label: "Palatino", stack: 'Palatino, "Palatino Linotype", "Book Antiqua", serif', kind: "serif" },
   { id: "geist", label: "Geist", stack: '"Geist Variable", -apple-system, system-ui, sans-serif', kind: "sans" },
@@ -40,8 +43,12 @@ export const READ_FONTS: ReadFont[] = [
     },
     stack: 'ui-rounded, "SF Pro Rounded", -apple-system, system-ui, sans-serif',
     kind: "sans",
+    mac: true,
   },
 ];
+
+/** Polices proposées sur ce système (une police du Mac choisie avant reste lisible : `readFont`). */
+export const readFonts = (): ReadFont[] => (isWindows ? READ_FONTS.filter((f) => !f.mac) : READ_FONTS);
 
 export interface Paper {
   id: string;

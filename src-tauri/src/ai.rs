@@ -22,10 +22,34 @@ pub(crate) fn backend() -> Result<&'static LlamaBackend> {
     if let Some(b) = BACKEND.get() {
         return Ok(b);
     }
+    cpu_check()?;
     let mut b = LlamaBackend::init().map_err(|e| anyhow!("llama.cpp : {e}"))?;
     b.void_logs();
     let _ = BACKEND.set(b);
     Ok(BACKEND.get().unwrap())
+}
+
+/// Sur PC, llama.cpp et Whisper sont compilés pour les processeurs qui ont
+/// l'AVX2 (Intel depuis 2013, AMD depuis 2015) : sur un plus ancien, ils
+/// s'arrêteraient net. On le dit plutôt, avec la solution.
+pub(crate) fn cpu_check() -> Result<()> {
+    #[cfg(target_arch = "x86_64")]
+    if !(std::is_x86_feature_detected!("avx2") && std::is_x86_feature_detected!("fma") && std::is_x86_feature_detected!("f16c")) {
+        return Err(anyhow!(crate::i18n::t(
+            "Le processeur de cet ordinateur est trop ancien pour l'IA locale (il lui manque l'AVX2). L'IA en ligne peut la remplacer : Réglages › IA.",
+            "This computer's processor is too old for the local AI (it lacks AVX2). The online AI can replace it: Settings › AI."
+        )));
+    }
+    Ok(())
+}
+
+/// Fils de calcul de llama.cpp (8 au plus). Sous Windows, où tout se calcule
+/// sur le processeur, un par cœur physique : l'hyperthreading le ralentit.
+pub(crate) fn threads() -> i32 {
+    let n = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4);
+    #[cfg(windows)]
+    let n = crate::win::physical_cores().unwrap_or(n);
+    n.min(8) as i32
 }
 
 pub struct Engine {
@@ -105,6 +129,11 @@ impl Engine {
 
     pub fn next_epoch(&self) -> u64 {
         self.epoch.fetch_add(1, Ordering::SeqCst) + 1
+    }
+
+    /// La requête interactive `id` est toujours la plus récente (sinon elle est dépassée).
+    pub fn is_current(&self, id: u64) -> bool {
+        self.epoch.load(Ordering::SeqCst) == id
     }
 
     pub fn is_loaded(&self, path: &Path) -> bool {
@@ -199,7 +228,7 @@ impl Engine {
         let n_prompt = tokens.len();
         let reserve = if g.think.is_some() { budget + stop_tokens.len() } else { 0 };
         let n_ctx = (n_prompt + reserve + g.max_tokens + 16).max(512) as u32;
-        let threads = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4).min(8) as i32;
+        let threads = threads();
         let ctx_params = LlamaContextParams::default()
             .with_n_ctx(NonZeroU32::new(n_ctx))
             .with_n_batch(n_ctx.min(2048))
@@ -335,7 +364,7 @@ impl Engine {
 
 /// Ajoute un morceau de réponse (sans les sauts de ligne qui suivent la
 /// réflexion) et le transmet. `false` : arrêt demandé par l'appelant.
-fn answer_piece(out: &mut Output, piece: &str, on_piece: &mut impl FnMut(Piece) -> bool) -> bool {
+pub(crate) fn answer_piece(out: &mut Output, piece: &str, on_piece: &mut impl FnMut(Piece) -> bool) -> bool {
     let piece = if out.answer.is_empty() { piece.trim_start() } else { piece };
     if piece.is_empty() {
         return true;
@@ -345,7 +374,7 @@ fn answer_piece(out: &mut Output, piece: &str, on_piece: &mut impl FnMut(Piece) 
 }
 
 /// Retire d'éventuels restes de balises de réflexion.
-fn clean(s: &str) -> String {
+pub(crate) fn clean(s: &str) -> String {
     let mut t = s.to_string();
     if let Some(i) = t.find("</think>") {
         t = t[i + 8..].to_string();
@@ -573,9 +602,9 @@ pub struct Learner {
     pub feminine: Option<bool>,
 }
 
-#[cfg(test)]
 impl Learner {
-    /// Un apprenant dont on ne sait que le nombre de mots connus.
+    /// Un apprenant dont on ne sait que le nombre de mots connus (le chat en ligne :
+    /// le profil ne quitte jamais ce Mac).
     pub fn knows(known: i64) -> Self {
         Learner { known, ..Default::default() }
     }

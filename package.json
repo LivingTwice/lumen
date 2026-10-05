@@ -1,7 +1,12 @@
 {
   "name": "lumen",
   "private": true,
-  "version": "0.6.0",
+  "version": "0.7.0",
+  "license": "GPL-3.0-or-later",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/LivingTwice/lumen.git"
+  },
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -22,6 +27,7 @@
     "@tauri-apps/plugin-opener": "^2.7.0",
     "@tauri-apps/plugin-process": "^2.4.0",
     "@tauri-apps/plugin-updater": "^2.13.1",
+    "hls.js": "^1.7.3",
     "jszip": "^3.10.2",
     "motion": "^14.0.0",
     "pdfjs-dist": "^6.3.289",

@@ -8,6 +8,8 @@
  * Changer de langue remonte toute l'interface (clé de `App`) : les textes
  * calculés au rendu suffisent, pas besoin d'abonnement.
  */
+import { forPc } from "./platform";
+
 export type UiLang = "fr" | "en";
 
 let current: UiLang = typeof navigator !== "undefined" && navigator.language?.toLowerCase().startsWith("fr") ? "fr" : "en";
@@ -25,9 +27,9 @@ export function setUiLang(l: UiLang) {
   document.documentElement.lang = l;
 }
 
-/** Texte de l'interface dans la langue choisie. */
+/** Texte de l'interface dans la langue choisie (sous Windows, « ce Mac » y devient « ce PC »). */
 export function t(fr: string, en: string): string {
-  return current === "en" ? en : fr;
+  return forPc(current === "en" ? en : fr);
 }
 
 /** Mot accordé au nombre (en français, 0 et 1 restent au singulier). */

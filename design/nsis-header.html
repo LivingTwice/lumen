@@ -1,0 +1,22 @@
+<!doctype html>
+<!-- Image d'en-tête des pages de l'installateur Windows, src-tauri/nsis/header.bmp, rendue par
+     `node scripts/design.mjs`. 150 × 57 pixels, la taille qu'attend NSIS, à gauche du titre de la page
+     (fond blanc autour : l'image se fond dans le blanc par ses bords). -->
+<html><head><meta charset="utf-8">
+<style>
+html,body{margin:0;width:150px;height:57px;overflow:hidden}
+body{background:#fff;position:relative}
+.glow{position:absolute;left:50%;top:50%;width:150px;height:80px;transform:translate(-50%,-50%);border-radius:50%;
+  background:radial-gradient(closest-side,rgba(255,206,140,.75),rgba(255,214,160,.35) 50%,rgba(255,255,255,0))}
+.horizon{position:absolute;left:24px;right:24px;top:39px;height:1px;
+  background:linear-gradient(90deg,rgba(232,145,58,0),rgba(232,145,58,.6) 30%,rgba(255,170,80,.85) 50%,rgba(232,145,58,.6) 70%,rgba(232,145,58,0))}
+.disc{position:absolute;left:50%;top:21px;width:24px;height:24px;transform:translateX(-50%);border-radius:50%;
+  background:radial-gradient(circle at 42% 38%,#fff 0%,#fff3dc 36%,#ffc67f 76%,#f6a04f 100%);
+  box-shadow:0 0 12px 3px rgba(255,186,104,.55)}
+.ground{position:absolute;left:0;right:0;top:39px;bottom:0;background:linear-gradient(180deg,rgba(255,255,255,.85),#fff 70%)}
+</style></head><body>
+<div class="glow"></div>
+<div class="disc"></div>
+<div class="ground"></div>
+<div class="horizon"></div>
+</body></html>

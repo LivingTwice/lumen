@@ -8,7 +8,6 @@ use std::process::Stdio;
 use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncBufReadExt, BufReader};
-use tokio::process::Command;
 
 use crate::text;
 
@@ -62,7 +61,8 @@ pub async fn transcribe(
     mut on_event: impl FnMut(ImportEvent),
 ) -> Result<Vec<WWord>> {
     let bin = sidecar_path()?;
-    let mut cmd = Command::new(bin);
+    crate::ai::cpu_check()?;
+    let mut cmd = crate::proc::tokio_command(bin);
     cmd.arg(model).arg(media).arg(lang);
     if let Some(p) = pcm_out {
         cmd.arg("--pcm").arg(p);
@@ -529,7 +529,7 @@ async fn run_ytdlp(
     cookies_browser: Option<&str>,
     on_progress: &mut (dyn FnMut(f64) + Send),
 ) -> Result<Vec<String>> {
-    let mut cmd = Command::new(ytdlp);
+    let mut cmd = crate::proc::tokio_command(ytdlp);
     cmd.args(["--no-playlist", "--newline", "--progress", "--no-colors"]);
     cmd.args(["--progress-template", "download:LUMEN %(progress._percent_str)s"]);
     if let Some(js) = crate::tools::js_runtime_arg(data_dir) {
@@ -655,6 +655,9 @@ pub async fn yt_flat(data_dir: &Path, ytdlp: &Path, url: &str, from: usize, to: 
 pub async fn yt_stream(data_dir: &Path, ytdlp: &Path, url: &str, audio_only: bool, browser: Option<&str>) -> Result<serde_json::Value> {
     let format = if audio_only {
         "ba[ext=m4a][protocol=https]/ba[protocol=https]/ba/b"
+    } else if cfg!(windows) {
+        // le moteur de Windows (WebView2) lit l'image DASH de YouTube, pas toujours le HLS
+        "bv*[vcodec^=avc1][height<=720][protocol=https]+ba[ext=m4a][protocol=https]/b[vcodec^=avc1][acodec!=none][protocol=https]/bv*[vcodec^=avc1][height<=720][protocol^=m3u8]+ba[ext=m4a][protocol=https]/b[protocol=https]/b[protocol^=m3u8]/b"
     } else {
         "bv*[vcodec^=avc1][height<=720][protocol^=m3u8]+ba[ext=m4a][protocol=https]/bv*[vcodec^=avc1][height<=720][protocol=https]+ba[ext=m4a][protocol=https]/b[vcodec^=avc1][acodec!=none][protocol=https]/b[protocol^=m3u8]/b[protocol=https]/b"
     };

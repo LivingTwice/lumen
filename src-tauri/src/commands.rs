@@ -23,6 +23,7 @@ use crate::podcast;
 use crate::search;
 use crate::media::{self, ImportEvent};
 use crate::models::{self, DownloadEvent};
+use crate::online;
 use crate::i18n::{self, t};
 use crate::state::AppState;
 use crate::text;
@@ -276,7 +277,7 @@ pub async fn dict_lookup(app: tauri::AppHandle, state: State<'_, AppState>, lang
     state.dicts.lookup_ctx(i18n::native(), &lang, &word, after.as_deref().unwrap_or("")).map_err(err)
 }
 
-// ---------- IA locale ----------
+// ---------- IA (sur ce Mac ou en ligne) ----------
 
 fn active_model(state: &AppState, kind: &str) -> R<&'static models::ModelInfo> {
     let key = if kind == "llm" { "llm_model" } else { "asr_model" };
@@ -290,14 +291,14 @@ fn active_model(state: &AppState, kind: &str) -> R<&'static models::ModelInfo> {
         }
         return Err(if kind == "llm" {
             t(
-                "NO_MODEL:Aucun modèle de traduction n'est installé. Ouvrez Réglages › IA locale.",
-                "NO_MODEL:No translation model is installed. Open Settings › Local AI.",
+                "NO_MODEL:Aucun modèle de traduction n'est installé. Ouvrez Réglages › IA.",
+                "NO_MODEL:No translation model is installed. Open Settings › AI.",
             )
             .into()
         } else {
             t(
-                "NO_MODEL:Aucun modèle de transcription n'est installé. Ouvrez Réglages › IA locale.",
-                "NO_MODEL:No transcription model is installed. Open Settings › Local AI.",
+                "NO_MODEL:Aucun modèle de transcription n'est installé. Ouvrez Réglages › IA.",
+                "NO_MODEL:No transcription model is installed. Open Settings › AI.",
             )
             .into()
         });
@@ -309,6 +310,64 @@ fn active_model(state: &AppState, kind: &str) -> R<&'static models::ModelInfo> {
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum AiEvent {
     Piece { text: String },
+}
+
+/// Qui répond : Qwen3.5 sur ce Mac, ou l'IA en ligne choisie par l'apprenant.
+enum Brain {
+    Local(&'static models::ModelInfo),
+    Online(online::Config),
+}
+
+impl Brain {
+    /// Identifiant dans le cache des traductions (celles de ce Mac gardent leur clé).
+    fn id(&self) -> String {
+        match self {
+            Brain::Local(m) => m.id.to_string(),
+            Brain::Online(c) => c.id(),
+        }
+    }
+}
+
+/// L'IA en ligne si l'apprenant l'a choisie pour ce rôle, sinon le modèle de ce Mac.
+fn brain(state: &AppState, role: online::Role) -> R<Brain> {
+    let cfg = online::config(&state.db.lock(), role);
+    match cfg {
+        Some(Ok(c)) => Ok(Brain::Online(c)),
+        Some(Err(e)) => Err(e),
+        None => Ok(Brain::Local(active_model(state, "llm")?)),
+    }
+}
+
+/// Réponse simple (traduction, réécriture), envoyée au fil de l'eau.
+async fn generate(st: &AppState, brain: &Brain, messages: &[(&str, String)], max_tokens: usize, priority: Priority, on_event: &Channel<AiEvent>) -> anyhow::Result<String> {
+    let send = |piece: &str| {
+        let _ = on_event.send(AiEvent::Piece { text: piece.to_string() });
+        true
+    };
+    match brain {
+        Brain::Online(cfg) => online::generate(cfg, messages, max_tokens, online::halter(&st.ai, &priority), send).await,
+        Brain::Local(m) => {
+            let path = models::path_of(&st.data_dir, m);
+            tokio::task::block_in_place(|| st.ai.generate(&path, messages, max_tokens, priority, send))
+        }
+    }
+}
+
+/// Traduction : l'IA en ligne, et si elle est injoignable (pas de connexion),
+/// le modèle de ce Mac s'il est installé. Renvoie la réponse et qui l'a donnée.
+async fn translate(st: &AppState, brain: Brain, messages: &[(&str, String)], max_tokens: usize, epoch: u64, on_event: &Channel<AiEvent>) -> R<(String, Brain)> {
+    match generate(st, &brain, messages, max_tokens, Priority::Interactive(epoch), on_event).await {
+        Ok(out) => Ok((out, brain)),
+        Err(e) if online::is_unreachable(&e) => match active_model(st, "llm") {
+            Ok(m) => {
+                let local = Brain::Local(m);
+                let out = generate(st, &local, messages, max_tokens, Priority::Interactive(epoch), on_event).await.map_err(err)?;
+                Ok((out, local))
+            }
+            Err(_) => Err(e.to_string()),
+        },
+        Err(e) => Err(e.to_string()),
+    }
 }
 
 #[derive(Serialize)]
@@ -326,16 +385,16 @@ pub async fn ai_word(
     sentence: String,
     on_event: Channel<AiEvent>,
 ) -> R<WordAnswer> {
-    let m = active_model(&state, "llm")?;
+    let brain = brain(&state, online::Role::Words)?;
     // traductions en français (clé d'origine) ou en anglais (clé à part)
     let native = i18n::native();
     let version = if native == "en" { "w3en" } else { "w3" };
-    let key = hash(&[version, m.id, &lang, &text::normalize_for(&word, &lang), sentence.trim()]);
-    if let Some(v) = db::cache_get(&state.db.lock(), &key) {
+    let normalized = text::normalize_for(&word, &lang);
+    let key_of = |b: &Brain| hash(&[version, &b.id(), &lang, &normalized, sentence.trim()]);
+    if let Some(v) = db::cache_get(&state.db.lock(), &key_of(&brain)) {
         let (t, n) = v.split_once('\u{1f}').unwrap_or((&v, ""));
         return Ok(WordAnswer { translation: t.to_string(), note: n.to_string(), cached: true });
     }
-    let path = models::path_of(&state.data_dir, m);
     let epoch = state.ai.next_epoch();
     // indice du dictionnaire : forme de base et premiers sens
     let mut hint = String::new();
@@ -352,17 +411,10 @@ pub async fn ai_word(
         }
     }
     let messages = ai::word_messages(native, &lang, &word, &sentence, &hint);
-    let st = state.inner();
-    let raw = tokio::task::block_in_place(|| {
-        st.ai.generate(&path, &messages, 72, Priority::Interactive(epoch), |piece| {
-            let _ = on_event.send(AiEvent::Piece { text: piece.to_string() });
-            true
-        })
-    })
-    .map_err(err)?;
+    let (raw, by) = translate(state.inner(), brain, &messages, 72, epoch, &on_event).await?;
     let (translation, note) = ai::parse_word_answer(&raw);
     if !translation.is_empty() {
-        db::cache_put(&state.db.lock(), &key, &format!("{translation}\u{1f}{note}"));
+        db::cache_put(&state.db.lock(), &key_of(&by), &format!("{translation}\u{1f}{note}"));
     }
     Ok(WordAnswer { translation, note, cached: false })
 }
@@ -374,26 +426,19 @@ pub async fn ai_sentence(
     sentence: String,
     on_event: Channel<AiEvent>,
 ) -> R<String> {
-    let m = active_model(&state, "llm")?;
+    let brain = brain(&state, online::Role::Words)?;
     let native = i18n::native();
-    let key = hash(&[if native == "en" { "s1en" } else { "s1" }, m.id, &lang, sentence.trim()]);
-    if let Some(v) = db::cache_get(&state.db.lock(), &key) {
+    let version = if native == "en" { "s1en" } else { "s1" };
+    let key_of = |b: &Brain| hash(&[version, &b.id(), &lang, sentence.trim()]);
+    if let Some(v) = db::cache_get(&state.db.lock(), &key_of(&brain)) {
         return Ok(v);
     }
-    let path = models::path_of(&state.data_dir, m);
     let epoch = state.ai.next_epoch();
     let messages = ai::sentence_messages(native, &lang, &sentence);
-    let st = state.inner();
-    let out = tokio::task::block_in_place(|| {
-        st.ai.generate(&path, &messages, 260, Priority::Interactive(epoch), |piece| {
-            let _ = on_event.send(AiEvent::Piece { text: piece.to_string() });
-            true
-        })
-    })
-    .map_err(err)?;
+    let (out, by) = translate(state.inner(), brain, &messages, 260, epoch, &on_event).await?;
     let out = out.trim().trim_matches(['«', '»', '"']).trim().to_string();
     if !out.is_empty() {
-        db::cache_put(&state.db.lock(), &key, &out);
+        db::cache_put(&state.db.lock(), &key_of(&by), &out);
     }
     Ok(out)
 }
@@ -406,13 +451,14 @@ pub async fn ai_simplify(
     level: String,
     on_event: Channel<AiEvent>,
 ) -> R<String> {
-    let m = active_model(&state, "llm")?;
-    let path = models::path_of(&state.data_dir, m);
-    // découpe en blocs de paragraphes d'environ 1 200 caractères
+    let brain = brain(&state, online::Role::Chat)?;
+    // découpe en blocs de paragraphes d'environ 1 200 caractères (4 000 en ligne :
+    // les grands modèles gardent le fil d'un plus long passage)
+    let size = if matches!(brain, Brain::Online(_)) { 4000 } else { 1200 };
     let mut chunks: Vec<String> = Vec::new();
     let mut cur = String::new();
     for para in text.split("\n\n").map(str::trim).filter(|p| !p.is_empty()) {
-        if !cur.is_empty() && cur.len() + para.len() > 1200 {
+        if !cur.is_empty() && cur.len() + para.len() > size {
             chunks.push(std::mem::take(&mut cur));
         }
         if !cur.is_empty() {
@@ -431,13 +477,7 @@ pub async fn ai_simplify(
             let _ = on_event.send(AiEvent::Piece { text: "\n\n".into() });
         }
         let messages = ai::simplify_messages(i18n::native(), &lang, &level, chunk);
-        let out = tokio::task::block_in_place(|| {
-            st.ai.generate(&path, &messages, 900, Priority::Background, |piece| {
-                let _ = on_event.send(AiEvent::Piece { text: piece.to_string() });
-                true
-            })
-        })
-        .map_err(err)?;
+        let out = generate(st, &brain, &messages, size * 3 / 4, Priority::Background, &on_event).await.map_err(err)?;
         result.push_str(out.trim());
     }
     Ok(result)
@@ -445,6 +485,14 @@ pub async fn ai_simplify(
 
 #[tauri::command]
 pub async fn ai_warmup(state: State<'_, AppState>) -> R<bool> {
+    // tout part en ligne : inutile d'occuper la mémoire avec le modèle de ce Mac
+    let online_all = {
+        let c = state.db.lock();
+        matches!(online::config(&c, online::Role::Words), Some(Ok(_))) && matches!(online::config(&c, online::Role::Chat), Some(Ok(_)))
+    };
+    if online_all {
+        return Ok(false);
+    }
     let m = match active_model(&state, "llm") {
         Ok(m) => m,
         Err(_) => return Ok(false),
@@ -463,6 +511,9 @@ pub async fn ai_warmup(state: State<'_, AppState>) -> R<bool> {
 /// Place de la leçon jointe et des échanges précédents dans la mémoire du modèle (en octets).
 const CHAT_LESSON_BYTES: usize = 24_000;
 const CHAT_HISTORY_BYTES: usize = 16_000;
+/// En ligne : les grands modèles lisent bien plus long.
+const ONLINE_LESSON_BYTES: usize = 64_000;
+const ONLINE_HISTORY_BYTES: usize = 32_000;
 /// Longueur maximale d'une réponse, réflexion non comprise (en jetons).
 const CHAT_ANSWER_TOKENS: usize = 1600;
 
@@ -544,8 +595,8 @@ pub async fn chat_send(
     if text.is_empty() {
         return Err(t("Écrivez d'abord votre question.", "Write your question first.").into());
     }
-    let m = active_model(&state, "llm")?;
-    let path = models::path_of(&state.data_dir, m);
+    let brain = brain(&state, online::Role::Chat)?;
+    let online = matches!(brain, Brain::Online(_));
     // tout est lu d'un coup : aucun verrou n'est tenu pendant la génération
     let (chat, history, lesson, learner) = {
         let c = state.db.lock();
@@ -561,18 +612,20 @@ pub async fn chat_send(
             None => None,
         };
         let known = db::known_words(&c, &chat.lang).unwrap_or(0);
-        // le profil de l'apprenant : son nom, ce qui le motive, ses centres d'intérêt
-        let learner = user::learner(&c, i18n::native(), known);
+        // le profil de l'apprenant : son nom, ce qui le motive, ses centres d'intérêt ;
+        // il ne quitte jamais ce Mac (en ligne, seul le nombre de mots connus part)
+        let learner = if online { ai::Learner::knows(known) } else { user::learner(&c, i18n::native(), known) };
         (chat, history, lesson, learner)
     };
+    let (lesson_bytes, history_bytes) = if online { (ONLINE_LESSON_BYTES, ONLINE_HISTORY_BYTES) } else { (CHAT_LESSON_BYTES, CHAT_HISTORY_BYTES) };
     let excerpt = lesson.map(|(title, text)| {
-        let (text, partial) = ai::lesson_excerpt(&text, options.focus, CHAT_LESSON_BYTES);
+        let (text, partial) = ai::lesson_excerpt(&text, options.focus, lesson_bytes);
         (title, text, partial)
     });
     let context = excerpt.as_ref().map(|(title, text, partial)| ai::LessonContext { title, text, partial: *partial });
     let native = i18n::native();
     let hints: Vec<String> = ai::quoted_words(&text).iter().filter_map(|w| ai::dict_hint(&state.dicts, native, &chat.lang, w)).collect();
-    let messages = ai::chat_messages(native, &chat.lang, &learner, context.as_ref(), ai::recent_history(&history, CHAT_HISTORY_BYTES), &text, &hints);
+    let messages = ai::chat_messages(native, &chat.lang, &learner, context.as_ref(), ai::recent_history(&history, history_bytes), &text, &hints);
 
     let key = format!("chat:{id}");
     let cancel = Arc::new(AtomicBool::new(false));
@@ -583,33 +636,42 @@ pub async fn chat_send(
         }
         dl.insert(key.clone(), cancel.clone());
     }
-    let g = ai::Gen {
-        max_tokens: CHAT_ANSWER_TOKENS,
-        think: options.think.then(|| ai::think_budget(&options.effort)),
-        sampling: ai::Sampling::Natural,
-        priority: Priority::Stoppable(cancel),
-    };
     let st = state.inner();
     // durée de la réflexion : du premier mot pensé au premier mot de la réponse
     let mut thinking_since: Option<std::time::Instant> = None;
     let mut thought_secs = 0.0;
-    let res = tokio::task::block_in_place(|| {
-        st.ai.run(&path, &messages, g, |piece| {
-            match piece {
-                ai::Piece::Thought(t) => {
-                    thinking_since.get_or_insert_with(std::time::Instant::now);
-                    let _ = on_event.send(ChatEvent::Thought { text: t.to_string() });
-                }
-                ai::Piece::Answer(t) => {
-                    if let Some(since) = thinking_since.take() {
-                        thought_secs = since.elapsed().as_secs_f64();
-                    }
-                    let _ = on_event.send(ChatEvent::Answer { text: t.to_string() });
-                }
+    let mut on_piece = |piece: ai::Piece| {
+        match piece {
+            ai::Piece::Thought(t) => {
+                thinking_since.get_or_insert_with(std::time::Instant::now);
+                let _ = on_event.send(ChatEvent::Thought { text: t.to_string() });
             }
-            true
-        })
-    });
+            ai::Piece::Answer(t) => {
+                if let Some(since) = thinking_since.take() {
+                    thought_secs = since.elapsed().as_secs_f64();
+                }
+                let _ = on_event.send(ChatEvent::Answer { text: t.to_string() });
+            }
+        }
+        true
+    };
+    let priority = Priority::Stoppable(cancel);
+    let res = match &brain {
+        Brain::Online(cfg) => {
+            let ask = online::Ask { messages: &messages, max_tokens: CHAT_ANSWER_TOKENS, think: options.think.then_some(options.effort.as_str()), exact: false };
+            online::run(cfg, ask, online::halter(&st.ai, &priority), &mut on_piece).await
+        }
+        Brain::Local(m) => {
+            let path = models::path_of(&st.data_dir, m);
+            let g = ai::Gen {
+                max_tokens: CHAT_ANSWER_TOKENS,
+                think: options.think.then(|| ai::think_budget(&options.effort)),
+                sampling: ai::Sampling::Natural,
+                priority,
+            };
+            tokio::task::block_in_place(|| st.ai.run(&path, &messages, g, &mut on_piece))
+        }
+    };
     state.downloads.lock().remove(&key);
     let out = res.map_err(err)?;
     if let Some(since) = thinking_since {
@@ -1088,6 +1150,15 @@ pub async fn lesson_fetch_video(state: State<'_, AppState>, id: i64, on_event: C
     let p = path.display().to_string();
     db::lesson_set_video(&state.db.lock(), id, &p).map_err(err)?;
     Ok(p)
+}
+
+// ---------- IA en ligne ----------
+
+/// Vérifie une clé d'IA en ligne : modèles proposés, modèle retenu, temps de réponse.
+/// `url` : adresse d'un serveur compatible (fournisseur « custom »).
+#[tauri::command]
+pub async fn online_check(provider: String, key: String, url: Option<String>, model: Option<String>) -> R<online::Check> {
+    online::check(&provider, &key, url.as_deref().unwrap_or(""), model.as_deref().unwrap_or("")).await.map_err(err)
 }
 
 // ---------- podcasts sur mesure (Gemini) ----------

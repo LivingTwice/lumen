@@ -11,8 +11,9 @@ import { openShortcuts } from "../lib/menu";
 import { count, formatNumber, t, type UiLang } from "../lib/i18n";
 import { LANGS, STARTERS, inLang, langInfo, langLower, starterCollection, theLang } from "../lib/langs";
 import { useDictStatus } from "../lib/dicts";
-import { LEVELS, levelName, unitsLabel, useLevel } from "../lib/discover";
+import { LEVELS, levelName, openSource, unitsLabel, useLevel } from "../lib/discover";
 import { useLingq } from "../lib/lingq";
+import { isWindows } from "../lib/platform";
 import { PROFILES } from "../lib/profiles";
 import { formatBytes, useApp, type SettingsTab } from "../lib/store";
 import { naturalVoiceFor, naturalVoices, pronounce } from "../lib/pronounce";
@@ -23,6 +24,8 @@ import { FontPicker, LayoutPicker, PaperPicker, lineHeightOptions, widthOptions 
 import type { LangCode, ModelRow } from "../lib/types";
 import { BackupSection } from "./BackupSection";
 import { LingqSection } from "./LingqSection";
+import { EnginePicker, OnlineSection } from "./OnlineSection";
+import { useOnline } from "../lib/online";
 import { PodcastSection } from "./PodcastSection";
 import { ProfileSection } from "./ProfileSection";
 import { useUser } from "../lib/user";
@@ -31,6 +34,8 @@ import { useUser } from "../lib/user";
    Chaque page ne montre que son domaine ; la recherche du menu retrouve un réglage. */
 
 const EASE = [0.2, 0.8, 0.2, 1] as const;
+/** Dépôt public du code de Lumen (GPL-3.0). */
+const SOURCE_URL = "https://github.com/LivingTwice/lumen";
 
 interface Tab {
   id: SettingsTab;
@@ -133,12 +138,12 @@ const groups = (): { title: string | null; tabs: Tab[] }[] => [
       {
         id: "ai",
         icon: "cpu",
-        label: t("IA locale", "Local AI"),
+        label: t("IA", "AI"),
         lead: t(
-          "Choisissez la puissance des modèles. Ils sont téléchargés une seule fois puis fonctionnent hors ligne.",
-          "Choose how powerful the models are. They are downloaded once, then work offline.",
+          "Sur ce Mac, les modèles sont téléchargés une seule fois puis fonctionnent hors ligne. Si vous le souhaitez, une IA en ligne peut prendre le relais pour la traduction et le chat, avec votre clé.",
+          "On this Mac, the models are downloaded once, then work offline. If you wish, an online AI can take over translation and the chat, with your key.",
         ),
-        keys: "ia locale modele modeles qwen whisper asr transcription traduction chat profil leger equilibre maximum telecharger local ai model models translation profile light balanced download",
+        keys: "ia locale modele modeles qwen whisper asr transcription traduction chat profil leger equilibre maximum telecharger en ligne api cle fournisseur deepseek gemini mistral openai chatgpt claude anthropic openrouter ollama lm studio serveur abonnement local ai model models translation profile light balanced download online key provider server subscription",
       },
       {
         id: "videos",
@@ -185,7 +190,7 @@ const groups = (): { title: string | null; tabs: Tab[] }[] => [
         icon: "orb",
         label: t("À propos", "About"),
         lead: t("Lumen, ses nouveautés, sa visite guidée et ceux qui le rendent possible.", "Lumen, what's new, its guided tour and those who make it possible."),
-        keys: "a propos version mises a jour nouveautes visite guidee guide raccourcis clavier touches accueil credits dossier donnees about updates what's new whats new tour keyboard shortcuts keys welcome credits data folder",
+        keys: "a propos version mises a jour nouveautes visite guidee guide raccourcis clavier touches accueil credits dossier donnees about updates what's new whats new tour keyboard shortcuts keys welcome credits data folder code source logiciel libre licence gpl github source code free software license open source",
       },
     ],
   },
@@ -214,9 +219,11 @@ function useBadges(): Partial<Record<SettingsTab, "busy" | "warn" | "light">> {
   const backupError = useBackup((s) => !!s.status?.enabled && !!s.status.error && !s.status.running);
   const lingq = useLingq((s) => s.phase === "importing");
   const update = useUpdate((s) => s.phase === "available" || s.phase === "ready");
-  const noLlm = models.length > 0 && !models.some((m) => m.kind === "llm" && m.installed);
+  const online = useOnline();
+  // rien pour traduire ni converser : ni modèle sur ce Mac, ni IA en ligne prête pour les deux
+  const noLlm = models.length > 0 && !models.some((m) => m.kind === "llm" && m.installed) && !(online.ready && online.words && online.chat);
   return {
-    ai: downloading ? "busy" : noLlm ? "warn" : undefined,
+    ai: downloading ? "busy" : noLlm || (online.on && !online.ready) ? "warn" : undefined,
     backup: backupError ? "warn" : undefined,
     lingq: lingq ? "busy" : undefined,
     about: update ? "light" : undefined,
@@ -244,6 +251,7 @@ function TabIcon({ tab, size = 16 }: { tab: Tab; size?: number }) {
 
 export function Settings() {
   const tab = useApp((s) => s.settingsTab);
+  const online = useApp((s) => s.settings.online_on === "1");
   const openSettings = useApp((s) => s.openSettings);
   const still = !!useReducedMotion();
   const [query, setQuery] = useState("");
@@ -340,7 +348,11 @@ export function Settings() {
             })}
             {!found.length && <p className="set-nav-empty">{t("Aucun réglage ne correspond.", "No setting matches.")}</p>}
           </div>
-          <p className="set-nav-foot">{t("Tout fonctionne sur votre Mac, sans compte.", "Everything works on your Mac, with no account.")}</p>
+          <p className="set-nav-foot">
+            {online
+              ? t("Sans compte. L'IA en ligne passe par votre clé ; tout le reste fonctionne sur votre Mac.", "No account. The online AI goes through your key; everything else works on your Mac.")
+              : t("Tout fonctionne sur votre Mac, sans compte.", "Everything works on your Mac, with no account.")}
+          </p>
         </nav>
 
         <div className="set-main" ref={mainRef} role="tabpanel" aria-label={current.label}>
@@ -808,7 +820,9 @@ function VoicePane() {
                 {voices.length
                   ? t(`${voices.length} voix disponible${voices.length > 1 ? "s" : ""}`, `${voices.length} voice${voices.length > 1 ? "s" : ""} available`)
                   : t("Aucune voix installée pour cette langue", "No voice installed for this language")}
-                {t(" · d'autres voix dans Réglages Système › Accessibilité › Contenu énoncé", " · more voices in System Settings › Accessibility › Spoken Content")}
+                {isWindows
+                  ? t(" · d'autres voix dans Paramètres › Heure et langue › Voix", " · more voices in Settings › Time & language › Speech")
+                  : t(" · d'autres voix dans Réglages Système › Accessibilité › Contenu énoncé", " · more voices in System Settings › Accessibility › Spoken Content")}
               </span>
             </div>
             <select className="select" value={settings[voiceKey] ?? ""} onChange={(e) => setSetting(voiceKey, e.target.value)} aria-label={t("Voix", "Voice")}>
@@ -928,7 +942,7 @@ function LevelExplained({ lang, forms }: { lang: LangCode; forms: string }) {
   );
 }
 
-// ---------- IA locale ----------
+// ---------- IA ----------
 
 function ModelLine({ m }: { m: ModelRow }) {
   const dl = useApp((s) => s.downloads[m.id]);
@@ -1000,6 +1014,7 @@ function ModelLine({ m }: { m: ModelRow }) {
 
 function AiPane() {
   const settings = useApp((s) => s.settings);
+  const online = settings.online_on === "1";
   const setSetting = useApp((s) => s.setSetting);
   const models = useApp((s) => s.models);
   const download = useApp((s) => s.download);
@@ -1016,7 +1031,36 @@ function AiPane() {
 
   return (
     <>
-      <Section title={t("Puissance", "Power")} note={t("Plus le modèle est grand, plus il saisit les nuances, mais plus il pèse et demande de mémoire.", "The bigger the model, the more nuance it catches, but the more space and memory it needs.")}>
+      <Section
+        title={t("Où travaille l'IA", "Where the AI works")}
+        note={t(
+          "Le sens des mots, la traduction des phrases, Simplifier et le chat. La transcription et la voix restent toujours sur ce Mac.",
+          "Word meanings, sentence translation, Simplify and the chat. Transcription and the voice always stay on this Mac.",
+        )}
+      >
+        <EnginePicker />
+      </Section>
+      <AnimatePresence initial={false}>
+        {online && (
+          <motion.div
+            key="online"
+            className="online-block"
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: "auto" }}
+            exit={{ opacity: 0, height: 0 }}
+            transition={{ duration: 0.32, ease: EASE }}
+          >
+            <OnlineSection />
+          </motion.div>
+        )}
+      </AnimatePresence>
+      <Section
+        title={t("Puissance", "Power")}
+        note={
+          t("Plus le modèle est grand, plus il saisit les nuances, mais plus il pèse et demande de mémoire.", "The bigger the model, the more nuance it catches, but the more space and memory it needs.") +
+          (online ? " " + t("Avec l'IA en ligne, il sert hors connexion et pour ce qui reste sur ce Mac.", "With the online AI, it's used offline and for whatever stays on this Mac.") : "")
+        }
+      >
         <div className="profile-grid">
           {PROFILES.map((p) => (
             <button key={p.id} className={`profile ${activeProfile === p.id ? "on" : ""}`} onClick={() => pickProfile(p.id)}>
@@ -1176,7 +1220,11 @@ function AboutPane() {
             </span>
             <div className="grow">
               <strong>{t("Raccourcis clavier", "Keyboard shortcuts")}</strong>
-              <span>{t("Tout ce qui se fait au clavier, dans une leçon et partout ailleurs. Aussi dans le menu Aide, ⌘/.", "Everything you can do from the keyboard, in a lesson and everywhere else. Also in the Help menu, ⌘/.")}</span>
+              <span>
+                {isWindows
+                  ? t("Tout ce qui se fait au clavier, dans une leçon et partout ailleurs. Aussi avec Ctrl+/.", "Everything you can do from the keyboard, in a lesson and everywhere else. Also with Ctrl+/.")
+                  : t("Tout ce qui se fait au clavier, dans une leçon et partout ailleurs. Aussi dans le menu Aide, ⌘/.", "Everything you can do from the keyboard, in a lesson and everywhere else. Also in the Help menu, ⌘/.")}
+              </span>
             </div>
             <button className="btn sm soft" onClick={openShortcuts}>
               {t("Voir les raccourcis", "See shortcuts")}
@@ -1233,6 +1281,20 @@ function AboutPane() {
       </Section>
 
       <Section title={t("Crédits", "Credits")}>
+        <div className="set-card">
+          <div className="set-row">
+            <span className="set-row-icon">
+              <Icon name="globe" size={16} />
+            </span>
+            <div className="grow">
+              <strong>{t("Code source", "Source code")}</strong>
+              <span>{t("Lumen est un logiciel libre, sous licence GPL-3.0 : son code est public, chacun peut le lire et vérifier ce qui reste sur ce Mac.", "Lumen is free software, under the GPL-3.0 licence: its code is public, anyone can read it and check what stays on this Mac.")}</span>
+            </div>
+            <button className="btn sm soft" onClick={() => void openSource(SOURCE_URL)}>
+              {t("Voir sur GitHub", "View on GitHub")}
+            </button>
+          </div>
+        </div>
         <p className="set-credits">
           {t(
             "Dictionnaires : Wiktionnaire via kaikki.org ; JMdict et KANJIDIC2, selon la licence de l'Electronic Dictionary Research and Development Group ; corpus Universal Dependencies (tous CC BY-SA 4.0). Traduction : Qwen3.5 (Apache 2.0) par llama.cpp (MIT). Transcription : Qwen3-ASR (Apache 2.0) par llama.cpp et Whisper (MIT) par whisper.cpp. Voix : Supertonic 3 par sherpa-onnx. Polices : Literata, Newsreader, Geist (OFL).",

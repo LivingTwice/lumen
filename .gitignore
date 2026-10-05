@@ -14,3 +14,13 @@ public
 src-tauri/resources/dicts-en
 src-tauri/resources/dicts-v2
 __pycache__
+# le dépôt est public : jamais de secret ni de donnée personnelle
+.env
+.env.*
+*.key
+*.pem
+*.p12
+*.db
+*.sqlite
+*.lumen
+cles.tsv

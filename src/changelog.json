@@ -2,6 +2,39 @@
   "_lisezmoi": "Nouveautés montrées après chaque mise à jour (components/News.tsx) et notes de publication. Ajouter ce qui change sous la version \"next\" au fil du travail ; « Publier une version » lui donne son numéro et sa date. Icônes : noms de components/Icon.tsx. Actions : \"tour\" (visite guidée), \"guide\", \"settings:<page>\" (profile, general, langs, reading, voice, discover, podcasts, ai, videos, backup, lingq, about), \"import:<onglet>\" (text, link, file, media, podcast), \"view:<vue>\" (library, discover, playlists, chat, vocab, progress).",
   "releases": [
     {
+      "version": "0.7.0",
+      "date": "2026-10-05",
+      "title": { "fr": "Lumen arrive sur Windows", "en": "Lumen comes to Windows" },
+      "items": [
+        {
+          "icon": "laptop",
+          "title": { "fr": "Lumen sur PC", "en": "Lumen on PC" },
+          "body": {
+            "fr": "Lumen existe désormais pour Windows 10 et 11, avec tout ce qu'il sait faire : lecture, écoute, Découvrir, chat, podcasts sur mesure, voix naturelle, sauvegarde dans OneDrive ou le nuage de votre choix. Sur PC, l'IA locale calcule sur le processeur (il faut l'AVX2, présent depuis 2013) : le profil Léger y est le plus rapide, et l'IA en ligne peut prendre le relais. Votre progression passe d'un Mac à un PC par la sauvegarde.",
+            "en": "Lumen now runs on Windows 10 and 11, with everything it can do: reading, listening, Discover, chat, custom podcasts, natural voice, backup to OneDrive or the cloud of your choice. On a PC, the local AI runs on the processor (it needs AVX2, available since 2013): the Light profile is the fastest there, and the online AI can take over. Your progress moves from a Mac to a PC through the backup."
+          }
+        },
+        {
+          "icon": "cloud",
+          "title": { "fr": "Une IA en ligne, si vous le voulez", "en": "An online AI, if you want one" },
+          "body": {
+            "fr": "Dans Réglages › IA, le sens des mots, Simplifier et le chat peuvent passer par une IA en ligne, avec votre propre clé : DeepSeek (le moins cher), Gemini (clé gratuite, celle des podcasts), Mistral, OpenAI, Claude, OpenRouter, ou un serveur comme Ollama. Des modèles bien plus grands, rapides même sur un petit Mac. Par défaut, tout reste sur ce Mac ; votre profil, la transcription et la voix n'en sortent jamais, et sans connexion la traduction revient au modèle de ce Mac.",
+            "en": "In Settings › AI, word meanings, Simplify and the chat can go through an online AI, with your own key: DeepSeek (the cheapest), Gemini (free key, the podcast one), Mistral, OpenAI, Claude, OpenRouter, or a server like Ollama. Much bigger models, fast even on a small Mac. By default, everything stays on this Mac; your profile, transcription and the voice never leave it, and without a connection translation falls back to this Mac's model."
+          },
+          "action": "settings:ai"
+        },
+        {
+          "icon": "globe",
+          "title": { "fr": "Le code de Lumen est ouvert", "en": "Lumen's code is open" },
+          "body": {
+            "fr": "Lumen devient un logiciel libre, sous licence GPL-3.0 : son code est public sur GitHub. Chacun peut le lire, vérifier que vos mots, vos leçons et votre profil restent bien sur ce Mac, et proposer des améliorations. Le lien est dans Réglages › À propos.",
+            "en": "Lumen is now free software, under the GPL-3.0 licence: its code is public on GitHub. Anyone can read it, check that your words, lessons and profile really stay on this Mac, and suggest improvements. The link is in Settings › About."
+          },
+          "action": "settings:about"
+        }
+      ]
+    },
+    {
       "version": "0.6.0",
       "date": "2026-10-05",
       "title": { "fr": "Un profil à vous", "en": "A profile of your own" },
@@ -34,6 +67,7 @@
         },
         {
           "icon": "keyboard",
+          "only": "mac",
           "title": { "fr": "Les menus du Mac", "en": "The Mac menu bar" },
           "body": {
             "fr": "Lumen a ses vrais menus, en français ou en anglais. Fichier : ouvrir un fichier (⌘O), importer un lien (⌘L), exporter le vocabulaire, sauvegarder maintenant (⌘S). Présentation : passer d'une vue à l'autre (⌘1 à ⌘6), changer de langue étudiée ou d'apparence. Format : police, couleur de la page, taille du texte (⌘= et ⌘-). Leçon : reprendre la lecture (⌘R), la vitesse, reculer de 5 secondes, ajouter à une playlist, changer la couverture ou supprimer la leçon sans quitter la page. Aide › Raccourcis clavier (⌘/) les réunit tous, avec ceux du lecteur.",

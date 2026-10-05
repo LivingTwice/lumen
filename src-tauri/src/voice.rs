@@ -18,8 +18,18 @@ use sha2::{Digest, Sha256};
 use crate::models::{self, DownloadEvent, ModelInfo};
 
 const ENGINE_VERSION: &str = "1.13.8";
-/// Taille de l'archive du moteur (macOS arm64), pour la progression.
-pub const ENGINE_SIZE: u64 = 20_314_448;
+/// Archive du moteur pour ce système : macOS (puce Apple) ou Windows (x64,
+/// bibliothèque C++ intégrée : rien à installer à côté).
+const ENGINE_FLAVOR: &str = if cfg!(windows) { "win-x64-shared-MT-Release" } else { "osx-arm64-shared" };
+/// Taille de cette archive, pour la progression.
+pub const ENGINE_SIZE: u64 = if cfg!(windows) { 24_805_859 } else { 20_314_448 };
+/// Ce qu'on garde de l'archive : l'outil de synthèse (en premier), puis les
+/// bibliothèques qu'il charge (sous Windows, à côté de lui).
+const ENGINE_FILES: &[&str] = if cfg!(windows) {
+    &["bin/sherpa-onnx-offline-tts.exe", "bin/onnxruntime.dll", "bin/onnxruntime_providers_shared.dll"]
+} else {
+    &["bin/sherpa-onnx-offline-tts", "lib/libonnxruntime.dylib"]
+};
 
 /// Les langues de Lumen portent le même code chez Supertonic.
 use crate::text::LANGS;
@@ -34,19 +44,25 @@ fn speaker(voice: &str) -> u32 {
 }
 
 fn engine_name() -> String {
-    format!("sherpa-onnx-v{ENGINE_VERSION}-osx-arm64-shared")
+    format!("sherpa-onnx-v{ENGINE_VERSION}-{ENGINE_FLAVOR}")
 }
 
 fn engine_dir(data_dir: &Path) -> PathBuf {
     crate::tools::tools_dir(data_dir).join(engine_name())
 }
 
+/// Un fichier du moteur (« bin/… », « lib/… »).
+fn engine_file(data_dir: &Path, rel: &str) -> PathBuf {
+    rel.split('/').fold(engine_dir(data_dir), |p, part| p.join(part))
+}
+
 fn engine_bin(data_dir: &Path) -> PathBuf {
-    engine_dir(data_dir).join("bin").join("sherpa-onnx-offline-tts")
+    engine_file(data_dir, ENGINE_FILES[0])
 }
 
 pub fn engine_ready(data_dir: &Path) -> bool {
-    engine_bin(data_dir).exists() && engine_dir(data_dir).join("lib").join("libonnxruntime.dylib").exists()
+    // la bibliothèque facultative d'onnxruntime peut manquer
+    ENGINE_FILES.iter().take(2).all(|f| engine_file(data_dir, f).exists())
 }
 
 /// Supprime le moteur (avec le modèle de voix).
@@ -60,8 +76,11 @@ pub async fn ensure_engine(data_dir: &Path, cancel: Arc<AtomicBool>, mut on_prog
     if engine_ready(data_dir) {
         return Ok(());
     }
-    if !cfg!(all(target_os = "macos", target_arch = "aarch64")) {
-        return Err(anyhow!(crate::i18n::t("La voix naturelle n'est disponible que sur Mac pour l'instant.", "The natural voice is only available on Mac for now.")));
+    if !cfg!(any(all(target_os = "macos", target_arch = "aarch64"), all(windows, target_arch = "x86_64"))) {
+        return Err(anyhow!(crate::i18n::t(
+            "La voix naturelle n'est pas encore disponible sur cet ordinateur.",
+            "The natural voice isn't available on this computer yet."
+        )));
     }
     let tools = crate::tools::tools_dir(data_dir);
     tokio::fs::create_dir_all(&tools).await?;
@@ -74,17 +93,22 @@ pub async fn ensure_engine(data_dir: &Path, cancel: Arc<AtomicBool>, mut on_prog
         }
     };
     models::fetch_resumable(&url, &part, 0, ENGINE_SIZE, cancel, &mut forward).await?;
-    let out = tokio::process::Command::new("tar")
-        .arg("-xjf")
-        .arg(&part)
-        .arg("-C")
-        .arg(&tools)
-        .arg(format!("{name}/bin/sherpa-onnx-offline-tts"))
-        .arg(format!("{name}/lib/libonnxruntime.dylib"))
-        .output()
-        .await?;
+    let wanted: Vec<String> = ENGINE_FILES.iter().map(|f| format!("{name}/{f}")).collect();
+    #[cfg(not(windows))]
+    let ok = tokio::process::Command::new("tar").arg("-xjf").arg(&part).arg("-C").arg(&tools).args(&wanted).output().await?.status.success();
+    // Windows : décompressé ici (le tar de Windows 10 ne lit pas toujours le bzip2)
+    #[cfg(windows)]
+    let ok = {
+        let (archive, dest) = (part.clone(), tools.clone());
+        tokio::task::spawn_blocking(move || models::unpack_tar_bz2(&archive, &dest, Some(&wanted))).await?.is_ok()
+    };
     let _ = tokio::fs::remove_file(&part).await;
-    if !out.status.success() || !engine_ready(data_dir) {
+    // l'outil lit sa ligne de commande (le texte à dire) en UTF-8
+    #[cfg(windows)]
+    if ok {
+        let _ = crate::win::utf8_manifest(&engine_bin(data_dir));
+    }
+    if !ok || !engine_ready(data_dir) {
         remove_engine(data_dir);
         return Err(anyhow!(crate::i18n::t("le moteur de voix n'a pas pu être installé, réessayez", "the voice engine couldn't be installed, try again")));
     }
@@ -107,7 +131,7 @@ pub fn cached_path(data_dir: &Path, m: &ModelInfo, lang: &str, text: &str, voice
 async fn run_engine(data_dir: &Path, m: &ModelInfo, lang: &str, text: &str, voice: &str, threads: u32, out: &Path) -> Result<()> {
     let model = models::path_of(data_dir, m);
     let f = |name: &str| model.join(name);
-    let mut cmd = tokio::process::Command::new(engine_bin(data_dir));
+    let mut cmd = crate::proc::tokio_command(engine_bin(data_dir));
     cmd.arg(format!("--supertonic-duration-predictor={}", f("duration_predictor.int8.onnx").display()))
         .arg(format!("--supertonic-text-encoder={}", f("text_encoder.int8.onnx").display()))
         .arg(format!("--supertonic-vector-estimator={}", f("vector_estimator.int8.onnx").display()))
@@ -389,6 +413,27 @@ pub async fn lesson_audio(
     Ok(LessonAudio { path: path?, timings, duration })
 }
 
+/// Change la fréquence d'un son (interpolation linéaire, assez fine pour la voix) :
+/// l'encodeur AAC de Windows n'accepte que 44,1 et 48 kHz.
+#[cfg(any(windows, test))]
+pub(crate) fn resample(s: &[i16], from: u32, to: u32) -> Vec<i16> {
+    if from == to || from == 0 || to == 0 || s.is_empty() {
+        return s.to_vec();
+    }
+    let n = (s.len() as u64 * to as u64 / from as u64) as usize;
+    let step = from as f64 / to as f64;
+    let last = s.len() - 1;
+    (0..n)
+        .map(|i| {
+            let x = i as f64 * step;
+            let k = (x as usize).min(last);
+            let f = x - k as f64;
+            let (a, b) = (s[k] as f64, s[(k + 1).min(last)] as f64);
+            (a + (b - a) * f).round().clamp(-32768.0, 32767.0) as i16
+        })
+        .collect()
+}
+
 /// Crête ramenée à 85 % du maximum (gain borné : un son presque muet reste discret).
 pub(crate) fn level_volume(all: &mut [i16]) {
     if let Some(peak) = all.iter().map(|v| (*v as i32).abs()).max().filter(|p| *p > 0) {
@@ -400,20 +445,29 @@ pub(crate) fn level_volume(all: &mut [i16]) {
 }
 
 /// Enregistre un son assemblé dans `media/<horodatage>.<tag>.m4a`, compressé en
-/// AAC (environ 0,5 Mo par minute au lieu de 5 Mo en WAV) ; en WAV si `afconvert` échoue.
+/// AAC (environ 0,5 Mo par minute au lieu de 5 Mo en WAV) ; en WAV si la compression
+/// échoue (`afconvert` sur Mac, l'encodeur de Windows sur PC).
 /// `work` : dossier de travail, où passe le WAV intermédiaire.
 pub(crate) async fn save_m4a(work: &Path, media: &Path, tag: &str, rate: u32, samples: &[i16]) -> Result<PathBuf> {
     let wav_path = work.join(format!("{tag}.wav"));
     tokio::fs::write(&wav_path, write_wav(rate, samples)).await?;
     let stem = crate::media::new_stem();
     let m4a = media.join(format!("{stem}.{tag}.m4a"));
-    let conv = tokio::process::Command::new("afconvert")
+    #[cfg(not(windows))]
+    let converted = tokio::process::Command::new("afconvert")
         .args(["-f", "m4af", "-d", "aac", "-b", "64000"])
         .arg(&wav_path)
         .arg(&m4a)
         .output()
-        .await;
-    if conv.map(|o| o.status.success()).unwrap_or(false) && m4a.exists() {
+        .await
+        .map(|o| o.status.success())
+        .unwrap_or(false);
+    #[cfg(windows)]
+    let converted = {
+        let (out, pcm) = (m4a.clone(), samples.to_vec());
+        tokio::task::spawn_blocking(move || crate::win::aac_m4a(rate, &pcm, &out)).await.map(|r| r.is_ok()).unwrap_or(false)
+    };
+    if converted && m4a.exists() {
         let _ = tokio::fs::remove_file(&wav_path).await;
         return Ok(m4a);
     }
@@ -482,6 +536,18 @@ mod tests {
     }
 
     #[test]
+    fn resample_keeps_duration_and_shape() {
+        // 24 kHz (voix de Gemini) vers 48 kHz : deux fois plus d'échantillons, même allure
+        let s: Vec<i16> = (0..2400).map(|k| ((k as f64 / 24.0).sin() * 10000.0) as i16).collect();
+        let r = resample(&s, 24_000, 48_000);
+        assert_eq!(r.len(), 4800);
+        assert_eq!(r[0], s[0]);
+        assert_eq!(r[200], s[100]);
+        assert!((r[201] as i32 - (s[100] as i32 + s[101] as i32) / 2).abs() <= 1);
+        assert_eq!(resample(&s, 48_000, 48_000), s);
+    }
+
+    #[test]
     fn polish_leaves_unknown_formats_alone() {
         assert!(polish_wav(b"pas un wav").is_none());
         assert!(polish_wav(&wav(&[0; 100], 1000)).is_none());
@@ -495,6 +561,8 @@ mod live {
     use super::*;
     use std::time::Instant;
 
+    // liens symboliques du Mac : essai réservé au Mac
+    #[cfg(unix)]
     #[tokio::test]
     #[ignore]
     async fn voice_live() {
@@ -530,6 +598,8 @@ mod live {
 
     /// Audio d'une leçon entière, puis recalage par Whisper si `LUMEN_ASR_MODEL` est donné :
     /// `LUMEN_VOICE_MODEL=… LUMEN_ASR_MODEL=…/ggml-large-v3-turbo-q5_0.bin cargo test --lib lesson_audio_live -- --ignored --nocapture`
+    // liens symboliques du Mac : essai réservé au Mac
+    #[cfg(unix)]
     #[tokio::test]
     #[ignore]
     async fn lesson_audio_live() {

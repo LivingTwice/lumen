@@ -6,6 +6,7 @@ import { useDictStatus } from "../lib/dicts";
 import { useDiscoverNews } from "../lib/discover";
 import { LANGS, langInfo } from "../lib/langs";
 import { useApp, type View } from "../lib/store";
+import { useOnline } from "../lib/online";
 import type { LangCode, LessonSummary } from "../lib/types";
 import { Avatar } from "./Avatar";
 import { Icon, type IconName } from "./Icon";
@@ -68,6 +69,7 @@ export function Sidebar() {
   }, [lang, libraryVersion, lessonId]);
 
   const li = langInfo(lang);
+  const online = useOnline();
   const llm = models.find((m) => m.kind === "llm" && m.installed && m.id === settings.llm_model) ?? models.find((m) => m.kind === "llm" && m.installed);
   const asr = models.find((m) => m.kind === "asr" && m.installed && m.id === settings.asr_model) ?? models.find((m) => m.kind === "asr" && m.installed);
   const asrText = models.find((m) => m.kind === "asrtext" && m.installed);
@@ -223,11 +225,24 @@ export function Sidebar() {
         <LingqCard />
         <BackupCard />
         <button className="ai-card" style={{ textAlign: "left", cursor: "pointer" }} onClick={() => openSettings("ai")}>
-          <span className="eyebrow">{t("IA locale", "Local AI")}</span>
-          <span className="ai-row">
-            <span className={`dot ${llm ? "ok" : busy ? "busy" : ""}`} />
-            {llm ? t(`${llm.name} · prêt`, `${llm.name} · ready`) : busy ? t("Téléchargement…", "Downloading…") : t("Traduction : à installer", "Translation: to install")}
-          </span>
+          <span className="eyebrow">{online.on ? t("IA", "AI") : t("IA locale", "Local AI")}</span>
+          {online.on && (
+            <span className="ai-row">
+              <span className={`dot ${online.ready ? "online" : ""}`} />
+              {online.ready
+                ? t(`${online.provider.name} · en ligne`, `${online.provider.name} · online`)
+                : online.provider.id === "custom"
+                  ? t("Serveur : adresse à indiquer", "Server: address needed")
+                  : t(`${online.provider.name} : clé à ajouter`, `${online.provider.name}: key needed`)}
+            </span>
+          )}
+          {/* le modèle de ce Mac, tant qu'il sert à quelque chose */}
+          {!(online.on && online.words && online.chat) && (
+            <span className="ai-row">
+              <span className={`dot ${llm ? "ok" : busy ? "busy" : ""}`} />
+              {llm ? t(`${llm.name} · prêt`, `${llm.name} · ready`) : busy ? t("Téléchargement…", "Downloading…") : t("Traduction : à installer", "Translation: to install")}
+            </span>
+          )}
           <span className="ai-row">
             <span className={`dot ${asr ? "ok" : ""}`} />
             {asr

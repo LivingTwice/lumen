@@ -2,6 +2,7 @@ import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { Fragment, useEffect, useMemo, useState, type ReactNode } from "react";
 import { count, t } from "../lib/i18n";
 import { useApp } from "../lib/store";
+import { useOnline } from "../lib/online";
 import type { LangCode, ModelRow } from "../lib/types";
 import { Icon, type IconName } from "./Icon";
 
@@ -281,11 +282,14 @@ export const roles = (): Role[] => [
 /** 4. Quatre modèles, quatre rôles, tous sur ce Mac. */
 function SceneModels({ still }: { still: boolean }) {
   const models = useApp((s) => s.models);
+  const online = useOnline();
   return (
     <div className="g-scene models">
       <div className="g-roles">
         {roles().map((r, i) => {
-          const installed = models.some((m) => m.kind === r.kind && m.installed);
+          // traduction confiée à l'IA en ligne : son nom, et prête si la clé est là
+          const remote = r.kind === "llm" && online.words;
+          const installed = remote ? online.ready : models.some((m) => m.kind === r.kind && m.installed);
           return (
             <motion.div
               key={r.kind}
@@ -300,7 +304,7 @@ function SceneModels({ still }: { still: boolean }) {
               <span className="body">
                 <span className="head">
                   <strong>{r.name}</strong>
-                  <span className="model">{r.model}</span>
+                  <span className="model">{remote ? t(`${online.provider.name} · en ligne`, `${online.provider.name} · online`) : r.model}</span>
                 </span>
                 <span className="what">{r.what}</span>
                 <span className={`state ${installed ? "ok" : ""}`}>

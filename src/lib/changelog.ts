@@ -1,6 +1,7 @@
 import data from "../changelog.json";
 import type { IconName } from "../components/Icon";
 import { locale, t } from "./i18n";
+import { isWindows } from "./platform";
 import { useApp, type ImportTab, type SettingsTab, type View } from "./store";
 
 /**
@@ -20,6 +21,8 @@ export interface NewsItem {
   title: Text;
   body: Text;
   action?: string;
+  /** nouveauté d'un seul système (la barre des menus du Mac…) : pas montrée sur l'autre */
+  only?: "mac" | "windows";
 }
 
 export interface Release {
@@ -29,7 +32,10 @@ export interface Release {
   items: NewsItem[];
 }
 
-export const RELEASES = (data as { releases: Release[] }).releases;
+export const RELEASES = (data as { releases: Release[] }).releases.map((r) => ({
+  ...r,
+  items: r.items.filter((it) => !it.only || it.only === (isWindows ? "windows" : "mac")),
+}));
 
 /** Texte dans la langue de l'interface. */
 export function tx(x: Text): string {

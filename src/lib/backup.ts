@@ -6,6 +6,7 @@ import { create } from "zustand";
 import { api, errorText, isTauri } from "./api";
 import { useChat } from "./chat";
 import { count, isEn, locale, t } from "./i18n";
+import { inFolder, isWindows, pathParts } from "./platform";
 import { formatBytes, formatNumber, useApp } from "./store";
 import type { BackupInfo, BackupPlace, BackupRestored, BackupStatus } from "./types";
 
@@ -218,7 +219,10 @@ export function statusLine(s: BackupStatus, saving: boolean): string {
     return s.decided
       ? t("Désactivée : votre progression ne vit que sur ce Mac.", "Off: your progress only lives on this Mac.")
       : t("Activez-la pour mettre votre progression à l'abri.", "Turn it on to keep your progress safe.");
-  if (!s.dir) return t("iCloud Drive n'est pas activé sur ce Mac : choisissez un dossier.", "iCloud Drive isn't turned on on this Mac: choose a folder.");
+  if (!s.dir)
+    return isWindows
+      ? t("Choisissez où sauvegarder : OneDrive, un autre nuage ou un dossier.", "Choose where to back up: OneDrive, another cloud or a folder.")
+      : t("iCloud Drive n'est pas activé sur ce Mac : choisissez un dossier.", "iCloud Drive isn't turned on on this Mac: choose a folder.");
   if (s.last_at === null) return t("Activée : la première copie se fera dès votre première lecture.", "On: the first copy will be made as soon as you start reading.");
   const parts = [t(`Sauvegardée ${formatWhen(s.last_at)}`, `Backed up ${formatWhen(s.last_at)}`), formatBytes(s.size + s.media_size)];
   const cloud = cloudText(s);
@@ -231,12 +235,13 @@ export function placeLabel(s: BackupStatus): string {
   if (!s.dir) return t("Aucun", "None");
   if (s.icloud) return "iCloud Drive › Lumen";
   const p = s.place;
-  if (p && (isCloud(p) || p.kind === "drive") && s.dir.startsWith(`${p.path}/`)) {
-    return [p.name, ...s.dir.slice(p.path.length).split("/").filter(Boolean)].join(" › ");
+  if (p && (isCloud(p) || p.kind === "drive") && inFolder(s.dir, p.path) && s.dir.length > p.path.length) {
+    return [p.name, ...pathParts(s.dir.slice(p.path.length))].join(" › ");
   }
-  const home = s.dir.match(/^\/Users\/[^/]+/)?.[0];
+  // dans le dossier personnel (« /Users/léa », « C:\Users\léa ») : à partir de lui
+  const home = s.dir.match(/^(?:[A-Za-z]:)?[\\/]Users[\\/][^\\/]+/)?.[0];
   const rel = home ? s.dir.slice(home.length + 1) : s.dir;
-  return rel.split("/").filter(Boolean).slice(-3).join(" › ");
+  return pathParts(rel).slice(-3).join(" › ");
 }
 
 /** Dossier à retenir pour un nuage du Mac ("" : iCloud Drive ; null : impossible, déjà signalé). */
@@ -253,12 +258,12 @@ export async function placeDir(p: BackupPlace): Promise<string | null> {
 /** Ce nuage est-il celui de la sauvegarde ? */
 export function isPlaceOf(s: BackupStatus, p: BackupPlace): boolean {
   if (p.kind === "icloud") return s.icloud;
-  return !s.icloud && !!s.dir && (s.dir === p.path || s.dir.startsWith(`${p.path}/`));
+  return !s.icloud && !!s.dir && inFolder(s.dir, p.path);
 }
 
 /** Choisit un autre dossier (clé USB, disque, NAS, ou un nuage qui n'est pas proposé). */
 export async function pickBackupFolder(): Promise<string | null> {
-  if (!isTauri) return t("/Users/vous/Dropbox", "/Users/you/Dropbox");
+  if (!isTauri) return isWindows ? t("C:\\Users\\vous\\Dropbox", "C:\\Users\\you\\Dropbox") : t("/Users/vous/Dropbox", "/Users/you/Dropbox");
   const { open } = await import("@tauri-apps/plugin-dialog");
   const res = await open({ directory: true, multiple: false, title: t("Dossier de sauvegarde de Lumen", "Lumen backup folder") });
   return typeof res === "string" ? res : null;

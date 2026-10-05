@@ -7,12 +7,13 @@ import { api } from "../../lib/api";
 import { attachedLesson, efforts, langWithArticle, suggestions, useChat, type LessonRef, type Pending, type Suggestion } from "../../lib/chat";
 import { count, t } from "../../lib/i18n";
 import { inLang } from "../../lib/langs";
+import { useOnline } from "../../lib/online";
 import { useApp } from "../../lib/store";
 import type { ChatEffort, ChatMessage, LangCode, LessonSummary } from "../../lib/types";
 import { useUserName } from "../../lib/user";
 
 /**
- * Conversation avec l'IA locale : messages, réponse qui s'écrit, réflexion,
+ * Conversation avec l'IA (sur ce Mac ou en ligne) : messages, réponse qui s'écrit, réflexion,
  * champ de saisie. Sert dans la vue Chat et, en plus étroit (`compact`), à
  * côté du texte dans le lecteur. `lessonNow` : la leçon ouverte, que `/leçon`
  * joint d'un coup.
@@ -25,6 +26,7 @@ export function ChatThread({ compact = false, lessonNow = null }: { compact?: bo
   const appLang = useApp((s) => s.lang)();
   const lang = useChat((s) => s.lang) ?? appLang;
   const openSettings = useApp((s) => s.openSettings);
+  const onlineChat = useOnline().chat;
   const messages = thread?.messages ?? [];
   const mine = pending && pending.chatId === thread?.chat.id ? pending : null;
   const lesson = attachedLesson({ thread, draftLesson });
@@ -58,9 +60,9 @@ export function ChatThread({ compact = false, lessonNow = null }: { compact?: bo
           {error && (
             <motion.div className="chat-error" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }}>
               <span>{error.text}</span>
-              {error.noModel && (
+              {(error.noModel || onlineChat) && (
                 <button className="btn sm soft" onClick={() => openSettings("ai")}>
-                  {t("Installer un modèle", "Install a model")}
+                  {error.noModel ? t("Installer un modèle", "Install a model") : t("Réglages de l'IA", "AI settings")}
                 </button>
               )}
             </motion.div>
@@ -75,6 +77,7 @@ export function ChatThread({ compact = false, lessonNow = null }: { compact?: bo
 // ---------- messages ----------
 
 function Welcome({ lang, lesson, compact }: { lang: LangCode; lesson: LessonRef | null; compact: boolean }) {
+  const online = useOnline();
   const send = useChat((s) => s.send);
   const busy = useChat((s) => !!s.pending);
   const items = suggestions(lang, !!lesson);
@@ -128,7 +131,16 @@ function Welcome({ lang, lesson, compact }: { lang: LangCode; lesson: LessonRef 
         ))}
       </div>
       <p className="chat-private">
-        <span className="dot ok" /> {t("Calculé sur votre Mac, rien ne quitte votre ordinateur", "Computed on your Mac, nothing leaves your computer")}
+        {online.chat ? (
+          <>
+            <span className="dot online" />{" "}
+            {t(`${online.provider.name} répond, en ligne : vos questions et la leçon jointe lui sont envoyées`, `${online.provider.name} answers, online: your questions and the attached lesson are sent to it`)}
+          </>
+        ) : (
+          <>
+            <span className="dot ok" /> {t("Calculé sur votre Mac, rien ne quitte votre ordinateur", "Computed on your Mac, nothing leaves your computer")}
+          </>
+        )}
       </p>
     </motion.div>
   );

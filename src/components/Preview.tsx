@@ -7,6 +7,7 @@ import { count, formatNumber, t } from "../lib/i18n";
 import { extractArticle, firstWords, wordCount } from "../lib/importers";
 import { stageText, useImports, useJob } from "../lib/imports";
 import { LANGS, inLang } from "../lib/langs";
+import { isWindows } from "../lib/platform";
 import { jobOf, usePreview, type Previewable } from "../lib/preview";
 import { formatBytes, formatDuration, useApp } from "../lib/store";
 import type { LangCode, Lyrics, MediaStream, TextStats } from "../lib/types";
@@ -128,6 +129,42 @@ function LyricsView({ lyrics, time, live }: { lyrics: Lyrics; time: number; live
 
 const SPEEDS = [1, 0.85, 0.7];
 
+/** Flux HLS (YouTube : `hls_playlist`, Dailymotion : `.m3u8`). */
+const isHls = (url: string) => /\.m3u8|hls_playlist|\/hls\//i.test(url);
+
+/**
+ * Sous Windows, le moteur de la fenêtre (WebView2) ne lit pas toujours le HLS,
+ * que celui du Mac lit tel quel : hls.js s'en charge alors, chargé seulement ce
+ * jour-là. Ailleurs, l'adresse va directement à l'élément (`src` du rendu).
+ */
+function useWindowsSource(el: React.RefObject<HTMLMediaElement | null>, url: string) {
+  useEffect(() => {
+    const media = el.current;
+    if (!isWindows || !media || !url) return;
+    if (!isHls(url) || media.canPlayType("application/vnd.apple.mpegurl")) {
+      media.src = url;
+      return;
+    }
+    let hls: { destroy(): void } | null = null;
+    let gone = false;
+    void import("hls.js/light").then(({ default: Hls }) => {
+      if (gone) return;
+      if (!Hls.isSupported()) {
+        media.src = url;
+        return;
+      }
+      const h = new Hls();
+      h.loadSource(url);
+      h.attachMedia(media);
+      hls = h;
+    });
+    return () => {
+      gone = true;
+      hls?.destroy();
+    };
+  }, [el, url]);
+}
+
 /** Vidéo (muette si le son est à part, qu'elle suit) ou son seul, avec ses commandes. */
 function Player({ source, poster, cover, known, onTime }: { source: MediaStream; poster: string; cover?: React.ReactNode; known: number; onTime?(t: number): void }) {
   const video = useRef<HTMLVideoElement>(null);
@@ -141,6 +178,8 @@ function Player({ source, poster, cover, known, onTime }: { source: MediaStream;
   const [speed, setSpeed] = useState(1);
   const [waiting, setWaiting] = useState(true);
   const [failed, setFailed] = useState(false);
+  useWindowsSource(video, source.video);
+  useWindowsSource(audio, source.audio);
 
   // le son est le maître : la vidéo muette le suit (même correction que dans les leçons)
   useEffect(() => {
@@ -225,7 +264,7 @@ function Player({ source, poster, cover, known, onTime }: { source: MediaStream;
         <video
           ref={video}
           className="pv-video"
-          src={source.video}
+          src={isWindows ? undefined : source.video}
           poster={poster || undefined}
           playsInline
           autoPlay={!dual}
@@ -236,7 +275,7 @@ function Player({ source, poster, cover, known, onTime }: { source: MediaStream;
       ) : (
         cover
       )}
-      {source.audio && <audio ref={audio} src={source.audio} autoPlay muted={muted} {...events} />}
+      {source.audio && <audio ref={audio} src={isWindows ? undefined : source.audio} autoPlay muted={muted} {...events} />}
       {failed && (
         <div className="pv-failed">
           <Icon name="ban" size={18} /> {t("La lecture n'a pas pu commencer.", "Playback couldn't start.")}

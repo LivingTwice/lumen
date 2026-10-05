@@ -43,6 +43,13 @@ export const DEFAULTS: Record<string, string> = {
   tts_rate: "0.95",
   llm_model: "qwen3.5-2b",
   asr_model: "whisper-turbo",
+  // IA en ligne (lib/online.ts) : "1" quand l'apprenant la choisit ; fournisseur, et ce
+  // qu'elle prend en charge ("0" : reste sur ce Mac). Clés, modèles et adresse : `online_*`,
+  // propres à ce Mac (ni sauvegardés ni restaurés)
+  online_on: "",
+  online_provider: "deepseek",
+  online_words: "1",
+  online_chat: "1",
   // chat : réflexion du modèle avant de répondre, et sa longueur
   chat_think: "0",
   chat_effort: "medium",

@@ -14,6 +14,7 @@ import { pickFiles, pickSavePath } from "./dialogs";
 import { isEn, t } from "./i18n";
 import { MEDIA_EXT, TEXT_EXT } from "./importers";
 import { langInfo } from "./langs";
+import { isWindows, joinPath } from "./platform";
 import { LOOK_DEFAULTS, PAPERS, playbackRates, READ_FONTS, SIZE_MAX, SIZE_MIN } from "./reading";
 import { useApp, type View } from "./store";
 import { useUpdate } from "./updater";
@@ -160,7 +161,7 @@ async function revealData() {
   const dir = useApp.getState().info?.data_dir;
   if (!dir || !isTauri) return;
   const { revealItemInDir } = await import("@tauri-apps/plugin-opener");
-  await revealItemInDir(`${dir}/lumen.db`).catch(() => {});
+  await revealItemInDir(joinPath(dir, "lumen.db")).catch(() => {});
 }
 
 async function switchLang(code: LangCode) {
@@ -171,6 +172,25 @@ async function switchLang(code: LangCode) {
   const v = app.view;
   // une leçon, une conversation ou une playlist d'une autre langue n'ont plus leur place
   app.go(v === "reader" || v === "chat" || v === "playlists" ? "library" : v);
+}
+
+/** Rouvre la leçon en cours (celle du dernier lancement, s'il le faut). */
+function resumeLesson() {
+  const a = useApp.getState();
+  const id = a.lessonId ?? Number(a.settings.last_lesson);
+  if (id) a.openLesson(id);
+}
+
+function toggleSidebar() {
+  const app = useApp.getState();
+  void app.setSetting("reader_sidebar", app.setting("reader_sidebar") === "0" ? "1" : "0");
+}
+
+async function toggleFullscreen() {
+  if (!isTauri) return;
+  const { getCurrentWindow } = await import("@tauri-apps/api/window");
+  const w = getCurrentWindow();
+  await w.setFullscreen(!(await w.isFullscreen()));
 }
 
 function setSize(next: (now: number) => number) {
@@ -343,7 +363,7 @@ function viewMenu(s: Snap): SubmenuOptions {
     sep,
     act(
       sidebar === "0" ? t("Afficher la barre latérale", "Show Sidebar") : t("Masquer la barre latérale", "Hide Sidebar"),
-      () => app().setSetting("reader_sidebar", app().setting("reader_sidebar") === "0" ? "1" : "0"),
+      toggleSidebar,
       // hors leçon, la barre latérale est toujours là
       { key: "Ctrl+CmdOrCtrl+S", on: on && s.view === "reader" },
     ),
@@ -432,13 +452,8 @@ function lessonMenu(s: Snap): SubmenuOptions {
   // mêmes valeurs par défaut que le lecteur
   const rate = (l?.media ? s.look.media_rate : s.look.tts_rate) || (l?.media ? "1" : "0.95");
   const rates = playbackRates(!!l?.media);
-  const resume = () => {
-    const a = app();
-    const id = a.lessonId ?? Number(a.settings.last_lesson);
-    if (id) a.openLesson(id);
-  };
   return sub(t("Leçon", "Lesson"), [
-    act(t("Reprendre la lecture", "Resume Reading"), resume, { key: "CmdOrCtrl+R", on: !s.calm && s.resume }),
+    act(t("Reprendre la lecture", "Resume Reading"), resumeLesson, { key: "CmdOrCtrl+R", on: !s.calm && s.resume }),
     sep,
     act(t("Lire ou mettre en pause", "Play or Pause"), onLesson((a) => a.toggle()), { on }),
     act(t("Reculer de 5 secondes", "Back 5 Seconds"), onLesson((a) => a.skip(-5)), { on: media }),
@@ -536,5 +551,81 @@ export function useAppMenu() {
       unlisten?.();
       window.clearTimeout(timer);
     };
+  }, []);
+}
+
+// ---------- Windows : les raccourcis sans la barre des menus ----------
+
+const VIEW_KEYS: View[] = ["library", "discover", "playlists", "chat", "vocab", "progress"];
+
+/**
+ * Sous Windows, pas de barre des menus : ses raccourcis passent par Ctrl
+ * (Ctrl+N, Ctrl+O, Ctrl+1 à 6…), F11 pour le plein écran, Ctrl+B pour la barre
+ * latérale d'une leçon. Les chiffres se lisent à leur place sur le clavier
+ * (`code`) : sur un clavier AZERTY, Ctrl+1 se tape sans Maj. Les raccourcis du
+ * navigateur (recharger, imprimer, chercher dans la page) n'ont pas leur place
+ * dans une app. Appelé une fois, dans App.
+ */
+export function useWindowsKeys() {
+  useEffect(() => {
+    if (!isWindows) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.defaultPrevented) return;
+      if (e.key === "F11") {
+        e.preventDefault();
+        void toggleFullscreen();
+        return;
+      }
+      // F5 rechargerait l'app (gardé pendant le développement)
+      if (e.key === "F5" && !import.meta.env.DEV) {
+        e.preventDefault();
+        return;
+      }
+      if (!e.ctrlKey || e.metaKey || e.altKey) return;
+      const key = e.key.toLowerCase();
+      if (key === "p" || key === "g" || (key === "r" && e.shiftKey)) {
+        e.preventDefault();
+        return;
+      }
+      const app = useApp.getState();
+      const run = (f: () => unknown) => {
+        e.preventDefault();
+        void f();
+      };
+      // accueil, nouvel accueil ou visite guidée : seulement l'essentiel, comme le menu du Mac
+      if (snapshot().calm) {
+        if (key === "r" || key === "f") e.preventDefault();
+        return;
+      }
+      if (key === "/" || e.code === "Slash") return run(openShortcuts);
+      if (e.shiftKey && key === "n") return run(newChat);
+      if (key === "=" || key === "+" || e.code === "NumpadAdd") return run(() => setSize((v) => v + 1));
+      if (key === "-" || e.code === "NumpadSubtract") return run(() => setSize((v) => v - 1));
+      if (e.code === "Digit0" || e.code === "Numpad0") return run(() => setSize(() => Number(LOOK_DEFAULTS.font_size)));
+      const digit = /^(?:Digit|Numpad)([1-6])$/.exec(e.code);
+      if (digit) return run(() => app.go(VIEW_KEYS[Number(digit[1]) - 1]));
+      if (e.shiftKey) return;
+      switch (key) {
+        case ",":
+          return run(() => app.openSettings());
+        case "n":
+          return run(() => app.openImport(null, "text"));
+        case "o":
+          return run(openFiles);
+        case "l":
+          return run(() => app.openImport(null, "link"));
+        case "s":
+          return run(backupNow);
+        case "f":
+          return run(focusSearch);
+        case "r":
+          return run(resumeLesson);
+        case "b":
+          if (app.view === "reader") run(toggleSidebar);
+          return;
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
   }, []);
 }

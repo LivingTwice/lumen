@@ -484,6 +484,16 @@ export interface GeminiModels {
   tts: string[];
 }
 
+/** Vérification d'une clé d'IA en ligne (miroir de `online::Check`). */
+export interface OnlineCheck {
+  /** modèles de conversation proposés par le fournisseur */
+  models: string[];
+  /** le modèle retenu : celui demandé s'il existe, sinon le conseillé */
+  model: string;
+  /** temps d'une petite réponse, en millisecondes */
+  ms: number;
+}
+
 /** Niveau estimé d'après les mots connus regroupés par lemme (miroir de `level::Estimate`). */
 export interface LevelEstimate {
   /** mots connus tels qu'enregistrés (chaque forme compte) */

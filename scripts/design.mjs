@@ -1,9 +1,12 @@
 // Rend les visuels de design/ et les installe dans l'app :
 //   design/icon.mjs → icon.svg, icon-small.svg → design/icon-1024.png → src-tauri/icons/ (toutes les tailles)
 //   design/dmg-background.html → src-tauri/dmg/background.png (2x, 144 dpi : net sur un écran Retina)
+//   design/nsis-sidebar.html, nsis-header.html → src-tauri/nsis/*.bmp (images de l'installateur Windows)
 // Rendu par un Chromium sans fenêtre : celui de Playwright s'il est installé, sinon Google Chrome.
+//   node scripts/design.mjs        tout
+//   node scripts/design.mjs nsis   seulement les images de l'installateur Windows
 import { execFileSync, spawn } from "node:child_process";
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, statSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -53,6 +56,63 @@ async function render(file, out, w, h, scale = 1) {
 
 const sips = (...args) => execFileSync("sips", args.map(String), { stdio: "ignore" });
 
+/** PNG → BMP 24 bits, sans couche alpha : le seul format que l'installateur NSIS affiche à coup sûr. */
+function bmp24(png, out) {
+  const raw = join(tmp, "raw.bmp");
+  sips("-s", "format", "bmp", png, "--out", raw);
+  const b = readFileSync(raw);
+  const offset = b.readUInt32LE(10);
+  const w = b.readInt32LE(18);
+  const h = b.readInt32LE(22);
+  const bpp = b.readUInt16LE(28);
+  if (bpp !== 24 && bpp !== 32) throw new Error(`BMP de ${bpp} bits inattendu`);
+  const rows = Math.abs(h);
+  const from = Math.ceil((w * bpp) / 32) * 4;
+  const to = Math.ceil((w * 24) / 32) * 4;
+  const px = Buffer.alloc(to * rows);
+  for (let y = 0; y < rows; y++) {
+    // BMP ordinaire : de bas en haut ; hauteur négative : de haut en bas
+    const src = offset + (h < 0 ? rows - 1 - y : y) * from;
+    for (let x = 0; x < w; x++) {
+      const i = src + (x * bpp) / 8;
+      const a = bpp === 32 ? b[i + 3] / 255 : 1;
+      // composée sur blanc, le fond des pages de l'installateur
+      for (let c = 0; c < 3; c++) px[y * to + x * 3 + c] = Math.round(b[i + c] * a + 255 * (1 - a));
+    }
+  }
+  const head = Buffer.alloc(54);
+  head.write("BM", 0);
+  head.writeUInt32LE(54 + px.length, 2);
+  head.writeUInt32LE(54, 10);
+  head.writeUInt32LE(40, 14);
+  head.writeInt32LE(w, 18);
+  head.writeInt32LE(rows, 22);
+  head.writeUInt16LE(1, 26);
+  head.writeUInt16LE(24, 28);
+  head.writeUInt32LE(px.length, 34);
+  head.writeInt32LE(2835, 38);
+  head.writeInt32LE(2835, 42);
+  writeFileSync(out, Buffer.concat([head, px]));
+}
+
+async function installerImages() {
+  console.log("› Images de l'installateur Windows");
+  const dir = join(root, "src-tauri", "nsis");
+  mkdirSync(dir, { recursive: true });
+  for (const [name, w, h] of [["sidebar", 164, 314], ["header", 150, 57]]) {
+    const png = join(tmp, `${name}.png`);
+    await render(join(design, `nsis-${name}.html`), png, w, h);
+    bmp24(png, join(dir, `${name}.bmp`));
+  }
+  console.log("✓ src-tauri/nsis/");
+}
+
+if (process.argv[2] === "nsis") {
+  await installerImages();
+  rmSync(tmp, { recursive: true, force: true });
+  process.exit(0);
+}
+
 // ---------- icône ----------
 console.log("› Icône");
 execFileSync(process.execPath, [join(design, "icon.mjs")]);
@@ -88,5 +148,8 @@ const bg = join(tmp, "background.png");
 await render(join(design, "dmg-background.html"), bg, 660, 420, 2);
 sips("-s", "dpiWidth", 144, "-s", "dpiHeight", 144, bg, "--out", join(root, "src-tauri", "dmg", "background.png"));
 console.log("✓ src-tauri/dmg/background.png");
+
+// ---------- installateur Windows ----------
+await installerImages();
 
 rmSync(tmp, { recursive: true, force: true });

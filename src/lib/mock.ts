@@ -373,6 +373,21 @@ export function createMockApi(): Api {
   const OTHER_MAC: BackupCounts = { known: 4210, learning: 812, phrases: 37, lessons: 52, langs: ["it", "en"] };
   const dayAgo = (n: number) => new Date(Date.now() - n * 86400e3).toISOString().slice(0, 10);
 
+  /** IA en ligne choisie pour ce rôle (miroir de `online::config_from`) : erreur si la clé manque. */
+  const online = (role: "words" | "chat"): boolean => {
+    const s = db.settings;
+    if (s.online_on !== "1" || s[role === "words" ? "online_words" : "online_chat"] === "0") return false;
+    const id = s.online_provider || "deepseek";
+    const names: Record<string, string> = { deepseek: "DeepSeek", gemini: "Gemini", mistral: "Mistral", openai: "OpenAI", anthropic: "Claude", openrouter: "OpenRouter" };
+    if (id === "custom") {
+      if (!s.online_url?.trim()) throw t("Indiquez l'adresse de votre serveur dans Réglages › IA.", "Enter your server's address in Settings › AI.");
+      return true;
+    }
+    const key = id === "gemini" ? s.gemini_key : s[`online_key_${id}`];
+    const name = names[id] ?? "DeepSeek";
+    if (!key?.trim()) throw t(`Ajoutez votre clé ${name} dans Réglages › IA.`, `Add your ${name} key in Settings › AI.`);
+    return true;
+  };
   const fakeStream = async (text: string, onPiece: (t: string) => void) => {
     for (const part of text.match(/.{1,4}/gsu) ?? []) {
       await sleep(18);
@@ -761,7 +776,7 @@ export function createMockApi(): Api {
       return () => dictListeners.delete(onChange);
     },
     async aiWord(_lang, word, _sentence, onPiece) {
-      if (!db.installed.some((m) => m.startsWith("qwen"))) throw t("NO_MODEL:Aucun modèle de traduction n'est installé. Ouvrez Réglages › IA locale.", "NO_MODEL:No translation model is installed. Open Settings › Local AI.");
+      if (!online("words") && !db.installed.some((m) => m.startsWith("qwen"))) throw t("NO_MODEL:Aucun modèle de traduction n'est installé. Ouvrez Réglages › IA.", "NO_MODEL:No translation model is installed. Open Settings › AI.");
       await sleep(250);
       const d = MOCK_DICT[normalize(word)];
       const tr = d ? t(d[2], d[4]).toLowerCase() : t(`« ${word} » (aperçu)`, `“${word}” (preview)`);
@@ -770,10 +785,12 @@ export function createMockApi(): Api {
       return { translation: tr, note, cached: false };
     },
     async aiSentence(_lang, sentence, onPiece) {
+      online("words");
       await sleep(200);
       return fakeStream(t(`[Traduction simulée] ${sentence}`, `[Simulated translation] ${sentence}`), onPiece);
     },
     async aiSimplify(_lang, text, _level, onPiece) {
+      online("chat");
       await sleep(400);
       const simple = text.split(/(?<=[.!?])\s+/).slice(0, 8).join(" ");
       return fakeStream(simple, onPiece);
@@ -814,7 +831,7 @@ export function createMockApi(): Api {
       commit();
     },
     async chatSend(id, text, options, onEvent) {
-      if (!db.installed.some((m) => m.startsWith("qwen"))) throw t("NO_MODEL:Aucun modèle de traduction n'est installé. Ouvrez Réglages › IA locale.", "NO_MODEL:No translation model is installed. Open Settings › Local AI.");
+      if (!online("chat") && !db.installed.some((m) => m.startsWith("qwen"))) throw t("NO_MODEL:Aucun modèle de traduction n'est installé. Ouvrez Réglages › IA.", "NO_MODEL:No translation model is installed. Open Settings › AI.");
       const c = chats().find((x) => x.id === id);
       if (!c) throw t("Cette conversation n'existe plus.", "This conversation no longer exists.");
       chatStops.set(id, false);
@@ -1195,6 +1212,27 @@ export function createMockApi(): Api {
           "Google refuses this Gemini key. Check it in Google AI Studio, then paste it again.",
         );
       return { text: ["gemini-3.8-flash", "gemini-3.5-flash"], tts: ["gemini-3.8-flash-tts", "gemini-3.8-flash-lite-tts"] };
+    },
+    async onlineCheck(provider, key, url, model) {
+      await sleep(800);
+      if (provider === "custom") {
+        if (!/^https?:\/\/[^/]+/.test(url ?? "")) throw t("Cette adresse n'est pas valable. Exemple : http://localhost:11434/v1 pour Ollama.", "This address isn't valid. Example: http://localhost:11434/v1 for Ollama.");
+        const models = ["llama3.2", "qwen3:8b", "gemma3:12b"];
+        return { models, model: model && models.includes(model) ? model : models[0], ms: 1350 };
+      }
+      const name: Record<string, string> = { deepseek: "DeepSeek", gemini: "Gemini", mistral: "Mistral", openai: "OpenAI", anthropic: "Claude", openrouter: "OpenRouter" };
+      if (key.trim().length < 12) throw t(`${name[provider] ?? provider} refuse cette clé. Vérifiez-la, puis collez-la à nouveau (Réglages › IA).`, `${name[provider] ?? provider} refuses this key. Check it, then paste it again (Settings › AI).`);
+      const lists: Record<string, string[]> = {
+        deepseek: ["deepseek-flash", "deepseek-v4-pro"],
+        gemini: ["gemini-3.8-flash", "gemini-3.8-flash-lite", "gemini-3.8-pro"],
+        mistral: ["mistral-large-latest", "mistral-medium-latest", "mistral-small-latest"],
+        openai: ["gpt-5.4", "gpt-5.4-mini", "gpt-5.4-nano"],
+        anthropic: ["claude-haiku-4-5", "claude-sonnet-4-6", "claude-opus-4-8"],
+        openrouter: ["anthropic/claude-haiku-4.5", "deepseek/deepseek-chat", "google/gemini-2.5-flash", "meta-llama/llama-4-maverick"],
+      };
+      const picks: Record<string, string> = { deepseek: "deepseek-flash", gemini: "gemini-3.8-flash", mistral: "mistral-small-latest", openai: "gpt-5.4-mini", anthropic: "claude-haiku-4-5", openrouter: "deepseek/deepseek-chat" };
+      const models = lists[provider] ?? [];
+      return { models, model: model && models.includes(model) ? model : picks[provider] ?? models[0], ms: 640 };
     },
     async podcastCreate(lang, request, onEvent) {
       if (!db.settings.gemini_key) throw t("Ajoutez d'abord votre clé Gemini (Réglages › Podcasts).", "First add your Gemini key (Settings › Podcasts).");

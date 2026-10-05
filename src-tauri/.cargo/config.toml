@@ -1,0 +1,25 @@
+# Options de compilation de llama.cpp et whisper.cpp (variables GGML_*, lues par
+# leurs scripts de compilation), pour une app qui tourne sur tous les Mac et tous les PC.
+# - GGML_NATIVE : jamais le processeur exact de l'ordinateur qui compile (une app
+#   compilée sur une puce M2 utiliserait des instructions que la M1 n'a pas, et planterait).
+# - Windows : l'AVX2 et ses compagnons (Intel depuis 2013, AMD depuis 2015 ; l'app
+#   prévient sur un processeur plus ancien, `ai::cpu_check`). Une compilation sur PC les
+#   active d'elle-même ; depuis un Mac (cargo-xwin), il faut les demander. Sans effet
+#   sur les puces Apple (options propres aux processeurs x86).
+# - Windows encore : le runtime de Visual C++ intégré à l'app, sinon un PC sans « Visual
+#   C++ Redistributable » ne la lancerait pas. Tauri le fait pour l'app (staticVCRuntime,
+#   par défaut : runtime intégré, bibliothèque C de Windows partagée), lumen-whisper/build.rs
+#   de même ; llama.cpp et whisper.cpp sont compilés pour (/MT : LLAMA_STATIC_CRT et
+#   CMAKE_MSVC_RUNTIME_LIBRARY, que whisper.cpp, plus ancien, n'écoute qu'avec la règle
+#   CMP0091). Pas de `crt-static` : il contredirait Tauri. Sans effet sur Mac.
+[env]
+GGML_NATIVE = "OFF"
+GGML_SSE42 = "ON"
+GGML_AVX = "ON"
+GGML_AVX2 = "ON"
+GGML_BMI2 = "ON"
+GGML_FMA = "ON"
+GGML_F16C = "ON"
+LLAMA_STATIC_CRT = "1"
+CMAKE_MSVC_RUNTIME_LIBRARY = "MultiThreaded"
+CMAKE_POLICY_DEFAULT_CMP0091 = "NEW"

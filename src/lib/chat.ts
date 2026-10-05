@@ -1,4 +1,4 @@
-// Chat avec l'IA locale : conversations, réponse en cours, leçon jointe.
+// Chat avec l'IA (sur ce Mac ou en ligne) : conversations, réponse en cours, leçon jointe.
 // L'état vit ici (et non dans une vue) pour que la réponse continue de
 // s'écrire pendant qu'on passe du lecteur à la vue Chat.
 import { create } from "zustand";

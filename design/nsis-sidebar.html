@@ -1,0 +1,52 @@
+<!doctype html>
+<!-- Bandeau de gauche de l'installateur Windows (pages d'accueil et de fin), src-tauri/nsis/sidebar.bmp,
+     rendu par `node scripts/design.mjs`. 164 × 314 pixels, la taille qu'attend NSIS ; à droite, Windows
+     écrit le titre et le texte de la page sur un fond blanc. -->
+<html><head><meta charset="utf-8">
+<style>
+@font-face{font-family:N;src:url('../node_modules/@fontsource-variable/newsreader/files/newsreader-latin-opsz-normal.woff2');font-weight:200 800}
+html,body{margin:0;width:164px;height:314px;overflow:hidden}
+body{background:#fbf7f1;position:relative;color:#1d1a17;-webkit-font-smoothing:antialiased}
+
+/* ciel d'aube, comme l'accueil de Lumen */
+.b{position:absolute;border-radius:50%;filter:blur(36px)}
+.b1{width:190px;height:170px;left:-70px;top:-70px;background:#ffc56b;opacity:.55}
+.b2{width:160px;height:150px;right:-80px;top:20px;background:#ff9f6e;opacity:.32}
+.b3{width:200px;height:150px;left:-60px;top:170px;background:#ffe2a0;opacity:.6}
+.b4{width:170px;height:140px;right:-70px;top:230px;background:#f6a3b4;opacity:.28}
+
+/* l'astre qui se lève derrière l'horizon */
+.sun{position:absolute;left:50%;top:214px;width:300px;height:190px;transform:translateX(-50%);border-radius:50%;
+  background:radial-gradient(closest-side,rgba(255,200,130,.95),rgba(255,178,100,.45) 45%,rgba(255,182,104,0) 100%)}
+.disc{position:absolute;left:50%;top:190px;width:46px;height:46px;transform:translateX(-50%);border-radius:50%;
+  background:radial-gradient(circle at 42% 38%,#fff 0%,#fff3dc 36%,#ffc67f 76%,#f6a04f 100%);
+  box-shadow:0 0 22px 6px rgba(255,186,104,.55),0 0 60px 18px rgba(255,196,120,.3)}
+.ground{position:absolute;left:0;right:0;top:214px;bottom:0;
+  background:linear-gradient(180deg,rgba(251,247,241,.82),rgba(251,247,241,.96) 40%,#fbf7f1)}
+/* son reflet, adouci, sous l'horizon */
+.reflect{position:absolute;left:50%;top:216px;width:150px;height:70px;transform:translateX(-50%);border-radius:50%;
+  background:radial-gradient(closest-side,rgba(255,196,120,.38),rgba(255,206,140,.14) 55%,rgba(255,206,140,0));filter:blur(2px)}
+.horizon{position:absolute;left:10px;right:10px;top:214px;height:1px;
+  background:linear-gradient(90deg,rgba(232,145,58,0),rgba(232,145,58,.55) 28%,rgba(255,170,80,.85) 50%,rgba(232,145,58,.55) 72%,rgba(232,145,58,0))}
+.dust{position:absolute;border-radius:50%;background:#f3a254}
+
+.word{position:absolute;left:0;right:0;top:46px;text-align:center;font-family:N;font-size:34px;font-weight:460;
+  letter-spacing:-.025em;line-height:1;font-variation-settings:"opsz" 72}
+.line{position:absolute;left:50%;top:92px;width:34px;height:1px;transform:translateX(-50%);
+  background:linear-gradient(90deg,rgba(232,145,58,0),rgba(232,145,58,.7),rgba(232,145,58,0))}
+.grain{position:absolute;inset:0;opacity:.06;mix-blend-mode:multiply;background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='200' height='200'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/><feColorMatrix type='saturate' values='0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>")}
+</style></head><body>
+<div class="b b1"></div><div class="b b2"></div><div class="b b3"></div><div class="b b4"></div>
+<div class="sun"></div>
+<div class="disc"></div>
+<div class="ground"></div>
+<div class="reflect"></div>
+<div class="horizon"></div>
+<div class="dust" style="left:40px;top:150px;width:2px;height:2px;opacity:.45"></div>
+<div class="dust" style="left:118px;top:132px;width:3px;height:3px;opacity:.35"></div>
+<div class="dust" style="left:96px;top:166px;width:2px;height:2px;opacity:.55"></div>
+<div class="dust" style="left:58px;top:118px;width:1.5px;height:1.5px;opacity:.4"></div>
+<div class="word">Lumen</div>
+<div class="line"></div>
+<div class="grain"></div>
+</body></html>

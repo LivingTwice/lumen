@@ -1,0 +1,41 @@
+# Lumen sur un vrai Windows (à la demande, onglet « Actions » du dépôt) : les tests,
+# dont ceux propres à Windows (Media Foundation, manifeste de la voix, registre, nuages),
+# puis l'installateur compilé par les outils de Microsoft, sans signature de mise à jour
+# (la clé ne quitte jamais le Mac). La version publiée, elle, est compilée sur le Mac
+# (scripts/build-windows.mjs).
+name: Windows
+
+on:
+  workflow_dispatch:
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Dépendances
+        run: npm ci
+
+      - name: Tests
+        working-directory: src-tauri
+        run: cargo test --lib --release
+
+      - name: Installateur
+        shell: bash
+        run: |
+          node scripts/build-sidecar.mjs
+          npx tauri build --bundles nsis --config '{"bundle":{"createUpdaterArtifacts":false}}'
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lumen-windows
+          path: src-tauri/target/release/bundle/nsis/*.exe

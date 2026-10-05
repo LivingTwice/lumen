@@ -1534,14 +1534,19 @@ pub async fn fetch_cover(data_dir: &Path, url: &str) -> Option<PathBuf> {
     let out = dir.join(format!("{stem}.cover.jpg"));
     std::fs::write(&raw, &bytes).ok()?;
     // outil d'images de macOS : réduit et convertit en JPEG
-    let sips = tokio::process::Command::new("/usr/bin/sips")
+    #[cfg(not(windows))]
+    let shrunk = tokio::process::Command::new("/usr/bin/sips")
         .args(["-Z", "1280", "-s", "format", "jpeg", "-s", "formatOptions", "85"])
         .arg(&raw)
         .arg("--out")
         .arg(&out)
         .output()
-        .await;
-    if sips.is_ok_and(|o| o.status.success()) && out.exists() {
+        .await
+        .is_ok_and(|o| o.status.success());
+    // Windows : la même chose, ici
+    #[cfg(windows)]
+    let shrunk = shrink_image(&bytes).is_some_and(|jpg| std::fs::write(&out, jpg).is_ok());
+    if shrunk && out.exists() {
         let _ = std::fs::remove_file(&raw);
         return Some(out);
     }
@@ -1551,9 +1556,33 @@ pub async fn fetch_cover(data_dir: &Path, url: &str) -> Option<PathBuf> {
     Some(kept)
 }
 
+/// Réduit une image à 1 280 px au plus et la convertit en JPEG (qualité 85),
+/// comme `sips` sur Mac.
+#[cfg(any(windows, test))]
+pub(crate) fn shrink_image(bytes: &[u8]) -> Option<Vec<u8>> {
+    let img = image::load_from_memory(bytes).ok()?;
+    let img = if img.width() > 1280 || img.height() > 1280 { img.resize(1280, 1280, image::imageops::FilterType::Lanczos3) } else { img };
+    let mut out = Vec::new();
+    image::codecs::jpeg::JpegEncoder::new_with_quality(&mut out, 85).encode_image(&img.to_rgb8()).ok()?;
+    Some(out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn covers_are_shrunk_to_jpeg() {
+        // une grande image PNG devient un JPEG de 1 280 px au plus, proportions gardées
+        let big = image::RgbImage::from_fn(2560, 1440, |x, y| image::Rgb([(x % 256) as u8, (y % 256) as u8, 120]));
+        let mut png = Vec::new();
+        image::DynamicImage::ImageRgb8(big).write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png).unwrap();
+        let jpg = shrink_image(&png).expect("image réduite");
+        let back = image::load_from_memory(&jpg).unwrap();
+        assert_eq!((back.width(), back.height()), (1280, 720));
+        assert_eq!(image::guess_format(&jpg).unwrap(), image::ImageFormat::Jpeg);
+        assert!(shrink_image(b"pas une image").is_none());
+    }
 
     #[test]
     fn addresses_are_completed() {

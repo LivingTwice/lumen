@@ -6,12 +6,13 @@ import { News, useNewsOnUpdate } from "./components/News";
 import { Tour } from "./components/Tour";
 import { Shortcuts } from "./components/Shortcuts";
 import { Sidebar } from "./components/Sidebar";
+import { WindowControls } from "./components/WindowControls";
 import { Orb, Toasts } from "./components/ui";
 import { isTauri } from "./lib/api";
 import { MEDIA_EXT, TEXT_EXT, extOf } from "./lib/importers";
 import { startBackupEvents } from "./lib/backup";
 import { setUiLang, t, type UiLang } from "./lib/i18n";
-import { useAppMenu } from "./lib/menu";
+import { useAppMenu, useWindowsKeys } from "./lib/menu";
 import { useApp } from "./lib/store";
 import { startUpdateChecks } from "./lib/updater";
 import { ImportSheet } from "./views/ImportSheet";
@@ -96,8 +97,10 @@ export function App() {
   }, [sideHidden]);
 
   useTheme();
-  // barre des menus du Mac, dans la langue de Lumen et à jour de son état
+  // barre des menus du Mac, dans la langue de Lumen et à jour de son état ;
+  // sous Windows, ses raccourcis (Ctrl) sans barre des menus
   useAppMenu();
+  useWindowsKeys();
   const dropping = useFileDrop(ready && !!onboarded);
   // après une mise à jour : ce qui a changé
   useNewsOnUpdate();
@@ -123,25 +126,38 @@ export function App() {
     return () => window.removeEventListener("contextmenu", block);
   }, []);
 
+  // sous Windows, les boutons de la fenêtre restent en haut à droite, quel que soit l'écran
   if (failed) {
     return (
-      <div className="empty" style={{ height: "100%", justifyContent: "center" }}>
-        <Orb size={40} />
-        <h3>{t("Lumen n'a pas pu démarrer", "Lumen couldn't start")}</h3>
-        <p>{failed}</p>
-      </div>
+      <>
+        <div className="empty drag" data-tauri-drag-region style={{ height: "100%", justifyContent: "center" }}>
+          <Orb size={40} />
+          <h3>{t("Lumen n'a pas pu démarrer", "Lumen couldn't start")}</h3>
+          <p>{failed}</p>
+        </div>
+        <WindowControls />
+      </>
     );
   }
 
   if (!ready) {
     return (
-      <div style={{ height: "100%", display: "grid", placeItems: "center", background: "var(--bg)" }}>
-        <Orb size={34} />
-      </div>
+      <>
+        <div className="drag" data-tauri-drag-region style={{ height: "100%", display: "grid", placeItems: "center", background: "var(--bg)" }}>
+          <Orb size={34} />
+        </div>
+        <WindowControls />
+      </>
     );
   }
 
-  if (!onboarded || replay) return <Onboarding />;
+  if (!onboarded || replay)
+    return (
+      <>
+        <Onboarding />
+        <WindowControls />
+      </>
+    );
 
   // changer de langue remonte toute l'interface : chaque texte se recalcule
   return (
@@ -177,6 +193,7 @@ export function App() {
       <Tour />
       <Shortcuts />
       <Toasts />
+      <WindowControls />
       <AnimatePresence>
         {dropping && (
           <motion.div className="dropzone-overlay" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
