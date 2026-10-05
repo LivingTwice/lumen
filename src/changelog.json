@@ -1,6 +1,66 @@
 {
-  "_lisezmoi": "Nouveautés montrées après chaque mise à jour (components/News.tsx) et notes de publication. Ajouter ce qui change sous la version \"next\" au fil du travail ; « Publier une version » lui donne son numéro et sa date. Icônes : noms de components/Icon.tsx. Actions : \"tour\" (visite guidée), \"guide\", \"settings:<page>\" (general, langs, reading, voice, discover, podcasts, ai, videos, backup, lingq, about), \"import:<onglet>\" (text, link, file, media, podcast), \"view:<vue>\" (library, discover, playlists, chat, vocab, progress).",
+  "_lisezmoi": "Nouveautés montrées après chaque mise à jour (components/News.tsx) et notes de publication. Ajouter ce qui change sous la version \"next\" au fil du travail ; « Publier une version » lui donne son numéro et sa date. Icônes : noms de components/Icon.tsx. Actions : \"tour\" (visite guidée), \"guide\", \"settings:<page>\" (profile, general, langs, reading, voice, discover, podcasts, ai, videos, backup, lingq, about), \"import:<onglet>\" (text, link, file, media, podcast), \"view:<vue>\" (library, discover, playlists, chat, vocab, progress).",
   "releases": [
+    {
+      "version": "0.6.0",
+      "date": "2026-10-05",
+      "title": { "fr": "Un profil à vous", "en": "A profile of your own" },
+      "items": [
+        {
+          "icon": "user",
+          "title": { "fr": "Votre profil : un nom, un avatar", "en": "Your profile: a name, an avatar" },
+          "body": {
+            "fr": "Dans Réglages › Profil, choisissez comment Lumen vous appelle, et votre avatar : une lumière à vous (aube, halo, aurore ou nuit, dans la teinte de votre choix), votre initiale ou une photo. Il vous accompagne dans la barre latérale, et la bibliothèque vous salue par votre nom. Pas de compte, pas de communauté : personne d'autre ne le voit.",
+            "en": "In Settings › Profile, choose what Lumen calls you, and your avatar: a light of your own (dawn, halo, aurora or night, in the hue you like), your initial or a photo. It stays with you in the sidebar, and the library greets you by name. No account, no community: no one else sees it."
+          },
+          "action": "settings:profile"
+        },
+        {
+          "icon": "chat",
+          "title": { "fr": "Un chat qui vous connaît", "en": "A chat that knows you" },
+          "body": {
+            "fr": "Dites ce qui vous fait apprendre et ce qui vous passionne : le chat de votre Mac s'en inspire quand vous lui demandez de choisir un sujet ou des exemples, vous appelle par votre nom et fait les bons accords (« prête » ou « prêt », « pronta » ou « pronto »). Vos centres d'intérêt reviennent aussi comme idées de podcasts sur mesure, et la phrase qui vous motive vous attend dans Progrès.",
+            "en": "Tell Lumen why you're learning and what you love: your Mac's chat draws on it when you ask it to choose a topic or examples, calls you by name and gets the agreement right (“pronta” or “pronto”). Your interests also come back as custom podcast ideas, and the sentence that motivates you is waiting for you in Progress."
+          }
+        },
+        {
+          "icon": "chat",
+          "title": { "fr": "C'est vous qui menez la conversation", "en": "You lead the conversation" },
+          "body": {
+            "fr": "Le chat répond à ce que vous demandez, puis s'arrête : plus d'exercice, de question ni de proposition que vous n'avez pas demandés, et vos centres d'intérêt ne détournent plus ses réponses. Pour converser, « Discutons en italien de… » attend votre sujet dans le champ. Quand vous écrivez dans la langue étudiée, les corrections n'apparaissent que s'il y a des fautes.",
+            "en": "The chat answers what you ask, then stops: no more exercises, questions or offers you didn't ask for, and your interests no longer steer its answers. To have a conversation, “Let's chat in Italian about…” waits for your topic in the field. When you write in the language you're learning, corrections only appear if there are mistakes."
+          },
+          "action": "view:chat"
+        },
+        {
+          "icon": "keyboard",
+          "title": { "fr": "Les menus du Mac", "en": "The Mac menu bar" },
+          "body": {
+            "fr": "Lumen a ses vrais menus, en français ou en anglais. Fichier : ouvrir un fichier (⌘O), importer un lien (⌘L), exporter le vocabulaire, sauvegarder maintenant (⌘S). Présentation : passer d'une vue à l'autre (⌘1 à ⌘6), changer de langue étudiée ou d'apparence. Format : police, couleur de la page, taille du texte (⌘= et ⌘-). Leçon : reprendre la lecture (⌘R), la vitesse, reculer de 5 secondes, ajouter à une playlist, changer la couverture ou supprimer la leçon sans quitter la page. Aide › Raccourcis clavier (⌘/) les réunit tous, avec ceux du lecteur.",
+            "en": "Lumen has real menus, in English or French. File: open a file (⌘O), import a link (⌘L), export your vocabulary, back up now (⌘S). View: switch views (⌘1 to ⌘6), change the language you're learning or the appearance. Format: font, page color, text size (⌘= and ⌘-). Lesson: resume reading (⌘R), speed, go back 5 seconds, add to a playlist, change the cover or delete the lesson without leaving the page. Help › Keyboard Shortcuts (⌘/) gathers them all, along with the reader's."
+          },
+          "action": "settings:about"
+        },
+        {
+          "icon": "cloud",
+          "title": { "fr": "Sauvegarder dans le nuage de votre choix", "en": "Back up to the cloud you use" },
+          "body": {
+            "fr": "Réglages › Sauvegarde montre les nuages installés sur votre Mac : iCloud Drive, Dropbox, Google Drive, OneDrive, Box, Proton Drive… Un clic, et la sauvegarde y part ; le service l'envoie lui-même dans votre compte, sans serveur de Lumen. Sans iCloud Drive, Lumen propose d'emblée l'un des autres, et à l'accueil, une progression se retrouve dans chacun d'eux. Une clé USB ou un disque restent possibles.",
+            "en": "Settings › Backup shows the clouds installed on your Mac: iCloud Drive, Dropbox, Google Drive, OneDrive, Box, Proton Drive… One click, and the backup goes there; the service itself sends it to your account, with no Lumen server. Without iCloud Drive, Lumen offers one of the others right away, and on the welcome screen your progress can be found in any of them. A USB drive or a disk still work too."
+          },
+          "action": "settings:backup"
+        },
+        {
+          "icon": "user",
+          "title": { "fr": "D'un Mac à l'autre", "en": "From one Mac to the next" },
+          "body": {
+            "fr": "Votre profil part avec la sauvegarde de votre progression. Sur un nouveau Mac, vous reconnaissez la vôtre à votre nom et à votre avatar, et Lumen vous souhaite un bon retour.",
+            "en": "Your profile goes with the backup of your progress. On a new Mac, you recognize yours by your name and avatar, and Lumen welcomes you back."
+          },
+          "action": "settings:backup"
+        }
+      ]
+    },
     {
       "version": "0.5.0",
       "date": "2026-10-04",

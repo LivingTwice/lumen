@@ -395,6 +395,7 @@ export function SearchBar({ lang }: { lang: LangCode }) {
       >
         <Icon name={link ? "link" : "search"} size={19} />
         <input
+          data-find
           ref={input}
           value={text}
           onChange={(e) => setText(e.target.value)}

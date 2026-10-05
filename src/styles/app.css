@@ -339,6 +339,24 @@ p {
   letter-spacing: 0.01em;
 }
 
+/* l'avatar de l'apprenant, à droite du nom de Lumen : il mène à son profil */
+.brand .side-me {
+  margin-left: auto;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  display: grid;
+  transition: box-shadow 0.3s ease, transform 0.18s ease;
+}
+.side-me:hover,
+.side-me.on {
+  box-shadow: 0 0 0 1.5px var(--light-strong), 0 0 16px var(--light-soft);
+}
+.side-me:active {
+  transform: scale(0.94);
+}
+
 .lang-switch {
   margin: 0 12px 14px;
   position: relative;
@@ -656,6 +674,42 @@ p {
   }
 }
 
+/* ---------- avatar de l'apprenant (components/Avatar.tsx) ---------- */
+
+.avatar {
+  position: relative;
+  display: inline-block;
+  flex-shrink: 0;
+  border-radius: 50%;
+  overflow: hidden;
+  isolation: isolate;
+  background: var(--chip-hover);
+  color: var(--muted);
+}
+/* fin liseré de lumière, par-dessus l'image */
+.avatar::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--text) 9%, transparent), inset 0 1px 0 rgba(255, 255, 255, 0.18);
+  pointer-events: none;
+}
+.avatar-face {
+  position: absolute;
+  inset: 0;
+  display: block;
+}
+.avatar-svg,
+.avatar-img {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+.avatar-img {
+  object-fit: cover;
+}
+
 /* ---------- boutons et contrôles ---------- */
 
 .btn {
@@ -927,6 +981,49 @@ button.chip.on {
   color: var(--muted);
 }
 
+/* raccourcis clavier (menu Aide › Raccourcis clavier) */
+.keys-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 24px 36px;
+}
+.keys-group ul {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+}
+.keys-group li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 7px 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 13.5px;
+}
+.keys-group li:last-child {
+  border-bottom: 0;
+}
+.keys {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+.keys .kbd {
+  min-width: 22px;
+  height: 22px;
+  font-size: 12px;
+  font-family: var(--font-ui);
+  color: var(--text);
+  background: var(--raised);
+}
+.keys-or {
+  margin: 0 3px;
+  font-size: 11px;
+  color: var(--faint);
+}
+
 /* ---------- typographie ---------- */
 
 .eyebrow {
@@ -967,6 +1064,25 @@ button.chip.on {
   margin-top: 8px;
   color: var(--muted);
   font-size: 14.5px;
+}
+/* Progrès : ce qui fait apprendre (profil), comme une phrase notée pour soi */
+.page-head p.page-why {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 12px;
+  font-family: var(--font-read);
+  font-style: italic;
+  font-size: 15.5px;
+  color: var(--text);
+}
+.page-why-mark {
+  width: 7px;
+  height: 7px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: var(--light-strong);
+  box-shadow: 0 0 0 3px var(--light-veil), 0 0 12px var(--light);
 }
 
 /* ---------- cartes ---------- */

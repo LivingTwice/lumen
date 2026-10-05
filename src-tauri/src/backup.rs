@@ -1,5 +1,6 @@
-//! Sauvegarde de la progression dans iCloud Drive, ou dans tout dossier
-//! synchronisé choisi par l'utilisateur (Dropbox, Google Drive, clé USB…).
+//! Sauvegarde de la progression dans iCloud Drive, ou dans un autre nuage
+//! installé sur le Mac (Dropbox, Google Drive, OneDrive… : `places`), ou dans
+//! tout dossier choisi par l'utilisateur (clé USB, disque réseau).
 //! Rien ne passe par un serveur de Lumen : macOS envoie lui-même le dossier
 //! dans le nuage de l'utilisateur, gratuitement dans la limite de son forfait.
 //!
@@ -34,6 +35,7 @@ use sha2::{Digest, Sha256};
 use crate::db;
 use crate::media::{self, ImportEvent};
 use crate::state::AppState;
+use crate::user;
 
 const ROOT_NAME: &str = "Lumen";
 const MEDIA: &str = "Médias";
@@ -125,6 +127,9 @@ pub struct Manifest {
     /// fichiers de Médias/ dont cette version a besoin
     pub media: Vec<String>,
     pub media_size: u64,
+    /// nom et avatar de l'apprenant (absents des sauvegardes d'avant le profil)
+    #[serde(flatten)]
+    pub user: user::Card,
 }
 
 #[derive(Serialize, Clone, Debug, Default)]
@@ -136,6 +141,8 @@ pub struct Status {
     pub dir: Option<String>,
     pub icloud: bool,
     pub icloud_available: bool,
+    /// le nuage (ou le disque, le dossier) qui reçoit la sauvegarde
+    pub place: Place,
     pub running: bool,
     pub last_at: Option<i64>,
     pub size: u64,
@@ -175,6 +182,9 @@ pub struct Info {
     pub versions: Vec<Version>,
     /// faite par une version plus récente de Lumen
     pub newer: bool,
+    /// nom et avatar de l'apprenant
+    #[serde(flatten)]
+    pub user: user::Card,
 }
 
 #[derive(Serialize, Clone, Debug)]
@@ -215,6 +225,207 @@ pub fn root(custom: &str) -> Option<PathBuf> {
         return Some(if p.file_name().is_some_and(|n| n == ROOT_NAME) { p } else { p.join(ROOT_NAME) });
     }
     icloud_drive().map(|d| d.join(ROOT_NAME))
+}
+
+// ---------- nuages installés : Dropbox, Google Drive, OneDrive… ----------
+
+/// Un nuage de ce Mac où la sauvegarde peut aller.
+#[derive(Serialize, Clone, Debug, PartialEq, Default)]
+pub struct Place {
+    /// "icloud", "dropbox", "gdrive", "onedrive", "box", "proton", "pcloud",
+    /// "nextcloud", "synology", "mega", "cloud" (autre service), "drive" (disque
+    /// externe), "folder" (dossier ordinaire)
+    pub kind: String,
+    /// nom du service (« Google Drive »), du disque, ou du dossier
+    pub name: String,
+    /// compte (adresse, équipe) : il peut y en avoir plusieurs pour un même service
+    pub account: Option<String>,
+    /// dossier qui recevra « Lumen » (à passer par `place_dir`) ; vide : iCloud Drive
+    pub path: String,
+}
+
+/// Services qui se rangent dans ~/Library/CloudStorage (« GoogleDrive-lea@gmail.com »),
+/// avec leur ordre de présentation.
+const PROVIDERS: [(&str, &str, &str); 9] = [
+    ("Dropbox", "dropbox", "Dropbox"),
+    ("GoogleDrive", "gdrive", "Google Drive"),
+    ("OneDrive", "onedrive", "OneDrive"),
+    ("Box", "box", "Box"),
+    ("ProtonDrive", "proton", "Proton Drive"),
+    ("pCloud", "pcloud", "pCloud"),
+    ("Nextcloud", "nextcloud", "Nextcloud"),
+    ("SynologyDrive", "synology", "Synology Drive"),
+    ("MEGA", "mega", "MEGA"),
+];
+
+/// Dossiers des anciennes versions de ces services, directement dans le dossier personnel.
+const HOME_FOLDERS: [(&str, &str); 5] = [("Dropbox", "dropbox"), ("Google Drive", "gdrive"), ("OneDrive", "onedrive"), ("pCloud Drive", "pcloud"), ("Nextcloud", "nextcloud")];
+
+/// « Mon Drive » selon la langue du Mac : Google Drive n'accepte rien à la racine d'un compte.
+const MY_DRIVE: [&str; 14] = [
+    "My Drive", "Mon Drive", "Meine Ablage", "Mi unidad", "Il mio Drive", "Meu Drive", "Mijn Drive", "Min enhet", "Mit drev", "Mój dysk", "Мой диск",
+    "マイドライブ", "내 드라이브", "我的云端硬盘",
+];
+
+fn provider(kind: &str) -> Option<&'static (&'static str, &'static str, &'static str)> {
+    PROVIDERS.iter().find(|p| p.1 == kind)
+}
+
+/// Service et compte d'un dossier de ~/Library/CloudStorage : « OneDrive-Personal »,
+/// « ProtonDrive-lea@proton.me-folder », « Box-Box ».
+fn cloud_storage_place(entry: &str, path: PathBuf) -> Place {
+    let (prefix, rest) = entry.split_once('-').unwrap_or((entry, ""));
+    let rest = rest.strip_suffix("-folder").unwrap_or(rest);
+    let (kind, name) = match PROVIDERS.iter().find(|p| p.0.eq_ignore_ascii_case(prefix)) {
+        Some(p) => (p.1.to_string(), p.2.to_string()),
+        None => ("cloud".to_string(), prefix.to_string()),
+    };
+    let account = match rest {
+        "" => None,
+        r if r == prefix || r == name => None,
+        "Personal" => Some(crate::i18n::t("Personnel", "Personal").to_string()),
+        r => Some(r.to_string()),
+    };
+    Place { kind, name, account, path: path.display().to_string() }
+}
+
+/// Dossiers de Dropbox d'après son propre fichier de réglages (dossier déplacé,
+/// compte personnel et compte d'équipe).
+fn dropbox_paths(home: &Path) -> Vec<(String, bool)> {
+    let Ok(raw) = fs::read_to_string(home.join(".dropbox/info.json")) else { return Vec::new() };
+    let Ok(info) = serde_json::from_str::<serde_json::Value>(&raw) else { return Vec::new() };
+    ["personal", "business"]
+        .iter()
+        .filter_map(|k| Some((info.get(*k)?.get("path")?.as_str()?.to_string(), *k == "business")))
+        .collect()
+}
+
+/// Nuages installés sur ce Mac, iCloud Drive en tête. Rien n'est lu à
+/// l'intérieur des nuages (macOS demanderait l'accès) : seulement leurs noms.
+pub fn places() -> Vec<Place> {
+    let mut out = Vec::new();
+    if icloud_drive().is_some() {
+        out.push(Place { kind: "icloud".into(), name: "iCloud Drive".into(), account: None, path: String::new() });
+    }
+    let Some(home) = home() else { return out };
+    let mut found: Vec<Place> = Vec::new();
+    if let Ok(dir) = fs::read_dir(home.join("Library/CloudStorage")) {
+        for e in dir.flatten() {
+            let name = e.file_name().to_string_lossy().to_string();
+            if name.starts_with('.') || !e.file_type().is_ok_and(|t| t.is_dir() || t.is_symlink()) {
+                continue;
+            }
+            found.push(cloud_storage_place(&name, e.path()));
+        }
+    }
+    for (path, business) in dropbox_paths(&home) {
+        if Path::new(&path).is_dir() && !found.iter().any(|p| p.path == path) {
+            let account = business.then(|| crate::i18n::t("Équipe", "Team").to_string());
+            found.push(Place { kind: "dropbox".into(), name: "Dropbox".into(), account, path });
+        }
+    }
+    // anciennes versions (dossier dans le dossier personnel), si le service n'est pas déjà là
+    for (folder, kind) in HOME_FOLDERS {
+        let p = home.join(folder);
+        if !found.iter().any(|f| f.kind == kind) && p.is_dir() {
+            let name = provider(kind).map_or(folder, |p| p.2).to_string();
+            found.push(Place { kind: kind.into(), name, account: None, path: p.display().to_string() });
+        }
+    }
+    // Google Drive sur les macOS d'avant le dossier CloudStorage
+    let volume = Path::new("/Volumes/GoogleDrive");
+    if !found.iter().any(|f| f.kind == "gdrive") && volume.is_dir() {
+        found.push(Place { kind: "gdrive".into(), name: "Google Drive".into(), account: None, path: volume.display().to_string() });
+    }
+    let rank = |k: &str| PROVIDERS.iter().position(|p| p.1 == k).unwrap_or(PROVIDERS.len());
+    found.sort_by(|a, b| rank(&a.kind).cmp(&rank(&b.kind)).then_with(|| a.name.cmp(&b.name)).then_with(|| a.account.cmp(&b.account)));
+    out.extend(found);
+    out
+}
+
+/// Le nuage, le disque ou le dossier d'un emplacement de sauvegarde (réglage
+/// `backup_dir`), d'après son seul chemin.
+pub fn place_of(custom: &str) -> Place {
+    let custom = custom.trim();
+    if custom.is_empty() {
+        return Place { kind: "icloud".into(), name: "iCloud Drive".into(), account: None, path: String::new() };
+    }
+    let p = Path::new(custom);
+    let parts: Vec<String> = p.components().map(|c| c.as_os_str().to_string_lossy().to_string()).collect();
+    // …/Library/CloudStorage/<service>-<compte>/…
+    if let Some(i) = parts.windows(2).position(|w| w[0] == "Library" && w[1] == "CloudStorage") {
+        if let Some(entry) = parts.get(i + 2) {
+            let root: PathBuf = parts[..=i + 2].iter().collect();
+            return cloud_storage_place(entry, root);
+        }
+    }
+    if let Some(home) = home() {
+        if let Ok(rel) = p.strip_prefix(&home) {
+            let first = rel.components().next().map(|c| c.as_os_str().to_string_lossy().to_string()).unwrap_or_default();
+            if let Some((folder, kind)) = HOME_FOLDERS.iter().find(|(f, _)| *f == first) {
+                let name = provider(kind).map_or(*folder, |p| p.2).to_string();
+                return Place { kind: (*kind).into(), name, account: None, path: home.join(folder).display().to_string() };
+            }
+        }
+        for (path, business) in dropbox_paths(&home) {
+            if p.starts_with(&path) {
+                let account = business.then(|| crate::i18n::t("Équipe", "Team").to_string());
+                return Place { kind: "dropbox".into(), name: "Dropbox".into(), account, path };
+            }
+        }
+    }
+    if parts.len() >= 3 && parts[1] == "Volumes" {
+        let root: PathBuf = parts[..3].iter().collect();
+        let (kind, name) = if parts[2] == "GoogleDrive" { ("gdrive", "Google Drive".to_string()) } else { ("drive", parts[2].clone()) };
+        return Place { kind: kind.into(), name, account: None, path: root.display().to_string() };
+    }
+    let name = p.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+    Place { kind: "folder".into(), name, account: None, path: custom.to_string() }
+}
+
+/// Dossier à retenir (`backup_dir`) pour un nuage choisi. Google Drive
+/// n'accepte rien à la racine d'un compte : on prend « Mon Drive ». C'est ici
+/// que macOS peut demander l'accès au nuage, au moment où l'utilisateur le choisit.
+pub fn place_dir(path: &str) -> Result<String, String> {
+    let p = Path::new(path.trim());
+    let gdrive = p.file_name().is_some_and(|n| n.to_string_lossy().starts_with("GoogleDrive-")) || p == Path::new("/Volumes/GoogleDrive");
+    if !gdrive {
+        return if p.is_dir() {
+            Ok(p.display().to_string())
+        } else {
+            Err(crate::i18n::t("Ce dossier est introuvable. Le service est-il toujours installé et connecté ?", "This folder can't be found. Is the service still installed and signed in?").into())
+        };
+    }
+    let not_ready = || -> String {
+        crate::i18n::t(
+            "Google Drive n'est pas encore prêt. Ouvrez Google Drive, connectez-vous, puis réessayez.",
+            "Google Drive isn't ready yet. Open Google Drive, sign in, then try again.",
+        )
+        .into()
+    };
+    let mut dirs: Vec<String> = fs::read_dir(p)
+        .map_err(|e| match e.kind() {
+            io::ErrorKind::PermissionDenied => crate::i18n::t(
+                "Lumen n'a pas accès à Google Drive. Autorisez-le dans Réglages Système › Confidentialité et sécurité › Fichiers et dossiers, puis réessayez.",
+                "Lumen has no access to Google Drive. Allow it in System Settings › Privacy & Security › Files and Folders, then try again.",
+            )
+            .into(),
+            _ => not_ready(),
+        })?
+        .flatten()
+        .filter(|e| e.file_type().is_ok_and(|t| t.is_dir()))
+        .map(|e| e.file_name().to_string_lossy().to_string())
+        .filter(|n| !n.starts_with('.'))
+        .collect();
+    dirs.sort();
+    let mine = MY_DRIVE.iter().find(|m| dirs.iter().any(|d| d == *m)).map(|m| m.to_string());
+    // autre langue : le premier dossier qui n'est ni partagé ni un autre ordinateur
+    let shared = |d: &str| {
+        let d = d.to_lowercase();
+        ["shared", "partag", "geteilt", "compartid", "condivis", "other computers", "autres ordinateurs", "computer"].iter().any(|w| d.contains(w))
+    };
+    let pick = mine.or_else(|| dirs.iter().find(|d| !shared(d)).cloned()).ok_or_else(not_ready)?;
+    Ok(p.join(pick).display().to_string())
 }
 
 fn short_hash(s: &str) -> String {
@@ -484,7 +695,7 @@ pub fn run(data_dir: &Path, opts: &Options) -> Result<Option<Outcome>> {
 fn run_in(data_dir: &Path, opts: &Options, device: &str, scratch: &Path) -> Result<Option<Outcome>> {
     // 1. copie cohérente de la base par une seconde connexion : l'app continue d'écrire pendant ce temps
     let snap = scratch.join("base.db");
-    let profile = {
+    let (profile, card) = {
         let src = Connection::open(db::path(data_dir))?;
         src.busy_timeout(Duration::from_secs(15))?;
         if !has_progress(&src)? {
@@ -492,7 +703,7 @@ fn run_in(data_dir: &Path, opts: &Options, device: &str, scratch: &Path) -> Resu
         }
         let p = ensure_profile(&src, device)?;
         src.execute("VACUUM INTO ?1", [snap.to_string_lossy()])?;
-        p
+        (p, user::card(&src))
     };
     // 2. sans le cache des traductions ni les réglages propres à ce Mac
     let (counts, refs) = {
@@ -580,6 +791,7 @@ fn run_in(data_dir: &Path, opts: &Options, device: &str, scratch: &Path) -> Resu
         counts,
         media: names,
         media_size,
+        user: card,
     };
     write_json(&folder.join(MANIFEST), &manifest, scratch)?;
     dropped.extend(prune_history(&folder));
@@ -713,6 +925,7 @@ pub fn list(data_dir: &Path, root: &Path, profile: Option<&str>) -> Result<Vec<I
             counts: m.counts,
             versions: versions(&folder),
             newer: m.format > FORMAT,
+            user: m.user,
         });
     }
     out.sort_by(|a, b| b.saved_at.cmp(&a.saved_at));
@@ -906,31 +1119,37 @@ fn no_place() -> String {
     .into()
 }
 
-/// Message compréhensible pour les erreurs de fichier les plus courantes.
-fn io_message(io: &io::Error, icloud: bool) -> Option<String> {
+/// Message compréhensible pour les erreurs de fichier les plus courantes,
+/// selon l'emplacement : iCloud Drive, un autre nuage, un disque ou un dossier.
+fn io_message(io: &io::Error, place: &Place) -> Option<String> {
     if matches!(io.raw_os_error(), Some(28) | Some(112)) {
         return Some(crate::i18n::t("Il n'y a plus assez d'espace disque sur ce Mac.", "There isn't enough disk space left on this Mac.").into());
     }
+    let cloud = !matches!(place.kind.as_str(), "drive" | "folder");
+    let name = &place.name;
     match io.kind() {
-        io::ErrorKind::PermissionDenied if icloud => Some(
-            crate::i18n::t(
-                "Lumen n'a pas accès à iCloud Drive. Autorisez-le dans Réglages Système › Confidentialité et sécurité › Fichiers et dossiers, puis réessayez.",
-                "Lumen has no access to iCloud Drive. Allow it in System Settings › Privacy & Security › Files and Folders, then try again.",
-            )
-            .into(),
-        ),
+        io::ErrorKind::PermissionDenied if cloud => Some(crate::tr!(
+            "Lumen n'a pas accès à {name}. Autorisez-le dans Réglages Système › Confidentialité et sécurité › Fichiers et dossiers, puis réessayez.",
+            "Lumen has no access to {name}. Allow it in System Settings › Privacy & Security › Files and Folders, then try again."
+        )),
         io::ErrorKind::PermissionDenied => Some(crate::i18n::t("Lumen ne peut pas écrire dans ce dossier. Choisissez-en un autre.", "Lumen can't write to this folder. Choose another one.").into()),
-        io::ErrorKind::NotFound if !icloud => Some(crate::i18n::t("Le dossier de sauvegarde est introuvable. Le disque est-il branché ?", "The backup folder can't be found. Is the drive connected?").into()),
+        // iCloud Drive absent : `no_place` le dit déjà
+        io::ErrorKind::NotFound if place.kind == "icloud" => None,
+        io::ErrorKind::NotFound if cloud => Some(crate::tr!(
+            "Le dossier {name} est introuvable. {name} est-il toujours installé et connecté sur ce Mac ?",
+            "The {name} folder can't be found. Is {name} still installed and signed in on this Mac?"
+        )),
+        io::ErrorKind::NotFound => Some(crate::i18n::t("Le dossier de sauvegarde est introuvable. Le disque est-il branché ?", "The backup folder can't be found. Is the drive connected?").into()),
         _ => None,
     }
 }
 
 /// Message d'erreur lisible ; `what` : (« Sauvegarde impossible », « Backup failed »)…
 /// Les messages écrits pour l'utilisateur (`bail!`) passent tels quels.
-fn friendly(e: &anyhow::Error, icloud: bool, what: (&'static str, &'static str)) -> String {
+fn friendly(e: &anyhow::Error, place: &Place, what: (&'static str, &'static str)) -> String {
     let what = crate::i18n::t(what.0, what.1);
     if let Some(io) = e.chain().find_map(|c| c.downcast_ref::<io::Error>()) {
-        return io_message(io, icloud).unwrap_or_else(|| crate::tr!("{what} : {io}", "{what}: {io}"));
+        return io_message(io, place).unwrap_or_else(|| crate::tr!("{what} : {io}", "{what}: {io}"));
     }
     if let Some(sql) = e.chain().find_map(|c| c.downcast_ref::<rusqlite::Error>()) {
         return crate::tr!("{what} : {sql}", "{what}: {sql}");
@@ -946,17 +1165,17 @@ pub fn run_now(state: &AppState) -> Result<(), String> {
         (prefs(&c), c.total_changes())
     };
     state.backup.last_try.store(db::now(), Ordering::SeqCst);
-    let icloud = p.dir.trim().is_empty();
+    let place = place_of(&p.dir);
     let res = match root(&p.dir) {
         None => Err(no_place()),
-        Some(root) => run(&state.data_dir, &Options { root, audio: p.audio, video: p.video }).map_err(|e| friendly(&e, icloud, ("Sauvegarde impossible", "Backup failed"))),
+        Some(root) => run(&state.data_dir, &Options { root, audio: p.audio, video: p.video }).map_err(|e| friendly(&e, &place, ("Sauvegarde impossible", "Backup failed"))),
     };
     let mut error = state.backup.error.lock();
     match res {
         Ok(out) => {
             state.backup.seen.store(changes, Ordering::SeqCst);
             *error = out.and_then(|(_, w)| w).map(|w| {
-                let why = io_message(&w, icloud).unwrap_or_else(|| w.to_string());
+                let why = io_message(&w, &place).unwrap_or_else(|| w.to_string());
                 crate::tr!(
                     "La progression est sauvegardée, mais un média n'a pas pu être copié : {why}",
                     "Your progress is backed up, but a media file couldn't be copied: {why}"
@@ -1054,6 +1273,7 @@ pub fn status(state: &AppState) -> Status {
         dir: root.as_ref().map(|r| r.display().to_string()),
         icloud: p.dir.trim().is_empty() && root.is_some(),
         icloud_available: icloud_drive().is_some(),
+        place: place_of(&p.dir),
         running: state.backup.running.load(Ordering::SeqCst),
         cloud: "unknown".into(),
         error: state.backup.error.lock().clone(),
@@ -1080,14 +1300,14 @@ pub fn status(state: &AppState) -> Status {
 pub fn list_for(state: &AppState) -> Result<Vec<Info>, String> {
     let p = prefs(&state.db.lock());
     let root = root(&p.dir).ok_or_else(no_place)?;
-    list(&state.data_dir, &root, p.profile.as_deref()).map_err(|e| friendly(&e, p.dir.trim().is_empty(), ("Lecture des sauvegardes impossible", "Couldn't read the backups")))
+    list(&state.data_dir, &root, p.profile.as_deref()).map_err(|e| friendly(&e, &place_of(&p.dir), ("Lecture des sauvegardes impossible", "Couldn't read the backups")))
 }
 
 pub fn restore_for(state: &AppState, key: &str, day: Option<&str>, on: impl Fn(ImportEvent)) -> Result<Restored, String> {
     let _running = state.backup.wait();
     let p = prefs(&state.db.lock());
     let root = root(&p.dir).ok_or_else(no_place)?;
-    let out = restore(&state.db, &state.data_dir, &root, key, day, on).map_err(|e| friendly(&e, p.dir.trim().is_empty(), ("Restauration impossible", "Restore failed")))?;
+    let out = restore(&state.db, &state.data_dir, &root, key, day, on).map_err(|e| friendly(&e, &place_of(&p.dir), ("Restauration impossible", "Restore failed")))?;
     // la progression restaurée rejoint la sauvegarde de ce Mac à la prochaine occasion
     state.backup.seen.store(u64::MAX, Ordering::SeqCst);
     state.backup.last_try.store(0, Ordering::SeqCst);
@@ -1161,6 +1381,10 @@ mod tests {
         db::term_set(&ca, &db::TermUpdate { lang: "it".into(), term: "è alto".into(), status: 2, translation: Some("est haut".into()), note: None, lemma: None, context: None }).unwrap();
         db::setting_set(&ca, "lingq_key", "secret").unwrap();
         db::setting_set(&ca, "langs", "it").unwrap();
+        // le profil de l'apprenant : il voyage avec la progression
+        db::setting_set(&ca, "user_name", "Léa").unwrap();
+        db::setting_set(&ca, "user_avatar", "photo:34:7").unwrap();
+        db::setting_set(&ca, "user_photo", "data:image/jpeg;base64,AAAA").unwrap();
         db::cache_put(&ca, "k", "v");
 
         let out = run(&a, &Options { root: root.clone(), audio: true, video: false }).unwrap().unwrap();
@@ -1185,6 +1409,8 @@ mod tests {
         assert_eq!(found.len(), 1);
         assert!(!found[0].mine && !found[0].this_device && !found[0].newer);
         assert_eq!(found[0].counts.known, 2);
+        // on reconnaît sa sauvegarde à son nom et à son avatar
+        assert_eq!((found[0].user.name.as_str(), found[0].user.avatar.as_str(), found[0].user.photo.as_str()), ("Léa", "photo:34:7", "data:image/jpeg;base64,AAAA"));
 
         let events = Mutex::new(Vec::new());
         let r = restore(&live, &b, &root, &found[0].key, None, |e| events.lock().push(e)).unwrap();
@@ -1201,6 +1427,7 @@ mod tests {
         assert_eq!(db::setting(&cb, "lingq_key").as_deref(), Some("autre"));
         assert_eq!(db::setting(&cb, "backup_on").as_deref(), Some("0"));
         assert_eq!(db::setting(&cb, "profile_id"), Some(m.profile.clone()));
+        assert_eq!(db::setting(&cb, "user_name").as_deref(), Some("Léa"));
         assert!(b.join("lumen.avant-restauration.db").exists());
         drop(cb);
 
@@ -1333,5 +1560,48 @@ mod tests {
         assert!(is_day("2026-10-03") && !is_day("2026-1-03") && !is_day("../../x"));
         assert_eq!(root("/Users/x/Dropbox").unwrap(), PathBuf::from("/Users/x/Dropbox/Lumen"));
         assert_eq!(root("/Volumes/Clé/Lumen").unwrap(), PathBuf::from("/Volumes/Clé/Lumen"));
+    }
+
+    #[test]
+    fn cloud_places() {
+        // dossiers de ~/Library/CloudStorage : service et compte
+        let cs = Path::new("/Users/x/Library/CloudStorage");
+        let p = cloud_storage_place("GoogleDrive-lea@gmail.com", cs.join("GoogleDrive-lea@gmail.com"));
+        assert_eq!((p.kind.as_str(), p.name.as_str(), p.account.as_deref()), ("gdrive", "Google Drive", Some("lea@gmail.com")));
+        let p = cloud_storage_place("Dropbox", cs.join("Dropbox"));
+        assert_eq!((p.kind.as_str(), p.account.as_deref()), ("dropbox", None));
+        assert_eq!(cloud_storage_place("Box-Box", cs.join("Box-Box")).account, None);
+        assert_eq!(cloud_storage_place("ProtonDrive-lea@proton.me-folder", cs.join("x")).account.as_deref(), Some("lea@proton.me"));
+        assert_eq!(cloud_storage_place("OneDrive-Contoso", cs.join("x")).account.as_deref(), Some("Contoso"));
+        let p = cloud_storage_place("Lumière-moi", cs.join("x"));
+        assert_eq!((p.kind.as_str(), p.name.as_str()), ("cloud", "Lumière"));
+
+        // l'emplacement retenu, d'après son seul chemin
+        assert_eq!(place_of("").kind, "icloud");
+        let p = place_of("/Users/x/Library/CloudStorage/GoogleDrive-lea@gmail.com/Mon Drive");
+        assert_eq!((p.kind.as_str(), p.path.as_str()), ("gdrive", "/Users/x/Library/CloudStorage/GoogleDrive-lea@gmail.com"));
+        assert_eq!(place_of("/Users/x/Library/CloudStorage/OneDrive-Personal/Documents").kind, "onedrive");
+        let p = place_of("/Volumes/Clé USB/Sauvegardes");
+        assert_eq!((p.kind.as_str(), p.name.as_str(), p.path.as_str()), ("drive", "Clé USB", "/Volumes/Clé USB"));
+        let p = place_of("/Users/x/Sauvegardes");
+        assert_eq!((p.kind.as_str(), p.name.as_str()), ("folder", "Sauvegardes"));
+        if let Some(home) = home() {
+            assert_eq!(place_of(&home.join("Dropbox/Perso").display().to_string()).kind, "dropbox");
+        }
+
+        // Google Drive : « Mon Drive » (dans la langue du Mac), jamais la racine du compte
+        let tmp = temp("gdrive").join("GoogleDrive-lea@gmail.com");
+        fs::create_dir_all(tmp.join("Drive partagés")).unwrap();
+        fs::create_dir_all(tmp.join(".shortcut-targets-by-id")).unwrap();
+        assert!(place_dir(&tmp.display().to_string()).is_err());
+        fs::create_dir_all(tmp.join("Mein Laufwerk")).unwrap();
+        assert_eq!(place_dir(&tmp.display().to_string()).unwrap(), tmp.join("Mein Laufwerk").display().to_string());
+        fs::create_dir_all(tmp.join("Mon Drive")).unwrap();
+        assert_eq!(place_dir(&tmp.display().to_string()).unwrap(), tmp.join("Mon Drive").display().to_string());
+        // autres nuages : le dossier tel quel, s'il existe
+        let dropbox = tmp.parent().unwrap().join("Dropbox");
+        assert!(place_dir(&dropbox.display().to_string()).is_err());
+        fs::create_dir_all(&dropbox).unwrap();
+        assert_eq!(place_dir(&dropbox.display().to_string()).unwrap(), dropbox.display().to_string());
     }
 }

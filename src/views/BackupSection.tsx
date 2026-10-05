@@ -1,12 +1,17 @@
 import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useState } from "react";
-import { Icon } from "../components/Icon";
+import { Avatar } from "../components/Avatar";
+import { Icon, type IconName } from "../components/Icon";
 import { Orb, Switch } from "../components/ui";
+import { isTauri } from "../lib/api";
 import {
   dayLabel,
   formatWhen,
+  isPlaceOf,
   pickBackupFolder,
+  placeDir,
   placeLabel,
+  placeName,
   reloadProgress,
   restoreStage,
   restoredText,
@@ -18,7 +23,8 @@ import { confirmAsk } from "../lib/dialogs";
 import { count, t } from "../lib/i18n";
 import { langLower } from "../lib/langs";
 import { formatBytes, formatNumber, useApp } from "../lib/store";
-import type { BackupInfo } from "../lib/types";
+import type { BackupInfo, BackupPlace, BackupStatus } from "../lib/types";
+import { userFrom } from "../lib/user";
 
 const enter = { initial: { opacity: 0, y: 10 }, animate: { opacity: 1, y: 0 }, exit: { opacity: 0, y: 6 }, transition: { type: "spring" as const, stiffness: 320, damping: 30 } };
 
@@ -36,13 +42,15 @@ function BackupRow({ info }: { info: BackupInfo }) {
   const lessons = version?.lessons ?? info.counts.lessons;
   const langs = info.counts.langs.map((l) => langLower(l)).join(", ");
   const pct = progress ? (progress.stage === "media" ? progress.value * 100 : progress.stage === "apply" ? 100 : 6) : 0;
+  // le profil de cette sauvegarde : on reconnaît la sienne à son nom et à son avatar
+  const who = userFrom(info.name, info.avatar, info.photo);
 
   const go = async () => {
     const when = version ? dayLabel(version.day) : formatWhen(info.saved_at);
     const ok = await confirmAsk(
       t(
-        `Remplacer la progression de ce Mac par celle de « ${info.device_name} », sauvegardée ${when} ?\n\n${formatNumber(known)} mots connus et ${formatNumber(lessons)} leçon${lessons > 1 ? "s" : ""}. Votre progression actuelle reste en copie sur ce Mac.`,
-        `Replace the progress on this Mac with the one from “${info.device_name}”, backed up ${when}?\n\n${formatNumber(known)} known words and ${count(lessons, "", "", "lesson", "lessons")}. Your current progress is kept as a copy on this Mac.`,
+        `Remplacer la progression de ce Mac par celle de « ${who.name ? `${who.name}, sur ${info.device_name}` : info.device_name} », sauvegardée ${when} ?\n\n${formatNumber(known)} mots connus et ${formatNumber(lessons)} leçon${lessons > 1 ? "s" : ""}. Votre progression actuelle reste en copie sur ce Mac.`,
+        `Replace the progress on this Mac with the one from “${who.name ? `${who.name}, on ${info.device_name}` : info.device_name}”, backed up ${when}?\n\n${formatNumber(known)} known words and ${count(lessons, "", "", "lesson", "lessons")}. Your current progress is kept as a copy on this Mac.`,
       ),
       t("Restaurer une sauvegarde", "Restore a backup"),
       t("Restaurer", "Restore"),
@@ -65,12 +73,23 @@ function BackupRow({ info }: { info: BackupInfo }) {
 
   return (
     <motion.div layout="position" className="set-row backup-item" {...enter}>
-      <span className={`backup-device ${info.this_device ? "here" : ""}`}>
-        <Icon name="laptop" size={18} />
-      </span>
+      {who.empty ? (
+        <span className={`backup-device ${info.this_device ? "here" : ""}`}>
+          <Icon name="laptop" size={18} />
+        </span>
+      ) : (
+        <Avatar size={34} spec={who.avatar} name={who.name} photo={who.photo} empty={false} />
+      )}
       <div className="grow">
         <strong>
-          {info.device_name}
+          {who.name ? (
+            <>
+              {who.name}
+              <span className="backup-on">{t(`sur ${info.device_name}`, `on ${info.device_name}`)}</span>
+            </>
+          ) : (
+            info.device_name
+          )}
           {info.this_device && <span className="chip light">{info.mine ? t("Ce Mac", "This Mac") : t("Ce Mac, autre profil", "This Mac, other profile")}</span>}
         </strong>
         <span>
@@ -102,7 +121,133 @@ function BackupRow({ info }: { info: BackupInfo }) {
   );
 }
 
-/** Réglages › Sauvegarde : iCloud Drive (ou un dossier choisi), médias, restauration. */
+/** Pictogramme d'un emplacement : nuage, disque ou dossier. */
+export function placeIcon(kind: BackupPlace["kind"]): IconName {
+  switch (kind) {
+    case "dropbox":
+    case "gdrive":
+    case "onedrive":
+    case "box":
+    case "folder":
+      return kind;
+    case "drive":
+      return "disk";
+    default:
+      return "cloud";
+  }
+}
+
+/** Les grands nuages, proposés même absents : on apprend qu'il suffit de les installer. */
+const SUGGESTED: { kind: BackupPlace["kind"]; name: string; url: string }[] = [
+  { kind: "dropbox", name: "Dropbox", url: "https://www.dropbox.com/install" },
+  { kind: "gdrive", name: "Google Drive", url: "https://www.google.com/drive/download/" },
+  { kind: "onedrive", name: "OneDrive", url: "https://www.microsoft.com/microsoft-365/onedrive/download" },
+];
+
+const TILE = { type: "spring", stiffness: 520, damping: 40 } as const;
+
+/** Où va la sauvegarde : iCloud Drive, les autres nuages du Mac, un autre dossier. */
+function PlacePicker({ s, onPick }: { s: BackupStatus; onPick(dir: string): Promise<void> }) {
+  const places = useBackup((x) => x.places);
+  const loadPlaces = useBackup((x) => x.loadPlaces);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [missing, setMissing] = useState<(typeof SUGGESTED)[number] | null>(null);
+
+  // un nuage installé pendant que la page est ouverte apparaît au retour dans Lumen
+  useEffect(() => {
+    void loadPlaces();
+    const again = () => void loadPlaces();
+    window.addEventListener("focus", again);
+    return () => window.removeEventListener("focus", again);
+  }, [loadPlaces]);
+
+  if (!places) return null;
+  const known = places.some((p) => isPlaceOf(s, p));
+  const other = !known && !!s.dir;
+  const absent = SUGGESTED.filter((x) => !places.some((p) => p.kind === x.kind));
+  // un même service avec plusieurs comptes : le compte suffit à les distinguer
+  const twice = (p: BackupPlace) => places.filter((q) => q.kind === p.kind).length > 1;
+
+  const pick = async (p: BackupPlace) => {
+    setMissing(null);
+    if (isPlaceOf(s, p) || busy) return;
+    const key = p.path || p.kind;
+    setBusy(key);
+    const dir = await placeDir(p);
+    if (dir !== null) await onPick(dir);
+    setBusy(null);
+  };
+  const choose = async () => {
+    setMissing(null);
+    const dir = await pickBackupFolder();
+    if (dir) await onPick(dir);
+  };
+
+  const tile = (key: string, icon: IconName, name: string, note: string, on: boolean, run: () => void, extra = "") => (
+    <button key={key} className={`place ${on ? "on" : ""} ${extra}`} onClick={run} aria-pressed={on} title={name}>
+      {on && <motion.span layoutId="backup-place" className="look-ring" transition={TILE} />}
+      <span className="place-glyph">
+        {busy === key ? <Orb size={16} /> : <Icon name={icon} size={20} />}
+      </span>
+      <strong>{name}</strong>
+      <span className="place-note">{note}</span>
+    </button>
+  );
+
+  return (
+    <div className="place-pick">
+      <div className="places" role="group" aria-label={t("Emplacement de la sauvegarde", "Backup location")}>
+        {places.map((p) =>
+          tile(
+            p.path || p.kind,
+            placeIcon(p.kind),
+            p.name,
+            p.account && (twice(p) || p.kind === "gdrive") ? p.account : isPlaceOf(s, p) ? t("Sauvegarde ici", "Backed up here") : t("Disponible", "Available"),
+            isPlaceOf(s, p),
+            () => void pick(p),
+          ),
+        )}
+        {absent.map((x) =>
+          tile(x.kind, placeIcon(x.kind), x.name, t("À installer", "Not installed"), false, () => setMissing((m) => (m?.kind === x.kind ? null : x)), `absent ${missing?.kind === x.kind ? "asked" : ""}`),
+        )}
+        {tile(
+          "other",
+          s.place?.kind === "drive" && other ? "disk" : "folder",
+          other ? s.place?.name || t("Autre dossier", "Other folder") : t("Autre dossier…", "Other folder…"),
+          other ? t("Changer…", "Change…") : t("Clé USB, disque, NAS", "USB drive, disk, NAS"),
+          other,
+          () => void choose(),
+        )}
+      </div>
+      <AnimatePresence initial={false}>
+        {missing && (
+          <motion.div
+            key={missing.kind}
+            className="place-install"
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: "auto" }}
+            exit={{ opacity: 0, height: 0 }}
+            transition={{ duration: 0.28, ease: [0.2, 0.8, 0.2, 1] }}
+          >
+            <p>
+              {t(
+                `${missing.name} n'est pas installé sur ce Mac. Installez l'app ${missing.name} et connectez-vous : il apparaîtra ici, prêt à recevoir la sauvegarde. Lumen n'a besoin d'aucun mot de passe.`,
+                `${missing.name} isn't installed on this Mac. Install the ${missing.name} app and sign in: it will show up here, ready to receive the backup. Lumen needs no password.`,
+              )}
+            </p>
+            {isTauri && (
+              <button className="btn sm soft" onClick={() => void import("@tauri-apps/plugin-opener").then((o) => o.openUrl(missing.url))}>
+                {t(`Télécharger ${missing.name}`, `Download ${missing.name}`)} <Icon name="external" size={14} />
+              </button>
+            )}
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
+
+/** Réglages › Sauvegarde : iCloud Drive (ou un autre nuage, un dossier choisi), médias, restauration. */
 export function BackupSection() {
   const s = useBackup((x) => x.status);
   const saving = useBackup((x) => x.saving);
@@ -153,11 +298,6 @@ export function BackupSection() {
     } else await refresh();
   };
 
-  const choose = async () => {
-    const dir = await pickBackupFolder();
-    if (dir) await moveTo(dir);
-  };
-
   return (
     // le titre et la présentation sont dans l'en-tête de la page des Réglages
     <section className="set-section">
@@ -192,20 +332,23 @@ export function BackupSection() {
             <strong>{t("Vidéos", "Videos")}</strong>
             <span>
               {s.local_video ? t(`${formatBytes(s.local_video)} sur ce Mac. `, `${formatBytes(s.local_video)} on this Mac. `) : ""}
-              {t("Les vidéos en ligne se retéléchargent depuis leur leçon : inutile d'en encombrer iCloud.", "Online videos can be downloaded again from their lesson: no need to fill iCloud with them.")}
+              {t(
+                `Les vidéos en ligne se retéléchargent depuis leur leçon : inutile d'en encombrer ${s.icloud ? "iCloud" : placeName(s)}.`,
+                `Online videos can be downloaded again from their lesson: no need to fill ${s.icloud ? "iCloud" : placeName(s)} with them.`,
+              )}
             </span>
           </div>
           <Switch on={settings.backup_video === "1"} onChange={(v) => void setOption("backup_video", v)} label={t("Sauvegarder les vidéos", "Back up videos")} />
         </div>
-        <div className="set-row">
+        <div className="set-row backup-where">
           <div className="grow">
             <strong>{t("Emplacement", "Location")}</strong>
             <span>
               {s.dir
                 ? placeLabel(s)
                 : t(
-                    "iCloud Drive n'est pas activé sur ce Mac (Réglages Système › votre nom › iCloud). Vous pouvez aussi choisir un dossier : Dropbox, Google Drive, clé USB…",
-                    "iCloud Drive isn't turned on on this Mac (System Settings › your name › iCloud). You can also choose a folder: Dropbox, Google Drive, a USB drive…",
+                    "iCloud Drive n'est pas activé sur ce Mac (Réglages Système › votre nom › iCloud). Choisissez un autre nuage ou un dossier.",
+                    "iCloud Drive isn't turned on on this Mac (System Settings › your name › iCloud). Choose another cloud or a folder.",
                   )}
             </span>
           </div>
@@ -214,14 +357,9 @@ export function BackupSection() {
               {t("Afficher", "Show")}
             </button>
           )}
-          {!s.icloud && s.icloud_available && (
-            <button className="btn sm ghost" onClick={() => void moveTo("")}>
-              iCloud Drive
-            </button>
-          )}
-          <button className="btn sm soft" onClick={() => void choose()}>
-            {t("Choisir…", "Choose…")}
-          </button>
+        </div>
+        <div className="set-row backup-places">
+          <PlacePicker s={s} onPick={moveTo} />
         </div>
         <div className="set-row backup-foot">
           <span className="backup-note">
@@ -261,7 +399,7 @@ export function BackupSection() {
           ) : listing && !list.length ? (
             <motion.div key="wait" className="set-row lingq-wait" {...enter}>
               <Orb size={18} />
-              <span>{s.icloud ? t("Recherche dans votre iCloud Drive…", "Searching your iCloud Drive…") : t("Recherche dans le dossier choisi…", "Searching the chosen folder…")}</span>
+              <span>{t(`Recherche dans ${s.icloud ? "votre iCloud Drive" : placeName(s)}…`, `Searching ${s.icloud ? "your iCloud Drive" : placeName(s)}…`)}</span>
             </motion.div>
           ) : listError ? (
             <motion.div key="err" className="set-row lingq-error" {...enter}>
@@ -269,7 +407,11 @@ export function BackupSection() {
             </motion.div>
           ) : !list.length ? (
             <motion.div key="none" className="set-row lingq-wait" {...enter}>
-              {s.icloud ? t("Aucune sauvegarde dans votre iCloud Drive pour l'instant.", "No backup in your iCloud Drive yet.") : t("Aucune sauvegarde dans ce dossier pour l'instant.", "No backup in this folder yet.")}
+              {s.icloud
+                ? t("Aucune sauvegarde dans votre iCloud Drive pour l'instant.", "No backup in your iCloud Drive yet.")
+                : s.place && s.place.kind !== "folder"
+                  ? t(`Aucune sauvegarde dans ${s.place.name} pour l'instant.`, `No backup in ${s.place.name} yet.`)
+                  : t("Aucune sauvegarde dans ce dossier pour l'instant.", "No backup in this folder yet.")}
             </motion.div>
           ) : (
             list.map((b) => <BackupRow key={b.key} info={b} />)

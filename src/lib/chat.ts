@@ -81,21 +81,33 @@ export function langWithArticle(lang: LangCode): string {
   return /^[aeéiou]/.test(n) || n === "hindi" ? `l'${n}` : `le ${n}`;
 }
 
+/** Question proposée sur une conversation vide ; `draft` : elle s'écrit dans le
+ *  champ, à compléter (le sujet d'une conversation, c'est l'apprenant qui le choisit). */
+export interface Suggestion {
+  text: string;
+  label?: string;
+  draft?: boolean;
+}
+
 /** Questions proposées sur une conversation vide. */
-export function suggestions(lang: LangCode, withLesson: boolean): string[] {
+export function suggestions(lang: LangCode, withLesson: boolean): Suggestion[] {
   const name = langInfo(lang).name;
   if (withLesson)
     return [
-      t("Résume cette leçon en quelques phrases", "Summarize this lesson in a few sentences"),
-      t("Explique-moi les points de grammaire importants du texte", "Explain the important grammar points in the text"),
-      t("Quels mots de cette leçon dois-je retenir en priorité ?", "Which words from this lesson should I learn first?"),
-      t(`Pose-moi trois questions ${inLang(lang)} sur le texte`, `Ask me three questions ${inLang(lang)} about the text`),
+      { text: t("Résume cette leçon en quelques phrases", "Summarize this lesson in a few sentences") },
+      { text: t("Explique-moi les points de grammaire importants du texte", "Explain the important grammar points in the text") },
+      { text: t("Quels mots de cette leçon dois-je retenir en priorité ?", "Which words from this lesson should I learn first?") },
+      { text: t(`Pose-moi trois questions ${inLang(lang)} sur le texte`, `Ask me three questions ${inLang(lang)} about the text`) },
     ];
   return [
-    t(`Discutons ${inLang(lang)}, à mon niveau`, `Let's chat ${inLang(lang)}, at my level`),
-    t(`Quelles sont les difficultés de ${langWithArticle(lang)} pour un francophone ?`, `What is hard about ${name} for an English speaker?`),
-    t(`Écris-moi une courte histoire ${inLang(lang)} pour débutant`, `Write me a short story ${inLang(lang)} for beginners`),
-    t("Donne-moi dix mots utiles pour la vie de tous les jours", "Give me ten useful words for everyday life"),
+    {
+      label: t(`Discutons ${inLang(lang)} de…`, `Let's chat ${inLang(lang)} about…`),
+      text: t(`Discutons ${inLang(lang)}, à mon niveau, de `, `Let's chat ${inLang(lang)}, at my level, about `),
+      draft: true,
+    },
+    { text: t(`Quelles sont les difficultés de ${langWithArticle(lang)} pour un francophone ?`, `What is hard about ${name} for an English speaker?`) },
+    { text: t(`Écris-moi une courte histoire ${inLang(lang)} pour débutant`, `Write me a short story ${inLang(lang)} for beginners`) },
+    { text: t("Donne-moi dix mots utiles pour la vie de tous les jours", "Give me ten useful words for everyday life") },
   ];
 }
 

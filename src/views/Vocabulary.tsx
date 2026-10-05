@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { Icon } from "../components/Icon";
 import { Orb, Segmented } from "../components/ui";
 import { api, errorText, isTauri } from "../lib/api";
-import { pickSavePath } from "../lib/dialogs";
+import { exportVocabulary } from "../lib/menu";
 import { count, t } from "../lib/i18n";
 import { inLang } from "../lib/langs";
 import { useApp } from "../lib/store";
@@ -48,16 +48,7 @@ export function Vocabulary() {
     if (status === 4 || tm.status === 4) void refreshKnown();
   };
 
-  const exportCsv = async () => {
-    const path = await pickSavePath(t(`lumen-${lang}-vocabulaire.csv`, `lumen-${lang}-vocabulary.csv`));
-    if (!path) return;
-    try {
-      await api().exportVocab(lang, path);
-      toast(t("Vocabulaire exporté (compatible Anki)", "Vocabulary exported (Anki compatible)"), "light");
-    } catch (e) {
-      toast(errorText(e), "error");
-    }
-  };
+  const exportCsv = () => exportVocabulary(lang);
 
   return (
     <>
@@ -92,7 +83,7 @@ export function Vocabulary() {
             />
             <label className="search" style={{ marginLeft: "auto" }}>
               <Icon name="search" size={16} />
-              <input placeholder={t("Chercher un mot ou un sens", "Search a word or a meaning")} value={search} onChange={(e) => setSearch(e.target.value)} aria-label={t("Chercher", "Search")} />
+              <input data-find placeholder={t("Chercher un mot ou un sens", "Search a word or a meaning")} value={search} onChange={(e) => setSearch(e.target.value)} aria-label={t("Chercher", "Search")} />
             </label>
             <span className="muted num">{count(total, "terme", "termes", "term", "terms")}</span>
           </div>

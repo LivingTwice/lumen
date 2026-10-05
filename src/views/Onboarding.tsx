@@ -1,14 +1,17 @@
 import { AnimatePresence, motion, useMotionValue, useSpring, useTransform } from "motion/react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Avatar, AvatarArt } from "../components/Avatar";
 import { Icon } from "../components/Icon";
 import { Orb, Switch } from "../components/ui";
 import { api, errorText } from "../lib/api";
-import { formatWhen, pickBackupFolder, reloadProgress, restoreStage, useBackup } from "../lib/backup";
+import { formatWhen, isCloud, pickBackupFolder, placeDir, reloadProgress, restoreStage, useBackup } from "../lib/backup";
 import { count, t, type UiLang } from "../lib/i18n";
 import { LANGS, STARTERS, featuredLangs, langLower, starterCollection, type LangInfo } from "../lib/langs";
 import { PROFILES } from "../lib/profiles";
 import { formatBytes, formatNumber, useApp } from "../lib/store";
 import type { BackupInfo, BackupRestored, LangCode } from "../lib/types";
+import { HUES, NAME_MAX, avatarString, avatarStyles, choosePhoto, newSeed, userFrom, type AvatarStyle } from "../lib/user";
+import { useDraft } from "./ProfileSection";
 
 const EASE = [0.16, 1, 0.3, 1] as const;
 // marge au-dessus de la scène pour que les rayons de l'astre ne soient pas coupés
@@ -84,12 +87,28 @@ export function Onboarding() {
   const [searchError, setSearchError] = useState("");
   const [picked, setPicked] = useState<string | null>(null);
   const [restored, setRestored] = useState<BackupRestored | null>(null);
+  // le profil de la sauvegarde restaurée (« Bon retour, Léa »)
+  const [restoredUser, setRestoredUser] = useState<ReturnType<typeof userFrom> | null>(null);
+  // profil : le nom se tape ici, l'avatar suit aussitôt
+  const [meName, setMeName, saveMeName] = useDraft("user_name", NAME_MAX);
+  const meAvatar = useApp((s) => s.settings.user_avatar ?? "");
+  const mePhoto = useApp((s) => s.settings.user_photo ?? "");
+  const me = userFrom(meName, meAvatar, mePhoto);
+  const firstName = useApp((s) => (s.settings.user_name ?? "").trim());
   const [saveCloud, setSaveCloud] = useState(true);
+  // nuages du Mac : sans iCloud Drive, la sauvegarde va dans le premier autre (Dropbox, Google Drive…)
+  const places = useBackup((s) => s.places);
+  const fallback = backup && !backup.dir ? places?.find((p) => p.kind !== "icloud") : undefined;
   // proposée tant que l'utilisateur n'a pas choisi (pas en relecture d'une sauvegarde déjà réglée)
-  const offerBackup = !!backup?.dir && !backup.decided;
+  const offerBackup = !!backup && (!!backup.dir || !!fallback) && !backup.decided;
+  // « iCloud Drive », « Dropbox »… ; vide pour un dossier ordinaire
+  const cloudName = backup?.dir ? (backup.icloud ? "iCloud Drive" : isCloud(backup.place) ? backup.place.name : "") : (fallback?.name ?? "");
+  // là où l'on cherche une sauvegarde à restaurer : seulement l'emplacement retenu
+  const hereName = backup?.dir ? cloudName : "";
 
   useEffect(() => {
     void useBackup.getState().refresh();
+    void useBackup.getState().loadPlaces();
   }, []);
 
   // parallaxe douce : le ciel suit légèrement le pointeur
@@ -122,10 +141,10 @@ export function Onboarding() {
   );
 
   // géométrie de l'astre selon l'étape
-  const orbCenter = n === 0 ? H * 0.32 : n === 3 ? H * 0.3 : 58;
-  const orbSize = n === 0 ? 132 : n === 3 ? 104 : 46;
+  const orbCenter = n === 0 ? H * 0.32 : n === 4 ? H * 0.3 : 58;
+  const orbSize = n === 0 ? 132 : n === 4 ? 104 : 46;
   const horizonY = H * 0.32 + 92;
-  const showHorizon = n === 0 || n === 3;
+  const showHorizon = n === 0 || n === 4;
 
   const toggle = (c: LangCode) => setLangs((l) => (l.includes(c) ? l.filter((x) => x !== c) : [...l, c]));
   const others = LANGS.filter((l) => !featuredLangs().includes(l.code));
@@ -167,7 +186,7 @@ export function Onboarding() {
     void setSetting("llm_model", p.llm);
     void setSetting("asr_model", p.asr);
     if (!models.find((m) => m.id === p.llm)?.installed) void download(p.llm);
-    setN(3);
+    setN(4);
   };
 
   const startBloom = () => {
@@ -192,7 +211,7 @@ export function Onboarding() {
 
   const openRestore = () => {
     useBackup.setState({ restoreError: "" });
-    setN(4);
+    setN(5);
     void search();
   };
 
@@ -200,6 +219,17 @@ export function Onboarding() {
     const dir = await pickBackupFolder();
     if (!dir) return;
     await setSetting("backup_dir", dir);
+    await useBackup.getState().refresh();
+    void search();
+  };
+
+  // la sauvegarde d'un autre Mac peut être dans un autre nuage que celui de ce Mac
+  const otherPlaces = (places ?? []).filter((p) => (p.kind === "icloud" ? !backup?.icloud : !(backup?.dir ?? "").startsWith(`${p.path}/`)));
+  const searchIn = async (p: NonNullable<typeof places>[number]) => {
+    const dir = await placeDir(p);
+    if (dir === null) return;
+    await setSetting("backup_dir", dir);
+    await useBackup.getState().refresh();
     void search();
   };
 
@@ -209,8 +239,9 @@ export function Onboarding() {
     const r = await useBackup.getState().restore(info, null);
     if (!r) return;
     setRestored(r);
+    setRestoredUser(userFrom(info.name, info.avatar, info.photo));
     // les modèles d'IA ne voyagent pas avec la sauvegarde : on propose de les télécharger
-    setN(models.some((m) => m.kind === "llm" && m.installed) ? 3 : 2);
+    setN(models.some((m) => m.kind === "llm" && m.installed) ? 4 : 3);
   };
 
   const finishRestored = async () => {
@@ -237,6 +268,10 @@ export function Onboarding() {
     await refreshKnown();
     const wait = 950 - (performance.now() - started);
     if (wait > 0) await new Promise((res) => setTimeout(res, wait));
+    if (offerBackup && saveCloud && fallback) {
+      const dir = await placeDir(fallback);
+      if (dir !== null) await setSetting("backup_dir", dir);
+    }
     if (offerBackup) await setSetting("backup_on", saveCloud ? "1" : "0");
     // les nouveautés de cette version ne concernent pas qui découvre Lumen
     const version = useApp.getState().info?.version.match(/\d+\.\d+\.\d+/)?.[0];
@@ -246,7 +281,7 @@ export function Onboarding() {
     openLesson(first);
     // puis la visite guidée, dans cette première leçon
     void useApp.getState().startTour();
-    // macOS demande l'accès à iCloud Drive maintenant, juste après le choix
+    // macOS demande l'accès au nuage maintenant, juste après le choix
     if (offerBackup && saveCloud) void useBackup.getState().save();
   };
 
@@ -358,7 +393,65 @@ export function Onboarding() {
 
           {n === 1 && (
             <motion.div key="1" className="ob-step form" {...stepAnim}>
-              <h2>{t("Quelles langues voulez-vous apprendre ?", "Which languages do you want to learn?")}</h2>
+              <h2>{t("Faisons connaissance", "Let's get acquainted")}</h2>
+              <p className="ob-sub">
+                {t(
+                  "Comment Lumen peut-il vous appeler ? Votre profil reste sur ce Mac et dans votre sauvegarde : personne d'autre ne le voit.",
+                  "What should Lumen call you? Your profile stays on this Mac and in your backup: no one else sees it.",
+                )}
+              </p>
+              <div className="ob-me">
+                <motion.span
+                  className="ob-me-avatar"
+                  initial={{ opacity: 0, scale: 0.8 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  transition={{ type: "spring", stiffness: 200, damping: 18, delay: 0.15 }}
+                >
+                  <span className="ob-me-halo" aria-hidden="true" />
+                  <Avatar size={96} spec={me.avatar} name={me.name} photo={me.photo} empty={me.empty} />
+                </motion.span>
+                <input
+                  className="ob-name"
+                  value={meName}
+                  placeholder={t("Votre prénom ou un pseudo", "Your first name or a nickname")}
+                  onChange={(e) => setMeName(e.target.value)}
+                  onBlur={saveMeName}
+                  onKeyDown={(e) => {
+                    if (e.key !== "Enter") return;
+                    saveMeName();
+                    setN(2);
+                  }}
+                  aria-label={t("Votre prénom ou un pseudo", "Your first name or a nickname")}
+                  spellCheck={false}
+                  autoComplete="off"
+                  autoFocus
+                />
+                <ObAvatarPicker name={me.name} />
+              </div>
+              <div className="ob-actions">
+                <button className="ob-link" onClick={() => setN(0)}>
+                  {t("Retour", "Back")}
+                </button>
+                <button
+                  className="ob-cta"
+                  onClick={() => {
+                    saveMeName();
+                    setN(2);
+                  }}
+                >
+                  {meName.trim() || !me.empty ? t("Continuer", "Continue") : t("Plus tard", "Later")} <Icon name="forward" size={16} stroke={2} />
+                </button>
+              </div>
+            </motion.div>
+          )}
+
+          {n === 2 && (
+            <motion.div key="2" className="ob-step form" {...stepAnim}>
+              <h2>
+                {firstName
+                  ? t(`${firstName}, quelles langues voulez-vous apprendre ?`, `${firstName}, which languages do you want to learn?`)
+                  : t("Quelles langues voulez-vous apprendre ?", "Which languages do you want to learn?")}
+              </h2>
               <p className="ob-sub">
                 {t(
                   "Chacune a son dictionnaire hors ligne, sa bibliothèque et son vocabulaire. Vous pourrez en ajouter ou en retirer plus tard.",
@@ -372,18 +465,18 @@ export function Onboarding() {
                 <div className="ob-grid langs compact">{others.map((l, i) => langCard(l, 0.5 + i * 0.025))}</div>
               </div>
               <div className="ob-actions">
-                <button className="ob-link" onClick={() => setN(0)}>
+                <button className="ob-link" onClick={() => setN(1)}>
                   {t("Retour", "Back")}
                 </button>
-                <button className="ob-cta" disabled={!langs.length} onClick={() => setN(2)}>
+                <button className="ob-cta" disabled={!langs.length} onClick={() => setN(3)}>
                   {t("Continuer", "Continue")} <Icon name="forward" size={16} stroke={2} />
                 </button>
               </div>
             </motion.div>
           )}
 
-          {n === 2 && (
-            <motion.div key="2" className="ob-step form" {...stepAnim}>
+          {n === 3 && (
+            <motion.div key="3" className="ob-step form" {...stepAnim}>
               <h2>{t("Une IA qui vit sur votre Mac", "An AI that lives on your Mac")}</h2>
               <p className="ob-sub">
                 {t(
@@ -438,7 +531,7 @@ export function Onboarding() {
                 ))}
               </div>
               <div className="ob-actions">
-                <button className="ob-link" onClick={() => setN(3)}>
+                <button className="ob-link" onClick={() => setN(4)}>
                   {t("Plus tard", "Later")}
                 </button>
                 <button className="ob-cta" onClick={startDownload}>
@@ -448,9 +541,19 @@ export function Onboarding() {
             </motion.div>
           )}
 
-          {n === 3 && restored && (
-            <motion.div key="3r" className="ob-step ready" {...stepAnim}>
-              <h2>{t("Bon retour", "Welcome back")}</h2>
+          {n === 4 && restored && (
+            <motion.div key="4r" className="ob-step ready" {...stepAnim}>
+              {restoredUser && !restoredUser.empty && (
+                <motion.span
+                  className="ob-me-back"
+                  initial={{ opacity: 0, scale: 0.7, y: 8 }}
+                  animate={{ opacity: 1, scale: 1, y: 0 }}
+                  transition={{ type: "spring", stiffness: 220, damping: 18, delay: 0.25 }}
+                >
+                  <Avatar size={64} spec={restoredUser.avatar} name={restoredUser.name} photo={restoredUser.photo} empty={false} />
+                </motion.span>
+              )}
+              <h2>{restoredUser?.name ? t(`Bon retour, ${restoredUser.name}`, `Welcome back, ${restoredUser.name}`) : t("Bon retour", "Welcome back")}</h2>
               <p className="ob-sub">
                 {t(
                   `${formatNumber(restored.counts.known)} mots connus et ${count(restored.counts.lessons, "leçon", "leçons", "", "")} vous attendent, exactement là où vous les aviez laissés.`,
@@ -463,9 +566,9 @@ export function Onboarding() {
             </motion.div>
           )}
 
-          {n === 3 && !restored && (
-            <motion.div key="3" className="ob-step ready" {...stepAnim}>
-              <h2>{t("Tout est prêt", "Everything is ready")}</h2>
+          {n === 4 && !restored && (
+            <motion.div key="4" className="ob-step ready" {...stepAnim}>
+              <h2>{firstName ? t(`Tout est prêt, ${firstName}`, `Everything is ready, ${firstName}`) : t("Tout est prêt", "Everything is ready")}</h2>
               <p className="ob-sub">
                 {t(
                   "Une courte histoire vous attend dans chaque langue choisie. Touchez les mots inconnus, écoutez la page, puis terminez-la : les mots compris rejoignent votre vocabulaire.",
@@ -477,8 +580,8 @@ export function Onboarding() {
                   <Icon name="cloud" size={20} />
                   <span>
                     <strong>
-                      {backup.icloud
-                        ? t("Sauvegarder ma progression dans iCloud Drive", "Back up my progress to iCloud Drive")
+                      {cloudName
+                        ? t(`Sauvegarder ma progression dans ${cloudName}`, `Back up my progress to ${cloudName}`)
                         : t("Sauvegarder ma progression dans le dossier choisi", "Back up my progress to the chosen folder")}
                     </strong>
                     <small>{t("Une copie à l'abri, retrouvée en un clic si ce Mac s'efface ou sur un nouveau Mac.", "A safe copy, back in one click if this Mac is wiped, or on a new Mac.")}</small>
@@ -490,15 +593,15 @@ export function Onboarding() {
                 {t("Ouvrir ma première lecture", "Open my first reading")} <Icon name="book" size={16} />
               </button>
               {!langs.length && (
-                <button className="ob-link" onClick={() => setN(1)}>
+                <button className="ob-link" onClick={() => setN(2)}>
                   {t("Choisir une langue d'abord", "Choose a language first")}
                 </button>
               )}
             </motion.div>
           )}
 
-          {n === 4 && (
-            <motion.div key="4" className="ob-step form" {...stepAnim}>
+          {n === 5 && (
+            <motion.div key="5" className="ob-step form" {...stepAnim}>
               <h2>{t("Retrouver ma progression", "Get my progress back")}</h2>
               <p className="ob-sub">{t("Vos mots, vos expressions, vos leçons et vos réglages reviennent tels que vous les aviez laissés.", "Your words, phrases, lessons and settings come back just as you left them.")}</p>
               {restoring ? (
@@ -512,7 +615,11 @@ export function Onboarding() {
               ) : found === null ? (
                 <div className="ob-search">
                   <Orb size={20} />{" "}
-                  {backup?.icloud === false ? t("Recherche dans le dossier choisi…", "Searching the chosen folder…") : t("Recherche dans votre iCloud Drive…", "Searching your iCloud Drive…")}
+                  {backup?.icloud === false
+                    ? hereName
+                      ? t(`Recherche dans ${hereName}…`, `Searching ${hereName}…`)
+                      : t("Recherche dans le dossier choisi…", "Searching the chosen folder…")
+                    : t("Recherche dans votre iCloud Drive…", "Searching your iCloud Drive…")}
                 </div>
               ) : found.length ? (
                 <div className="ob-grid backups">
@@ -527,9 +634,7 @@ export function Onboarding() {
                       animate={{ opacity: 1, y: 0 }}
                       transition={{ delay: 0.1 + i * 0.07, duration: 0.6, ease: EASE }}
                     >
-                      <span className="ob-device">
-                        <Icon name="laptop" size={15} /> {b.device_name}
-                      </span>
+                      <BackupWho b={b} />
                       <strong className="pname">{count(b.counts.known, "mot connu", "mots connus", "known word", "known words")}</strong>
                       <span className="pdesc">
                         {count(b.counts.lessons, "leçon", "leçons", "lesson", "lessons")}
@@ -551,7 +656,9 @@ export function Onboarding() {
                 <p className="ob-empty">
                   {searchError ||
                     (backup?.icloud === false
-                      ? t("Aucune sauvegarde de Lumen dans ce dossier.", "No Lumen backup in this folder.")
+                      ? hereName
+                        ? t(`Aucune sauvegarde de Lumen dans ${hereName}.`, `No Lumen backup in ${hereName}.`)
+                        : t("Aucune sauvegarde de Lumen dans ce dossier.", "No Lumen backup in this folder.")
                       : t("Aucune sauvegarde de Lumen dans votre iCloud Drive.", "No Lumen backup in your iCloud Drive."))}
                 </p>
               )}
@@ -562,6 +669,11 @@ export function Onboarding() {
                 </button>
                 {found !== null && !found.length ? (
                   <>
+                    {otherPlaces.slice(0, 3).map((p) => (
+                      <button key={p.path || p.kind} className="ob-link" onClick={() => void searchIn(p)}>
+                        {t(`Chercher dans ${p.name}`, `Look in ${p.name}`)}
+                      </button>
+                    ))}
                     <button className="ob-link" onClick={chooseFolder}>
                       {t("Choisir un dossier…", "Choose a folder…")}
                     </button>
@@ -581,8 +693,8 @@ export function Onboarding() {
       </div>
 
       <div className="ob-dots" aria-hidden="true">
-        {/* la restauration (étape 4) n'a pas de point : elle remplace les étapes 1 à 3 */}
-        {[0, 1, 2, 3].map((i) => (
+        {/* la restauration (étape 5) n'a pas de point : elle remplace les étapes 1 à 4 */}
+        {[0, 1, 2, 3, 4].map((i) => (
           <i key={i} className={i === n ? "on" : ""} />
         ))}
       </div>
@@ -597,5 +709,80 @@ export function Onboarding() {
         />
       )}
     </div>
+  );
+}
+
+/** Choix de l'avatar à l'accueil : la photo, l'initiale ou une lumière, puis sa teinte. */
+function ObAvatarPicker({ name }: { name: string }) {
+  const avatar = useApp((s) => s.settings.user_avatar ?? "");
+  const photo = useApp((s) => s.settings.user_photo ?? "");
+  const setSetting = useApp((s) => s.setSetting);
+  const toast = useApp((s) => s.toast);
+  const me = userFrom(name, avatar, photo);
+  // rien de choisi : aucune option n'est allumée
+  const current: AvatarStyle | null = avatar ? me.avatar.style : null;
+  // pas encore de graine : celle des aperçus, pour que la lumière choisie soit bien celle qu'on a vue
+  const [fallback] = useState(newSeed);
+  const seed = me.avatar.seed || fallback;
+  const set = (style: AvatarStyle, hue = me.avatar.hue) => void setSetting("user_avatar", avatarString({ style, hue, seed }));
+
+  const pickPhoto = async () => {
+    try {
+      const data = await choosePhoto();
+      if (!data) return;
+      await setSetting("user_photo", data);
+      set("photo");
+    } catch (e) {
+      toast(errorText(e), "error");
+    }
+  };
+
+  return (
+    <motion.div className="ob-me-picker" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3, duration: 0.6, ease: EASE }}>
+      <div className="ob-me-styles" role="radiogroup" aria-label={t("Avatar", "Avatar")}>
+        <button
+          role="radio"
+          aria-checked={current === "photo"}
+          className={`ob-me-opt ${current === "photo" ? "on" : ""}`}
+          onClick={() => (photo && current !== "photo" ? set("photo") : void pickPhoto())}
+          title={photo ? t("Votre photo (toucher à nouveau pour en changer)", "Your photo (tap again to change it)") : t("Choisir une photo…", "Choose a photo…")}
+        >
+          <span className={`avatar ${photo ? "" : "ob-me-nophoto"}`} style={{ width: 42, height: 42 }}>
+            {photo ? <img className="avatar-img" src={photo} alt="" draggable={false} /> : <Icon name="image" size={17} />}
+          </span>
+        </button>
+        {avatarStyles().map((s) => (
+          <button key={s.id} role="radio" aria-checked={current === s.id} className={`ob-me-opt ${current === s.id ? "on" : ""}`} onClick={() => set(s.id)} title={s.label}>
+            <span className="avatar" style={{ width: 42, height: 42 }}>
+              <AvatarArt spec={{ style: s.id, hue: me.avatar.hue, seed }} name={name} />
+            </span>
+          </button>
+        ))}
+      </div>
+      <div className="ob-me-hues" role="radiogroup" aria-label={t("Teinte", "Hue")}>
+        {HUES.map((h) => (
+          <button
+            key={h}
+            role="radio"
+            aria-checked={me.avatar.hue === h}
+            aria-label={t(`Teinte ${h}°`, `Hue ${h}°`)}
+            className={`me-hue ${me.avatar.hue === h ? "on" : ""}`}
+            style={{ ["--h" as string]: h }}
+            onClick={() => set(current && current !== "photo" ? current : "initial", h)}
+          />
+        ))}
+      </div>
+    </motion.div>
+  );
+}
+
+/** Une sauvegarde trouvée à l'accueil : l'avatar et le nom de son profil, sinon le Mac. */
+function BackupWho({ b }: { b: BackupInfo }) {
+  const who = userFrom(b.name, b.avatar, b.photo);
+  return (
+    <span className="ob-device">
+      {who.empty ? <Icon name="laptop" size={15} /> : <Avatar size={22} spec={who.avatar} name={who.name} photo={who.photo} empty={false} />}
+      {who.name ? t(`${who.name} · ${b.device_name}`, `${who.name} · ${b.device_name}`) : b.device_name}
+    </span>
   );
 }

@@ -1,4 +1,5 @@
-// Sauvegarde de la progression dans iCloud Drive (ou un dossier choisi).
+// Sauvegarde de la progression dans iCloud Drive, un autre nuage du Mac
+// (Dropbox, Google Drive, OneDrive…) ou un dossier choisi.
 // L'état vit ici pour que la barre latérale, les Réglages et l'accueil le
 // partagent ; les sauvegardes automatiques (événement « backup ») le tiennent à jour.
 import { create } from "zustand";
@@ -6,7 +7,7 @@ import { api, errorText, isTauri } from "./api";
 import { useChat } from "./chat";
 import { count, isEn, locale, t } from "./i18n";
 import { formatBytes, formatNumber, useApp } from "./store";
-import type { BackupInfo, BackupRestored, BackupStatus } from "./types";
+import type { BackupInfo, BackupPlace, BackupRestored, BackupStatus } from "./types";
 
 export function restoreStage(stage: string): string | undefined {
   return {
@@ -27,7 +28,10 @@ interface BackupState {
   restoring: { key: string; stage: string; value: number } | null;
   /** dernière restauration échouée (l'accueil n'affiche pas les notifications) */
   restoreError: string;
+  /** nuages installés sur ce Mac ; null : pas encore lus */
+  places: BackupPlace[] | null;
   refresh(): Promise<void>;
+  loadPlaces(): Promise<void>;
   /** active ou coupe la sauvegarde automatique ; l'activation sauvegarde tout de suite */
   enable(on: boolean): Promise<boolean>;
   save(): Promise<boolean>;
@@ -43,6 +47,15 @@ export const useBackup = create<BackupState>((set, get) => ({
   listError: "",
   restoring: null,
   restoreError: "",
+  places: null,
+
+  async loadPlaces() {
+    try {
+      set({ places: await api().backupPlaces() });
+    } catch {
+      if (!get().places) set({ places: [] });
+    }
+  },
 
   async refresh() {
     try {
@@ -163,19 +176,35 @@ export function dayLabel(day: string): string {
   return t(`${weekday} ${frenchDate(d, d.getFullYear() !== new Date().getFullYear())}`, `${weekday}, ${frenchDate(d, d.getFullYear() !== new Date().getFullYear())}`);
 }
 
+/** Un nuage (iCloud Drive, Dropbox…), et non un disque ou un dossier ordinaire. */
+export function isCloud(p: BackupPlace | undefined): boolean {
+  return !!p && p.kind !== "drive" && p.kind !== "folder";
+}
+
+/** « iCloud Drive », « Dropbox », « Google Drive » ; « le dossier choisi » pour un dossier ordinaire. */
+export function placeName(s: BackupStatus): string {
+  if (s.icloud) return "iCloud Drive";
+  if (isCloud(s.place) || s.place?.kind === "drive") return s.place.name;
+  return t("le dossier choisi", "the chosen folder");
+}
+
 /** Où en est l'envoi vers le nuage (vide quand il n'y a rien d'utile à dire). */
 export function cloudText(s: BackupStatus): string {
+  const name = s.icloud ? "iCloud" : (s.place?.name ?? "");
   switch (s.cloud) {
     case "uploaded":
-      return t("dans iCloud", "in iCloud");
+      return t(`dans ${name}`, `in ${name}`);
     case "uploading":
-      return t("envoi vers iCloud…", "uploading to iCloud…");
+      return t(`envoi vers ${name}…`, `uploading to ${name}…`);
     case "waiting":
-      return t("en attente d'envoi vers iCloud", "waiting to upload to iCloud");
+      return t(`en attente d'envoi vers ${name}`, `waiting to upload to ${name}`);
     case "error":
-      return t(`iCloud : ${s.cloud_error ?? "envoi impossible"}`, `iCloud: ${s.cloud_error ?? "upload failed"}`);
+      return t(`${name} : ${s.cloud_error ?? "envoi impossible"}`, `${name}: ${s.cloud_error ?? "upload failed"}`);
     case "local":
-      return s.icloud ? "" : t("dans le dossier choisi", "in the chosen folder");
+      // dossier que l'app du service envoie elle-même (anciennes versions de Dropbox…)
+      if (s.icloud) return "";
+      if (s.place?.kind === "drive") return t(`sur ${name}`, `on ${name}`);
+      return isCloud(s.place) ? t(`dans le dossier ${name}`, `in the ${name} folder`) : t("dans le dossier choisi", "in the chosen folder");
     default:
       return "";
   }
@@ -197,16 +226,37 @@ export function statusLine(s: BackupStatus, saving: boolean): string {
   return parts.join(" · ");
 }
 
-/** Emplacement lisible : « iCloud Drive › Lumen », « Dropbox › Lumen ». */
+/** Emplacement lisible : « iCloud Drive › Lumen », « Google Drive › Mon Drive › Lumen ». */
 export function placeLabel(s: BackupStatus): string {
   if (!s.dir) return t("Aucun", "None");
   if (s.icloud) return "iCloud Drive › Lumen";
+  const p = s.place;
+  if (p && (isCloud(p) || p.kind === "drive") && s.dir.startsWith(`${p.path}/`)) {
+    return [p.name, ...s.dir.slice(p.path.length).split("/").filter(Boolean)].join(" › ");
+  }
   const home = s.dir.match(/^\/Users\/[^/]+/)?.[0];
   const rel = home ? s.dir.slice(home.length + 1) : s.dir;
   return rel.split("/").filter(Boolean).slice(-3).join(" › ");
 }
 
-/** Choisit un autre dossier (Dropbox, Google Drive, clé USB…). */
+/** Dossier à retenir pour un nuage du Mac ("" : iCloud Drive ; null : impossible, déjà signalé). */
+export async function placeDir(p: BackupPlace): Promise<string | null> {
+  if (p.kind === "icloud") return "";
+  try {
+    return await api().backupPlaceDir(p.path);
+  } catch (e) {
+    useApp.getState().toast(errorText(e), "error");
+    return null;
+  }
+}
+
+/** Ce nuage est-il celui de la sauvegarde ? */
+export function isPlaceOf(s: BackupStatus, p: BackupPlace): boolean {
+  if (p.kind === "icloud") return s.icloud;
+  return !s.icloud && !!s.dir && (s.dir === p.path || s.dir.startsWith(`${p.path}/`));
+}
+
+/** Choisit un autre dossier (clé USB, disque, NAS, ou un nuage qui n'est pas proposé). */
 export async function pickBackupFolder(): Promise<string | null> {
   if (!isTauri) return t("/Users/vous/Dropbox", "/Users/you/Dropbox");
   const { open } = await import("@tauri-apps/plugin-dialog");

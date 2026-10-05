@@ -14,6 +14,10 @@ import { paginate, sentenceBounds, type PageRange } from "../../lib/tokenize";
 import type { LessonSummary, OpenedLesson, Term, Token } from "../../lib/types";
 import { Player, type PlayerHandle, type PlaybackState } from "./Player";
 import { useChat } from "../../lib/chat";
+import { chooseCover } from "../../lib/covers";
+import { confirmAsk } from "../../lib/dialogs";
+import { useLessonMenu, useMenu } from "../../lib/menu";
+import { AddToPlaylist } from "../../components/AddToPlaylist";
 import { DisplayMenu } from "./Display";
 import { PlaylistStrip, UpNext, usePlaylist } from "./PlaylistBar";
 import { AsideTabs, ReaderChat, type AsideTab } from "./ReaderChat";
@@ -99,6 +103,8 @@ export function Reader() {
   const closeLook = useCallback(() => setLookOpen(false), []);
   // sens du dernier changement de page (1 : en avant), pour l'animation
   const [turn, setTurn] = useState(1);
+  // « Ajouter à une playlist… » du menu Leçon : la leçon et celles de sa langue
+  const [adding, setAdding] = useState<{ lesson: LessonSummary; all: LessonSummary[] } | null>(null);
 
   const look = readerLook(settings);
   const paged = look.layout === "pages";
@@ -732,7 +738,7 @@ export function Reader() {
     const onKey = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement;
       if (t.closest("input, textarea, select, [contenteditable]") || e.metaKey || e.ctrlKey) return;
-      if (useApp.getState().importOpen || simplify || complete || lookOpen) return;
+      if (useApp.getState().importOpen || useMenu.getState().shortcuts || simplify || complete || lookOpen || adding) return;
       const words: number[] = [];
       for (let i = pr.start; i < pr.end; i++) if (tokens[i].w) words.push(i);
       const cur = range ? words.indexOf(range.a) : -1;
@@ -787,6 +793,66 @@ export function Reader() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
+  });
+
+  // ---------- menu Leçon (barre des menus du Mac) ----------
+  const addToPlaylist = async () => {
+    if (!lesson) return;
+    try {
+      const all = await api().lessonsList(lesson.lang);
+      const me = all.find((l) => l.id === lesson.id);
+      if (me) setAdding({ lesson: me, all });
+    } catch (e) {
+      toast(errorText(e), "error");
+    }
+  };
+  const changeCover = async () => {
+    if (!lesson) return;
+    try {
+      if (await chooseCover(lesson.id)) {
+        bump();
+        toast(t("Nouvelle couverture enregistrée", "New cover saved"), "light");
+      }
+    } catch (e) {
+      toast(errorText(e), "error");
+    }
+  };
+  const removeLesson = async () => {
+    if (!lesson) return;
+    const ok = await confirmAsk(
+      t(`Supprimer « ${lesson.title} » ? Les mots appris sont conservés.`, `Delete “${lesson.title}”? The words you learned are kept.`),
+      t("Supprimer la leçon", "Delete the lesson"),
+      t("Supprimer", "Delete"),
+    );
+    if (!ok) return;
+    playerRef.current?.stop();
+    try {
+      await api().lessonDelete(lesson.id);
+    } catch (e) {
+      toast(errorText(e), "error");
+      return;
+    }
+    useApp.getState().forgetLesson(lesson.id);
+    toast(t("Leçon supprimée", "Lesson deleted"));
+    bump();
+    go("library");
+  };
+  useLessonMenu(lesson ? { media: !!lesson.media_path, video: !!lesson.video_path } : null, {
+    toggle: () => playerRef.current?.toggle(),
+    skip: (secs) => playerRef.current?.skip(secs),
+    prev: () => goPage(page - 1),
+    next: () => goPage(page + 1),
+    restart: () => goPage(0),
+    finish: () => void finishPage(),
+    chat: () => {
+      setAside("chat");
+      useChat.getState().focus();
+    },
+    simplify: () => setSimplify(true),
+    cinema: () => setCinema(true),
+    playlist: () => void addToPlaylist(),
+    cover: () => void changeCover(),
+    remove: () => void removeLesson(),
   });
 
   // le chat cadre l'extrait des longues leçons sur la page lue
@@ -1357,6 +1423,7 @@ export function Reader() {
       </aside>
 
       <SimplifySheet open={simplify} onClose={() => setSimplify(false)} lessonTitle={lesson.title} text={lesson.text} lang={lang} />
+      <AddToPlaylist lesson={adding?.lesson ?? null} all={adding?.all ?? []} onClose={() => setAdding(null)} />
     </div>
   );
 }

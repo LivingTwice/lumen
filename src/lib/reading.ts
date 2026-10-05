@@ -116,6 +116,11 @@ export const LOOK_DEFAULTS: Record<string, string> = {
   word_style: "tint",
 };
 
+/** Vitesses de lecture : audio et vidéo, ou voix (réglages `media_rate` et `tts_rate`). */
+export function playbackRates(media: boolean): string[] {
+  return media ? ["0.75", "0.9", "1", "1.25"] : ["0.75", "0.85", "0.95", "1.1"];
+}
+
 export function readFont(id: string | undefined): ReadFont {
   return READ_FONTS.find((f) => f.id === id) ?? READ_FONTS[0];
 }

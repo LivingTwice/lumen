@@ -532,22 +532,54 @@ pub fn simplify_messages(native: &str, lang: &str, level: &str, text: &str) -> V
 const CHAT_SYSTEM: &str = "Tu es Lumen, un professeur de langues expert, patient et chaleureux, intégré à une application qui aide à apprendre les langues en lisant et en écoutant. Tu maîtrises la grammaire, la conjugaison, le vocabulaire, la prononciation, les expressions idiomatiques, les registres de langue et la culture des pays concernés, et tu sais rendre tout cela simple.
 
 Règles :
-- Réponds en français, sauf si l'apprenant t'écrit dans une autre langue pour s'entraîner : réponds-lui alors dans cette langue, avec des phrases à sa portée, puis signale brièvement ses fautes et leur correction, en français.
+- C'est l'apprenant qui mène la conversation. Réponds à ce qu'il demande, et seulement à cela : pas d'exercice, de quiz, de liste de mots ni de nouveau sujet qu'il n'a pas demandés.
+- Termine ta réponse quand tu as répondu : pas de proposition, de question pour relancer ni d'encouragement à la fin (« Veux-tu que… ? », « N'hésite pas… », « Bravo ! »). S'il veut aller plus loin, il te le dira.
+- Réponds en français, sauf si l'apprenant t'écrit dans une autre langue pour s'entraîner : réponds-lui alors dans cette langue, avec des phrases à sa portée, comme un interlocuteur qui suit le sujet qu'il a choisi ; puis, seulement s'il a fait des fautes, corrige-les en une ligne, en français.
+- S'il te propose de converser sans choisir de sujet, demande-lui de quoi il veut parler.
 - Sois précis et concis : va droit au but, sans formule de politesse superflue.
 - Donne des exemples dans la langue étudiée, chacun suivi de sa traduction française.
 - Pour un mot ou une expression : son sens dans le contexte, sa forme de base, sa nature grammaticale, puis un ou deux exemples.
 - Si tu n'es pas sûr de quelque chose, dis-le au lieu d'inventer.
 - Mise en forme sobre : paragraphes courts, listes, **gras** pour les mots clés, tableaux seulement pour les conjugaisons et les déclinaisons.";
 
+/// Rappel ajouté à la question : un petit modèle suit mieux une règle lue
+/// juste avant de répondre que la même règle perdue en tête des consignes.
+const CHAT_LEAD: &str = "(Réponds seulement à ce que je demande, sans rien me proposer à la fin.)";
+
 const CHAT_SYSTEM_EN: &str = "You are Lumen, an expert, patient and warm language teacher, built into an app that helps people learn languages by reading and listening. You master grammar, conjugation, vocabulary, pronunciation, idioms, registers and the culture of the countries concerned, and you know how to make all of it simple.
 
 Rules:
-- Answer in English, unless the learner writes to you in another language to practise: then answer in that language, with sentences they can understand, then briefly point out their mistakes and how to correct them, in English.
+- The learner leads the conversation. Answer what they ask, and only that: no exercises, quizzes, word lists or new topics they didn't ask for.
+- End your answer once you have answered: no offer, follow-up question or encouragement at the end (\"Would you like me to…?\", \"Feel free to…\", \"Great job!\"). If they want to go further, they will tell you.
+- Answer in English, unless the learner writes to you in another language to practise: then answer in that language, with sentences they can understand, like someone following the topic they chose; then, only if they made mistakes, correct them in one line, in English.
+- If they offer to chat without choosing a topic, ask them what they would like to talk about.
 - Be precise and concise: get straight to the point, without unnecessary pleasantries.
 - Give examples in the language being studied, each followed by its English translation.
 - For a word or expression: its meaning in context, its base form, its part of speech, then one or two examples.
 - If you are not sure about something, say so instead of making it up.
 - Keep formatting simple: short paragraphs, lists, **bold** for key words, tables only for conjugations and declensions.";
+
+const CHAT_LEAD_EN: &str = "(Answer only what I ask, without offering anything else at the end.)";
+
+/// Ce que le chat sait de l'apprenant : ses mots connus, et son profil (nom,
+/// ce qui le motive, centres d'intérêt, accords), lu par `user::learner`.
+#[derive(Default, Clone, Debug)]
+pub struct Learner {
+    pub known: i64,
+    pub name: String,
+    pub why: String,
+    pub interests: Vec<String>,
+    /// accords quand le chat s'adresse à lui : féminin, masculin, ou sans préférence
+    pub feminine: Option<bool>,
+}
+
+#[cfg(test)]
+impl Learner {
+    /// Un apprenant dont on ne sait que le nombre de mots connus.
+    pub fn knows(known: i64) -> Self {
+        Learner { known, ..Default::default() }
+    }
+}
 
 /// Leçon jointe à une conversation.
 pub struct LessonContext<'a> {
@@ -573,21 +605,46 @@ pub fn lang_with_article(code: &str) -> String {
 pub fn chat_messages(
     native: &str,
     lang: &str,
-    known: i64,
+    learner: &Learner,
     lesson: Option<&LessonContext>,
     history: &[(String, String)],
     question: &str,
     hints: &[String],
 ) -> Vec<(&'static str, String)> {
     if native == "en" {
-        return chat_messages_en(lang, known, lesson, history, question, hints);
+        return chat_messages_en(lang, learner, lesson, history, question, hints);
     }
+    let known = learner.known;
+    // « elle » si l'apprenante l'a demandé dans son profil, sinon le « il » de « l'apprenant »
+    let il = if learner.feminine == Some(true) { "Elle" } else { "Il" };
     let mut system = String::from(CHAT_SYSTEM);
-    system.push_str("\n\nL'apprenant est francophone. ");
+    system.push_str(&format!("\n\n{} est francophone. ", if learner.feminine == Some(true) { "L'apprenante" } else { "L'apprenant" }));
     if known < 50 {
-        system.push_str(&format!("Il débute en {}.", lang_name(lang)));
+        system.push_str(&format!("{il} débute en {}.", lang_name(lang)));
     } else {
-        system.push_str(&format!("Il étudie {} et connaît déjà environ {known} mots dans cette langue.", lang_with_article(lang)));
+        system.push_str(&format!("{il} étudie {} et connaît déjà environ {known} mots dans cette langue.", lang_with_article(lang)));
+    }
+    if !learner.name.is_empty() {
+        system.push_str(&format!(" {il} s'appelle {} : tu peux l'appeler ainsi de temps en temps, sans en abuser.", learner.name));
+    }
+    match learner.feminine {
+        Some(true) => system.push_str(" Quand tu t'adresses à elle, accorde au féminin, en français comme dans la langue étudiée."),
+        Some(false) => system.push_str(" Quand tu t'adresses à lui, accorde au masculin, en français comme dans la langue étudiée."),
+        None => {}
+    }
+    // centres d'intérêt et motivation : seulement quand l'apprenant demande au
+    // chat de choisir un sujet ou des exemples ; ressortis à tout propos, ils
+    // détournent les réponses vers des sujets qu'il n'a pas choisis
+    let mut tastes = Vec::new();
+    if !learner.interests.is_empty() {
+        tastes.push(format!("ses centres d'intérêt ({})", learner.interests.join(", ")));
+    }
+    if !learner.why.is_empty() {
+        tastes.push(format!("ce qui {} motive (« {} »)", if learner.feminine == Some(true) { "la" } else { "le" }, learner.why));
+    }
+    if !tastes.is_empty() {
+        let si = if learner.feminine == Some(true) { "si elle" } else { "s'il" };
+        system.push_str(&format!(" Seulement {si} te demande de choisir un sujet ou des exemples, inspire-toi de {} ; sinon, n'en parle pas.", tastes.join(" et de ")));
     }
     if let Some(l) = lesson {
         let part = if l.partial { " (ce n'est qu'un extrait, autour du passage qu'il lit : la leçon complète est plus longue)" } else { "" };
@@ -603,11 +660,12 @@ pub fn chat_messages(
         out.push((if role == "assistant" { "assistant" } else { "user" }, content.trim().to_string()));
     }
     let mut q = question.trim().to_string();
-    if lang != "fr" && !looks_french(&q) {
+    let practice = lang != "fr" && !looks_french(&q);
+    if practice {
         // l'apprenant écrit dans une autre langue pour s'entraîner : un petit modèle
         // suit mieux une consigne précise, au bon endroit, qu'une règle générale
         q.push_str(&format!(
-            "\n\n(Je m'entraîne : réponds-moi en {}, avec des phrases simples, puis ajoute une courte partie « Corrections » en français si j'ai fait des fautes.)",
+            "\n\n(Je m'entraîne : réponds-moi en {}, en quelques phrases simples, comme dans une vraie conversation sur le sujet que j'ai choisi. Si mon message contient des fautes, termine par une seule ligne « Corrections : » qui les corrige, en français.)",
             lang_name(lang)
         ));
     }
@@ -615,25 +673,48 @@ pub fn chat_messages(
         // comme pour le panneau du mot : des repères sûrs évitent les sens inventés
         q.push_str(&format!("\n\n(Dictionnaire, sens possibles à choisir selon le contexte : {})", hints.join(" ; ")));
     }
+    if !practice {
+        q.push_str("\n\n");
+        q.push_str(CHAT_LEAD);
+    }
     out.push(("user", q));
     out
 }
 
 fn chat_messages_en(
     lang: &str,
-    known: i64,
+    learner: &Learner,
     lesson: Option<&LessonContext>,
     history: &[(String, String)],
     question: &str,
     hints: &[String],
 ) -> Vec<(&'static str, String)> {
     let name = lang_name_en(lang);
+    let known = learner.known;
     let mut system = String::from(CHAT_SYSTEM_EN);
     system.push_str("\n\nThe learner is an English speaker. ");
     if known < 50 {
         system.push_str(&format!("They are a beginner in {name}."));
     } else {
         system.push_str(&format!("They are learning {name} and already know about {known} words in this language."));
+    }
+    if !learner.name.is_empty() {
+        system.push_str(&format!(" Their name is {}: you can call them by it now and then, without overdoing it.", learner.name));
+    }
+    match learner.feminine {
+        Some(true) => system.push_str(&format!(" When addressing them in a language with grammatical gender, such as {name}, use feminine agreement.")),
+        Some(false) => system.push_str(&format!(" When addressing them in a language with grammatical gender, such as {name}, use masculine agreement.")),
+        None => {}
+    }
+    let mut tastes = Vec::new();
+    if !learner.interests.is_empty() {
+        tastes.push(format!("their interests ({})", learner.interests.join(", ")));
+    }
+    if !learner.why.is_empty() {
+        tastes.push(format!("what motivates them (\"{}\")", learner.why));
+    }
+    if !tastes.is_empty() {
+        system.push_str(&format!(" Only if they ask you to choose a topic or examples, draw on {}; otherwise, don't mention them.", tastes.join(" and ")));
     }
     if let Some(l) = lesson {
         let part = if l.partial { " (this is only an excerpt, around the passage they are reading: the full lesson is longer)" } else { "" };
@@ -648,13 +729,18 @@ fn chat_messages_en(
         out.push((if role == "assistant" { "assistant" } else { "user" }, content.trim().to_string()));
     }
     let mut q = question.trim().to_string();
-    if lang != "en" && !looks_english(&q) {
+    let practice = lang != "en" && !looks_english(&q);
+    if practice {
         q.push_str(&format!(
-            "\n\n(I'm practising my {name}: answer me in {name}, with simple sentences. Then, if I made mistakes, add a short \"Corrections\" section written in English.)"
+            "\n\n(I'm practising my {name}: answer me in {name}, in a few simple sentences, like in a real conversation on the topic I chose. If my message contains mistakes, end with a single line \"Corrections:\" that fixes them, written in English.)"
         ));
     }
     if !hints.is_empty() {
         q.push_str(&format!("\n\n(Dictionary, possible meanings to choose from depending on the context: {})", hints.join("; ")));
+    }
+    if !practice {
+        q.push_str("\n\n");
+        q.push_str(CHAT_LEAD_EN);
     }
     out.push(("user", q));
     out
@@ -717,6 +803,8 @@ pub fn looks_french(text: &str) -> bool {
         "ce", "ça", "pour", "pas", "dans", "sur", "avec", "mot", "mots", "phrase", "dire", "veut", "comment", "pourquoi", "quel", "quelle",
         "explique", "explique-moi", "peux-tu", "merci", "bonjour", "salut", "oui", "non", "c'est", "qu'est-ce", "j'ai", "moi", "mon", "ma",
         "mes", "leçon", "texte", "traduis", "traduction", "donne-moi", "écris-moi", "aussi", "plus", "très", "ou", "où", "au", "aux",
+        "cette", "cet", "ces", "quels", "quelles", "quelques", "résume", "résume-moi", "résumé", "niveau", "discutons", "parlons",
+        "pose-moi", "dois-je", "peux", "veux", "suis", "sont", "être", "avoir", "faire", "fait", "différence",
     ];
     // les passages cités (mots de la leçon) ne disent rien de la langue du message
     let mut plain = String::new();
@@ -952,15 +1040,16 @@ mod tests {
         assert_eq!(lang_with_article("hu"), "le hongrois");
         let lesson = LessonContext { title: "Il faro", text: "Marta sale le scale.", partial: false };
         let history = vec![("user".to_string(), "Ciao !".to_string()), ("assistant".to_string(), "Ciao ! Come stai ?".to_string())];
-        let m = chat_messages("fr", "it", 1200, Some(&lesson), &history, "  Que veut dire « sale » ?  ", &[]);
+        let m = chat_messages("fr", "it", &Learner::knows(1200), Some(&lesson), &history, "  Que veut dire « sale » ?  ", &[]);
         assert_eq!(m.iter().map(|(r, _)| *r).collect::<Vec<_>>(), vec!["system", "user", "assistant", "user"]);
         assert!(m[0].1.contains("connaît déjà environ 1200 mots") && m[0].1.contains("l'italien"));
         assert!(m[0].1.contains("« Il faro »") && m[0].1.contains("<leçon>\nMarta sale le scale.\n</leçon>"));
-        assert_eq!(m[3].1, "Que veut dire « sale » ?");
-        let m = chat_messages("fr", "ru", 0, None, &[], "Привет", &["привет : bonjour".into()]);
+        // l'apprenant mène : le rappel suit la question, la question reste telle quelle
+        assert_eq!(m[3].1, format!("Que veut dire « sale » ?\n\n{CHAT_LEAD}"));
+        let m = chat_messages("fr", "ru", &Learner::knows(0), None, &[], "Привет", &["привет : bonjour".into()]);
         assert!(m[0].1.contains("Il débute en russe.") && !m[0].1.contains("<leçon>"));
         assert!(m[1].1.starts_with("Привет\n\n(Je m'entraîne : réponds-moi en russe"));
-        assert!(m[1].1.ends_with("\n\n(Dictionnaire, sens possibles à choisir selon le contexte : привет : bonjour)"));
+        assert!(m[1].1.ends_with("\n\n(Dictionnaire, sens possibles à choisir selon le contexte : привет : bonjour)") && !m[1].1.contains(CHAT_LEAD));
         assert_eq!(quoted_words("Explique-moi « saliva » dans cette phrase : « Marta saliva le scale strette. »"), vec!["saliva"]);
         assert_eq!(quoted_words("Différence entre « è salita » et “scese” ?"), vec!["è", "salita", "scese"]);
         assert!(quoted_words("Bonjour, ça va ?").is_empty());
@@ -971,22 +1060,46 @@ mod tests {
         assert!(!looks_french("Ciao ! Io sono andato al mare ieri, e tu ?"));
         assert!(!looks_french("Привет, как дела ?"));
         assert!(!looks_french("Yesterday I goed to the beach with my friends."));
-        let m = chat_messages("fr", "it", 900, None, &[], "Ciao ! Come stai ?", &[]);
+        // les questions proposées par le chat sont bien du français (sinon : « Corrections » sans objet)
+        assert!(looks_french("Résume cette leçon en quelques phrases"));
+        assert!(looks_french("Discutons en italien, à mon niveau"));
+        assert!(looks_french("Quels mots de cette leçon dois-je retenir en priorité ?"));
+        assert!(!looks_french("Hay una diferencia entre ser y estar."));
+        assert!(!looks_french("These phrases are useful."));
+        let m = chat_messages("fr", "it", &Learner::knows(900), None, &[], "Ciao ! Come stai ?", &[]);
         assert!(m[1].1.contains("réponds-moi en italien"));
-        let m = chat_messages("fr", "it", 900, None, &[], "Comment dit-on « bonjour » ?", &[]);
+        let m = chat_messages("fr", "it", &Learner::knows(900), None, &[], "Comment dit-on « bonjour » ?", &[]);
         assert!(!m[1].1.contains("Je m'entraîne"));
-        let m = chat_messages("fr", "fr", 900, None, &[], "Je suis allé à la plage.", &[]);
+        let m = chat_messages("fr", "fr", &Learner::knows(900), None, &[], "Je suis allé à la plage.", &[]);
         assert!(!m[1].1.contains("Je m'entraîne"));
+        // profil : nom, accords, ce qui motive, centres d'intérêt
+        let me = Learner { known: 900, name: "Léa".into(), why: "parler avec ma famille à Naples".into(), interests: vec!["cuisine".into(), "opéra".into()], feminine: Some(true) };
+        let m = chat_messages("fr", "it", &me, None, &[], "Ciao !", &[]);
+        assert!(m[0].1.contains("L'apprenante est francophone. Elle étudie l'italien"));
+        assert!(m[0].1.contains("Elle s'appelle Léa :") && m[0].1.contains("accorde au féminin"));
+        // centres d'intérêt et motivation : seulement quand l'apprenante laisse choisir
+        assert!(m[0].1.contains(
+            "Seulement si elle te demande de choisir un sujet ou des exemples, inspire-toi de ses centres d'intérêt (cuisine, opéra) et de ce qui la motive (« parler avec ma famille à Naples ») ; sinon, n'en parle pas."
+        ));
+        let m = chat_messages("en", "it", &me, None, &[], "Ciao!", &[]);
+        assert!(m[0].1.contains("Their name is Léa:") && m[0].1.contains("such as Italian, use feminine agreement"));
+        assert!(m[0].1.contains(
+            "Only if they ask you to choose a topic or examples, draw on their interests (cuisine, opéra) and what motivates them (\"parler avec ma famille à Naples\"); otherwise, don't mention them."
+        ));
+        // sans profil : rien de plus qu'avant
+        let m = chat_messages("fr", "it", &Learner::knows(900), None, &[], "Ciao !", &[]);
+        assert!(m[0].1.contains("L'apprenant est francophone. Il étudie"));
+        assert!(!m[0].1.contains("s'appelle") && !m[0].1.contains("accorde") && !m[0].1.contains("motive") && !m[0].1.contains("centres d'intérêt"));
     }
 
     #[test]
     fn chat_prompt_english() {
         let lesson = LessonContext { title: "Il faro", text: "Marta sale le scale.", partial: true };
-        let m = chat_messages("en", "it", 1200, Some(&lesson), &[], "What does « sale » mean here?", &["sale: third-person singular present indicative of salire".into()]);
+        let m = chat_messages("en", "it", &Learner::knows(1200), Some(&lesson), &[], "What does « sale » mean here?", &["sale: third-person singular present indicative of salire".into()]);
         assert!(m[0].1.starts_with("You are Lumen") && m[0].1.contains("already know about 1200 words") && m[0].1.contains("Italian"));
         assert!(m[0].1.contains("\"Il faro\"") && m[0].1.contains("<lesson>\nMarta sale le scale.\n</lesson>") && m[0].1.contains("only an excerpt"));
-        assert!(!m[1].1.contains("practising") && m[1].1.ends_with("salire)"));
-        let m = chat_messages("en", "it", 10, None, &[], "Ciao! Io sono andato al mare ieri, e tu?", &[]);
+        assert!(!m[1].1.contains("practising") && m[1].1.ends_with(&format!("salire)\n\n{CHAT_LEAD_EN}")));
+        let m = chat_messages("en", "it", &Learner::knows(10), None, &[], "Ciao! Io sono andato al mare ieri, e tu?", &[]);
         assert!(m[0].1.contains("beginner in Italian") && m[1].1.contains("answer me in Italian") && m[1].1.contains("written in English"));
         // l'anglais : le français d'un apprenant anglophone, pas une question
         assert!(looks_english("What does « Marta saliva le scale » mean?"));
@@ -997,7 +1110,7 @@ mod tests {
         assert!(!looks_english("Ich bin in Berlin, und du?"));
         assert!(!looks_english("Hola, me llamo Ana y tengo un perro."));
         assert!(!looks_english("Je suis allé à la plage avec mes amis."));
-        let m = chat_messages("en", "en", 900, None, &[], "I goed to the beach.", &[]);
+        let m = chat_messages("en", "en", &Learner::knows(900), None, &[], "I goed to the beach.", &[]);
         assert!(!m[1].1.contains("practising"));
         // mots et phrases
         let w = word_messages("en", "it", "andavo", "Quando ero piccolo andavo al mare.", "form of andare: to go");
@@ -1143,7 +1256,7 @@ mod live {
         for q in ["What does “saliva” mean in “Marta saliva le scale”?", "Ciao! Ieri sono andato al mare con mio amici."] {
             let hints: Vec<String> = quoted_words(q).iter().filter_map(|w| dict_hint(&dicts, "en", "it", w)).collect();
             println!("\n--- repères : {hints:?}");
-            let msgs = chat_messages("en", "it", 900, None, &[], q, &hints);
+            let msgs = chat_messages("en", "it", &Learner::knows(900), None, &[], q, &hints);
             let g = Gen { max_tokens: 400, think: None, sampling: Sampling::Natural, priority: Priority::Stoppable(flag.clone()) };
             let out = engine.run(Path::new(&path), &msgs, g, |_| true).unwrap();
             println!("\n=== {q}\n{}", out.answer);
@@ -1168,7 +1281,7 @@ mod live {
         let hints = |q: &str| -> Vec<String> { quoted_words(q).iter().filter_map(|w| dict_hint(&dicts, "fr", "it", w)).collect() };
         let ask = |q: &str, think: Option<usize>, stop_after: Option<usize>| {
             let flag = Arc::new(AtomicBool::new(false));
-            let msgs = chat_messages("fr", "it", 900, Some(&lesson), &[], q, &hints(q));
+            let msgs = chat_messages("fr", "it", &Learner::knows(900), Some(&lesson), &[], q, &hints(q));
             let g = Gen { max_tokens: 700, think, sampling: Sampling::Natural, priority: Priority::Stoppable(flag.clone()) };
             let t = std::time::Instant::now();
             let (mut thought_pieces, mut answer_pieces) = (0usize, 0usize);
@@ -1208,6 +1321,74 @@ mod live {
         // arrêt demandé : la réponse partielle est gardée
         let (out, _) = ask("Écris-moi une longue histoire en italien sur un phare.", None, Some(12));
         assert!(out.stopped && !out.answer.is_empty());
+    }
+
+    /// Dernier paragraphe d'une réponse : une offre ou une question qui relance
+    /// l'apprenant (« Veux-tu que je… ? », « Let me know if… ») ?
+    fn ends_with_offer(answer: &str) -> bool {
+        const OFFERS: &[&str] = &[
+            "veux-tu", "voulez-vous", "souhaites-tu", "souhaitez-vous", "aimerais-tu", "aimeriez-vous", "n'hésite", "n'hésitez", "si tu veux",
+            "si vous voulez", "si tu le souhaites", "si vous le souhaitez", "je peux aussi", "je peux te", "je peux vous", "dis-moi", "dites-moi",
+            "à toi", "à vous", "would you like", "do you want", "let me know", "feel free", "if you want", "if you'd like", "i can also", "shall we",
+            "your turn", "want me to",
+        ];
+        let last = answer.trim().rsplit("\n\n").next().unwrap_or("").to_lowercase().replace('’', "'");
+        last.trim_end().ends_with('?') || OFFERS.iter().any(|o| last.contains(o))
+    }
+
+    /// L'apprenant mène la conversation : les réponses s'arrêtent à ce qui est
+    /// demandé, sans offre ni question pour relancer (compte et affiche les fins) :
+    /// LUMEN_TEST_MODEL=/chemin/modele.gguf cargo test --release --lib chat_lead_live -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn chat_lead_live() {
+        let Ok(path) = std::env::var("LUMEN_TEST_MODEL") else { return };
+        let engine = Engine::new();
+        let lesson = LessonContext {
+            title: "Il faro",
+            text: "Ogni mattina, Marta saliva le scale strette del vecchio faro. Dalla cima, il mare sembrava infinito e calmo.\n\nUn giorno trovò una lettera nascosta tra due pietre.",
+            partial: false,
+        };
+        let me = Learner { known: 900, name: "Léa".into(), why: "parler avec ma famille à Naples".into(), interests: vec!["cuisine".into()], feminine: Some(true) };
+        // questions précises : la réponse s'arrête à ce qui est demandé
+        let asks: &[(&str, bool, &str)] = &[
+            ("fr", true, "Que veut dire « saliva » dans la première phrase ?"),
+            ("fr", false, "Quelle est la différence entre le passato prossimo et l'imperfetto ?"),
+            ("fr", false, "Comment dit-on « je suis fatigué » en italien ?"),
+            ("fr", true, "Résume cette leçon en quelques phrases"),
+            ("fr", false, "Pourquoi dit-on « la mano » alors que le mot finit par -o ?"),
+            ("en", false, "How do I say “I'm tired” in Italian?"),
+            ("en", true, "What does “trovò” mean?"),
+        ];
+        // conversation voulue par l'apprenant : répondre comme un interlocuteur reste permis
+        let talks: &[(&str, &str)] = &[
+            ("fr", "Discutons en italien, à mon niveau"),
+            ("fr", "Discutons en italien, à mon niveau, de mon dernier voyage"),
+            ("fr", "Ciao ! Oggi ho cucinato una pasta al pomodoro."),
+            ("fr", "Ciao ! Ieri sono andata al cinema con mia sorella."),
+        ];
+        let flag = Arc::new(AtomicBool::new(false));
+        let answer = |native: &str, with_lesson: bool, q: &str| {
+            let msgs = chat_messages(native, "it", &me, with_lesson.then_some(&lesson), &[], q, &[]);
+            let g = Gen { max_tokens: 900, think: None, sampling: Sampling::Natural, priority: Priority::Stoppable(flag.clone()) };
+            engine.run(Path::new(&path), &msgs, g, |_| true).unwrap().answer
+        };
+        let mut offers = 0;
+        let mut total = 0;
+        for round in 0..2 {
+            for (native, with_lesson, q) in asks {
+                let a = answer(native, *with_lesson, q);
+                let offer = ends_with_offer(&a);
+                offers += offer as usize;
+                total += 1;
+                let last = a.trim().rsplit("\n\n").next().unwrap_or("");
+                println!("\n=== [{round}] {q} ({} car.){}\n--- fin : {last}", a.chars().count(), if offer { "  << RELANCE" } else { "" });
+            }
+        }
+        for (native, q) in talks {
+            println!("\n=== {q}\n{}", answer(native, false, q));
+        }
+        println!("\n>>> relances : {offers} sur {total}");
     }
 
     /// Comparaison de modèles sur les mêmes questions, dans les 31 langues : sens en contexte
@@ -1368,7 +1549,7 @@ mod live {
             let (mut gen_tokens, mut gen_secs) = (0usize, 0f64);
             for (native, lang, with_lesson, q) in chats {
                 let flag = Arc::new(AtomicBool::new(false));
-                let msgs = chat_messages(native, lang, 900, with_lesson.then_some(&lesson), &[], q, &[]);
+                let msgs = chat_messages(native, lang, &Learner::knows(900), with_lesson.then_some(&lesson), &[], q, &[]);
                 let n_prompt: usize = msgs.iter().map(|(_, c)| n_tok(c)).sum();
                 let g = Gen { max_tokens: 700, think: None, sampling: Sampling::Natural, priority: Priority::Stoppable(flag) };
                 let t = std::time::Instant::now();

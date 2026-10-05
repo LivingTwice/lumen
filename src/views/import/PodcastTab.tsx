@@ -1,5 +1,5 @@
 import { AnimatePresence, motion } from "motion/react";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Icon, type IconName } from "../../components/Icon";
 import { Orb, Segmented, Switch } from "../../components/ui";
 import { LEVELS, openSource, useLevel } from "../../lib/discover";
@@ -9,6 +9,7 @@ import { inLang, theLang } from "../../lib/langs";
 import { useApp } from "../../lib/store";
 import type { LangCode, PodcastFormat, PodcastRequest } from "../../lib/types";
 import { GeminiKey } from "../PodcastSection";
+import { interestLabel, useUser } from "../../lib/user";
 
 /* Importer › Podcast : un sujet, une forme, un niveau, une durée. Gemini écrit
    le podcast dans la langue étudiée et le dit ; la file des leçons en préparation
@@ -66,6 +67,9 @@ export function usePodcastForm(lang: LangCode) {
   const [chosenLevel, setLevel] = useState<number | null>(null);
   const [pool, setPool] = useState(() => shuffled(ideas()));
   const [offset, setOffset] = useState(0);
+  // les centres d'intérêt du profil passent en premier (trois au plus)
+  const interests = useUser().interests;
+  const mine = useMemo(() => shuffled(interests.map(interestLabel)).slice(0, 3), [interests]);
 
   const format = (["talk", "story", "debate"].includes(settings.podcast_format) ? settings.podcast_format : "talk") as PodcastFormat;
   const minutes = MINUTES.includes(Number(settings.podcast_minutes)) ? Number(settings.podcast_minutes) : 5;
@@ -93,7 +97,10 @@ export function usePodcastForm(lang: LangCode) {
     setUseWords: (on: boolean) => setSetting("podcast_words", on ? "1" : "0"),
     hasKey: !!(settings.gemini_key ?? "").trim(),
     ready: !!(settings.gemini_key ?? "").trim() && topic.trim().length >= 2,
-    ideas: pool.slice(offset, offset + 5),
+    ideas: [
+      ...(offset === 0 ? mine.map((label) => ({ label, mine: true })) : []),
+      ...pool.slice(offset, offset + 5 - (offset === 0 ? mine.length : 0)).map((label) => ({ label, mine: false })),
+    ],
     moreIdeas: () => {
       if (offset + 10 <= pool.length) setOffset(offset + 5);
       else {
@@ -184,8 +191,14 @@ function PodcastFields({ form }: { form: PodcastForm }) {
       </div>
       <div className="pod-ideas">
         {form.ideas.map((i) => (
-          <button key={i} className={`idea ${form.topic === i ? "on" : ""}`} onClick={() => form.setTopic(i)}>
-            {i}
+          <button
+            key={i.label}
+            className={`idea ${form.topic === i.label ? "on" : ""}`}
+            onClick={() => form.setTopic(i.label)}
+            title={i.mine ? t("Un de vos centres d'intérêt", "One of your interests") : undefined}
+          >
+            {i.mine && <Icon name="user" size={12} stroke={2} />}
+            {i.label}
           </button>
         ))}
         <button className="idea pod-more" onClick={form.moreIdeas}>

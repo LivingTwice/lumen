@@ -7,6 +7,7 @@ import { useDiscoverNews } from "../lib/discover";
 import { LANGS, langInfo } from "../lib/langs";
 import { useApp, type View } from "../lib/store";
 import type { LangCode, LessonSummary } from "../lib/types";
+import { Avatar } from "./Avatar";
 import { Icon, type IconName } from "./Icon";
 import { CountUp, Menu, Orb } from "./ui";
 import { BackupCard } from "./BackupCard";
@@ -15,6 +16,7 @@ import { LingqCard } from "./LingqCard";
 import { UpdateCard } from "./UpdateCard";
 import { count, formatNumber, t } from "../lib/i18n";
 import { studyTime } from "../lib/progress";
+import { useUserName } from "../lib/user";
 
 const nav = (): { view: View; label: string; icon: IconName }[] => [
   { view: "library", label: t("Bibliothèque", "Library"), icon: "library" },
@@ -34,6 +36,7 @@ export function Sidebar() {
   const openPlaylist = useApp((s) => s.openPlaylist);
   const openImport = useApp((s) => s.openImport);
   const openSettings = useApp((s) => s.openSettings);
+  const settingsTab = useApp((s) => s.settingsTab);
   const known = useApp((s) => s.knownCount);
   const streak = useApp((s) => s.streak);
   const models = useApp((s) => s.models);
@@ -55,6 +58,7 @@ export function Sidebar() {
   const calling = (fresh > 0 || unseen) && view !== "reader";
   const [menu, setMenu] = useState(false);
   const [recent, setRecent] = useState<LessonSummary[]>([]);
+  const name = useUserName();
 
   useEffect(() => {
     api()
@@ -84,6 +88,15 @@ export function Sidebar() {
       <div className="brand drag" data-tauri-drag-region>
         <Orb size={20} />
         <span className="brand-name">Lumen</span>
+        {/* le profil de l'apprenant : son avatar, qui mène à Réglages › Profil */}
+        <button
+          className={`side-me no-drag ${view === "settings" && settingsTab === "profile" ? "on" : ""}`}
+          onClick={() => openSettings("profile")}
+          title={name ? t(`${name} · votre profil`, `${name} · your profile`) : t("Votre profil", "Your profile")}
+          aria-label={name ? t(`${name} · votre profil`, `${name} · your profile`) : t("Votre profil", "Your profile")}
+        >
+          <Avatar size={30} />
+        </button>
       </div>
 
       <div className="lang-switch">

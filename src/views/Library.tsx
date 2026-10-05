@@ -10,6 +10,7 @@ import { count, isEn, t } from "../lib/i18n";
 import { STARTERS, inLang, starterCollection } from "../lib/langs";
 import { formatDuration, formatNumber, useApp } from "../lib/store";
 import type { LessonSummary } from "../lib/types";
+import { useUserName } from "../lib/user";
 
 type Filter = "all" | "text" | "audio" | "book" | "done";
 
@@ -143,6 +144,7 @@ export function Library() {
   const go = useApp((s) => s.go);
   const toast = useApp((s) => s.toast);
   const known = useApp((s) => s.knownCount);
+  const name = useUserName();
   const [lessons, setLessons] = useState<LessonSummary[] | null>(null);
   const [filter, setFilter] = useState<Filter>("all");
   const [query, setQuery] = useState("");
@@ -220,7 +222,7 @@ export function Library() {
         <div style={{ flex: 1 }} data-tauri-drag-region />
         <label className="search no-drag">
           <Icon name="search" size={16} />
-          <input placeholder={t("Rechercher une leçon", "Search lessons")} value={query} onChange={(e) => setQuery(e.target.value)} aria-label={t("Rechercher une leçon", "Search lessons")} />
+          <input data-find placeholder={t("Rechercher une leçon", "Search lessons")} value={query} onChange={(e) => setQuery(e.target.value)} aria-label={t("Rechercher une leçon", "Search lessons")} />
         </label>
       </div>
       <div className="view" ref={scroller}>
@@ -228,7 +230,8 @@ export function Library() {
           <header className="page-head">
             <div>
               <h1>
-                {greeting()}.
+                {greeting()}
+                {name ? `, ${name}` : ""}.
               </h1>
               <p>
                 {lessons ? `${count(lessons.length, "leçon", "leçons", "lesson", "lessons")} ${inLang(lang)}` : "…"} · {count(known, "mot connu", "mots connus", "known word", "known words")}

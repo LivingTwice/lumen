@@ -26,6 +26,7 @@ use crate::models::{self, DownloadEvent};
 use crate::i18n::{self, t};
 use crate::state::AppState;
 use crate::text;
+use crate::user;
 
 type R<T> = Result<T, String>;
 
@@ -546,7 +547,7 @@ pub async fn chat_send(
     let m = active_model(&state, "llm")?;
     let path = models::path_of(&state.data_dir, m);
     // tout est lu d'un coup : aucun verrou n'est tenu pendant la génération
-    let (chat, history, lesson, known) = {
+    let (chat, history, lesson, learner) = {
         let c = state.db.lock();
         let chat = db::chat_get(&c, id).map_err(err)?;
         let history: Vec<(String, String)> = db::chat_messages(&c, id)
@@ -560,7 +561,9 @@ pub async fn chat_send(
             None => None,
         };
         let known = db::known_words(&c, &chat.lang).unwrap_or(0);
-        (chat, history, lesson, known)
+        // le profil de l'apprenant : son nom, ce qui le motive, ses centres d'intérêt
+        let learner = user::learner(&c, i18n::native(), known);
+        (chat, history, lesson, learner)
     };
     let excerpt = lesson.map(|(title, text)| {
         let (text, partial) = ai::lesson_excerpt(&text, options.focus, CHAT_LESSON_BYTES);
@@ -569,7 +572,7 @@ pub async fn chat_send(
     let context = excerpt.as_ref().map(|(title, text, partial)| ai::LessonContext { title, text, partial: *partial });
     let native = i18n::native();
     let hints: Vec<String> = ai::quoted_words(&text).iter().filter_map(|w| ai::dict_hint(&state.dicts, native, &chat.lang, w)).collect();
-    let messages = ai::chat_messages(native, &chat.lang, known, context.as_ref(), ai::recent_history(&history, CHAT_HISTORY_BYTES), &text, &hints);
+    let messages = ai::chat_messages(native, &chat.lang, &learner, context.as_ref(), ai::recent_history(&history, CHAT_HISTORY_BYTES), &text, &hints);
 
     let key = format!("chat:{id}");
     let cancel = Arc::new(AtomicBool::new(false));
@@ -1228,6 +1231,20 @@ pub async fn backup_run(app: tauri::AppHandle, state: State<'_, AppState>) -> R<
 pub async fn backup_list(state: State<'_, AppState>) -> R<Vec<backup::Info>> {
     let st = state.inner();
     tokio::task::block_in_place(|| backup::list_for(st))
+}
+
+/// Nuages installés sur ce Mac (iCloud Drive, Dropbox, Google Drive, OneDrive…),
+/// lus à leur nom seulement : macOS ne demande rien tant qu'on n'en choisit pas un.
+#[tauri::command]
+pub async fn backup_places() -> R<Vec<backup::Place>> {
+    Ok(tokio::task::block_in_place(backup::places))
+}
+
+/// Dossier à retenir comme emplacement de sauvegarde pour un nuage choisi
+/// (« Mon Drive » pour Google Drive).
+#[tauri::command]
+pub async fn backup_place_dir(path: String) -> R<String> {
+    tokio::task::block_in_place(|| backup::place_dir(&path))
 }
 
 /// Remplace la progression de ce Mac par une sauvegarde (`day` : version d'un jour précédent).

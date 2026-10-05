@@ -1,11 +1,13 @@
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { Avatar } from "../components/Avatar";
 import { Icon, type IconName } from "../components/Icon";
 import { sampleFor, splitWords } from "../components/Guide";
 import { Orb, Segmented, Switch } from "../components/ui";
 import { api, isTauri } from "../lib/api";
 import { useBackup } from "../lib/backup";
 import { confirmAsk } from "../lib/dialogs";
+import { openShortcuts } from "../lib/menu";
 import { count, formatNumber, t, type UiLang } from "../lib/i18n";
 import { LANGS, STARTERS, inLang, langInfo, langLower, starterCollection, theLang } from "../lib/langs";
 import { useDictStatus } from "../lib/dicts";
@@ -22,6 +24,8 @@ import type { LangCode, ModelRow } from "../lib/types";
 import { BackupSection } from "./BackupSection";
 import { LingqSection } from "./LingqSection";
 import { PodcastSection } from "./PodcastSection";
+import { ProfileSection } from "./ProfileSection";
+import { useUser } from "../lib/user";
 
 /* Réglages : un menu de catégories à gauche, une page par catégorie à droite.
    Chaque page ne montre que son domaine ; la recherche du menu retrouve un réglage. */
@@ -40,6 +44,21 @@ interface Tab {
 
 /** Les pages, dans l'ordre du menu, rangées par groupe. */
 const groups = (): { title: string | null; tabs: Tab[] }[] => [
+  {
+    title: null,
+    tabs: [
+      {
+        id: "profile",
+        icon: "user",
+        label: t("Profil", "Profile"),
+        lead: t(
+          "Votre nom, votre avatar, ce qui vous motive. Il rend Lumen un peu plus à vous, et il reste à vous : sur ce Mac et dans votre sauvegarde, jamais ailleurs.",
+          "Your name, your avatar, what motivates you. It makes Lumen a little more yours, and it stays yours: on this Mac and in your backup, nowhere else.",
+        ),
+        keys: "profil nom prenom pseudo avatar photo image initiale teinte couleur motivation pourquoi apprendre centres interet passions loisirs accords feminin masculin chat icloud profile name first nickname picture photo initial hue color motivation why learning interests hobbies agreement feminine masculine gender",
+      },
+    ],
+  },
   {
     title: null,
     tabs: [
@@ -141,10 +160,10 @@ const groups = (): { title: string | null; tabs: Tab[] }[] => [
         icon: "cloud",
         label: t("Sauvegarde", "Backup"),
         lead: t(
-          "Une copie de votre progression dans votre iCloud Drive : mots, expressions, leçons, playlists, conversations et réglages. Si ce Mac est effacé ou remplacé, vous la retrouvez en un clic. Elle ne passe par aucun serveur : seul votre compte iCloud la reçoit.",
-          "A copy of your progress in your iCloud Drive: words, phrases, lessons, playlists, conversations and settings. If this Mac is wiped or replaced, you get it back in one click. It goes through no server: only your iCloud account receives it.",
+          "Une copie de votre progression dans votre iCloud Drive, votre Dropbox, Google Drive ou OneDrive : mots, expressions, leçons, playlists, conversations et réglages. Si ce Mac est effacé ou remplacé, vous la retrouvez en un clic. Elle ne passe par aucun serveur de Lumen : seul votre compte la reçoit.",
+          "A copy of your progress in your iCloud Drive, Dropbox, Google Drive or OneDrive: words, phrases, lessons, playlists, conversations and settings. If this Mac is wiped or replaced, you get it back in one click. It goes through no Lumen server: only your account receives it.",
         ),
-        keys: "sauvegarde icloud drive dossier restaurer historique audio videos backup folder restore history",
+        keys: "sauvegarde icloud drive dropbox google drive onedrive box proton pcloud nextcloud nuage cloud dossier cle usb disque emplacement restaurer historique audio videos backup folder usb disk location restore history",
       },
       {
         id: "lingq",
@@ -166,7 +185,7 @@ const groups = (): { title: string | null; tabs: Tab[] }[] => [
         icon: "orb",
         label: t("À propos", "About"),
         lead: t("Lumen, ses nouveautés, sa visite guidée et ceux qui le rendent possible.", "Lumen, what's new, its guided tour and those who make it possible."),
-        keys: "a propos version mises a jour nouveautes visite guidee guide accueil credits dossier donnees about updates what's new whats new tour welcome credits data folder",
+        keys: "a propos version mises a jour nouveautes visite guidee guide raccourcis clavier touches accueil credits dossier donnees about updates what's new whats new tour keyboard shortcuts keys welcome credits data folder",
       },
     ],
   },
@@ -202,6 +221,21 @@ function useBadges(): Partial<Record<SettingsTab, "busy" | "warn" | "light">> {
     lingq: lingq ? "busy" : undefined,
     about: update ? "light" : undefined,
   };
+}
+
+/** Le profil en tête du menu, comme le compte dans les Réglages Système : l'avatar et le nom. */
+function ProfileNavItem({ on, onClick }: { on: boolean; onClick(): void }) {
+  const me = useUser();
+  return (
+    <button data-tab="profile" role="tab" aria-selected={on} tabIndex={on ? 0 : -1} className={`set-nav-item set-nav-me ${on ? "on" : ""}`} onClick={onClick} title={t("Profil", "Profile")}>
+      {on && <motion.span layoutId="set-nav-pill" className="set-nav-pill" transition={{ type: "spring", stiffness: 500, damping: 40 }} />}
+      <Avatar size={36} className={on ? "lit" : ""} />
+      <span className="set-nav-label">
+        <strong>{me.name || t("Votre profil", "Your profile")}</strong>
+        <small>{me.name ? t("Profil", "Profile") : t("Nom, avatar, envies", "Name, avatar, interests")}</small>
+      </span>
+    </button>
+  );
 }
 
 function TabIcon({ tab, size = 16 }: { tab: Tab; size?: number }) {
@@ -280,6 +314,7 @@ export function Settings() {
                   {shown.map((x) => {
                     const on = x.id === tab;
                     const badge = badges[x.id];
+                    if (x.id === "profile") return <ProfileNavItem key={x.id} on={on} onClick={() => pick(x.id)} />;
                     return (
                       <button
                         key={x.id}
@@ -360,6 +395,8 @@ export function Settings() {
 
 function Pane({ tab }: { tab: SettingsTab }) {
   switch (tab) {
+    case "profile":
+      return <ProfileSection />;
     case "general":
       return <GeneralPane />;
     case "langs":
@@ -979,7 +1016,7 @@ function AiPane() {
 
   return (
     <>
-      <Section title={t("Profil", "Profile")} note={t("Plus le modèle est grand, plus il saisit les nuances, mais plus il pèse et demande de mémoire.", "The bigger the model, the more nuance it catches, but the more space and memory it needs.")}>
+      <Section title={t("Puissance", "Power")} note={t("Plus le modèle est grand, plus il saisit les nuances, mais plus il pèse et demande de mémoire.", "The bigger the model, the more nuance it catches, but the more space and memory it needs.")}>
         <div className="profile-grid">
           {PROFILES.map((p) => (
             <button key={p.id} className={`profile ${activeProfile === p.id ? "on" : ""}`} onClick={() => pickProfile(p.id)}>
@@ -1131,6 +1168,18 @@ function AboutPane() {
             </div>
             <button className="btn sm soft" onClick={() => openGuide()}>
               {t("Ouvrir le guide", "Open the guide")}
+            </button>
+          </div>
+          <div className="set-row">
+            <span className="set-row-icon">
+              <Icon name="keyboard" size={16} />
+            </span>
+            <div className="grow">
+              <strong>{t("Raccourcis clavier", "Keyboard shortcuts")}</strong>
+              <span>{t("Tout ce qui se fait au clavier, dans une leçon et partout ailleurs. Aussi dans le menu Aide, ⌘/.", "Everything you can do from the keyboard, in a lesson and everywhere else. Also in the Help menu, ⌘/.")}</span>
+            </div>
+            <button className="btn sm soft" onClick={openShortcuts}>
+              {t("Voir les raccourcis", "See shortcuts")}
             </button>
           </div>
           <div className="set-row">

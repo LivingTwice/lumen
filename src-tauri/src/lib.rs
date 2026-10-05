@@ -19,12 +19,13 @@ mod search;
 mod state;
 mod text;
 mod tools;
+mod user;
 mod voice;
 
 use std::collections::HashMap;
 
 use parking_lot::Mutex;
-use tauri::Manager;
+use tauri::{Emitter, Manager};
 
 pub fn run() {
     tauri::Builder::default()
@@ -52,6 +53,12 @@ pub fn run() {
                 backup: backup::Tracker::default(),
                 discover,
                 levels: Mutex::new(HashMap::new()),
+            });
+            // barre des menus (construite par l'interface, lib/menu.ts) : l'élément choisi lui
+            // revient par son identifiant ; les actions JavaScript des éléments de sous-menus
+            // sont oubliées par Tauri dès leur création
+            app.on_menu_event(|app, event| {
+                let _ = app.emit("menu", event.id().as_ref());
             });
             // sauvegarde automatique, au plus toutes les 10 minutes
             tauri::async_runtime::spawn(backup::auto_loop(app.handle().clone()));
@@ -110,6 +117,8 @@ pub fn run() {
             commands::backup_run,
             commands::backup_list,
             commands::backup_restore,
+            commands::backup_places,
+            commands::backup_place_dir,
             commands::discover_list,
             commands::discover_refresh,
             commands::discover_mark,

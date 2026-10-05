@@ -1,4 +1,4 @@
-import type { AppInfo, BackupInfo, BackupRestored, BackupStatus, ChatEvent, ChatOptions, ChatPatch, ChatReply, ChatSummary, ChatThread, DictResult, DictStatus, DiscoverFeed, DiscoverReport, DownloadEvent, GeminiModels, GoalReached, ImportEvent, LangCode, LessonSummary, LevelEstimate, LinkInfo, LinkMedia, LingqEvent, LingqLang, LingqPlan, LingqReport, Lyrics, MediaStream, ModelRow, NewLesson, OpenedLesson, Playlist, PlaylistPatch, PodcastRequest, SearchPage, SearchPlatform, SongItem, Stats, Term, TermQuery, TextStats, WordAnswer, VoicedLesson } from "./types";
+import type { AppInfo, BackupInfo, BackupPlace, BackupRestored, BackupStatus, ChatEvent, ChatOptions, ChatPatch, ChatReply, ChatSummary, ChatThread, DictResult, DictStatus, DiscoverFeed, DiscoverReport, DownloadEvent, GeminiModels, GoalReached, ImportEvent, LangCode, LessonSummary, LevelEstimate, LinkInfo, LinkMedia, LingqEvent, LingqLang, LingqPlan, LingqReport, Lyrics, MediaStream, ModelRow, NewLesson, OpenedLesson, Playlist, PlaylistPatch, PodcastRequest, SearchPage, SearchPlatform, SongItem, Stats, Term, TermQuery, TextStats, WordAnswer, VoicedLesson } from "./types";
 
 export const isTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
@@ -96,6 +96,10 @@ export interface Api {
   backupRestore(key: string, day: string | null, onEvent: (e: ImportEvent) => void): Promise<BackupRestored>;
   /** suit les sauvegardes automatiques ; renvoie de quoi arrêter l'écoute */
   backupListen(onStatus: (s: BackupStatus) => void): Promise<() => void>;
+  /** nuages installés sur ce Mac, iCloud Drive en tête */
+  backupPlaces(): Promise<BackupPlace[]>;
+  /** dossier à retenir pour un nuage choisi (« Mon Drive » pour Google Drive) */
+  backupPlaceDir(path: string): Promise<string>;
   /** Découvrir : ce que les sources de la langue proposent (dernière lecture) */
   discoverList(lang: LangCode): Promise<DiscoverFeed>;
   /** relit les sources de la langue qui sont à relire (`force` : toutes, à la demande) ; étapes « tools » et « found » */
@@ -196,6 +200,8 @@ async function createTauriApi(): Promise<Api> {
     backupRun: () => invoke("backup_run"),
     backupList: () => invoke("backup_list"),
     backupRestore: (key, day, onEvent) => invoke("backup_restore", { key, day, onEvent: ch<ImportEvent>(onEvent) }),
+    backupPlaces: () => invoke("backup_places"),
+    backupPlaceDir: (path) => invoke("backup_place_dir", { path }),
     backupListen: async (onStatus) => {
       const { listen } = await import("@tauri-apps/api/event");
       return listen<BackupStatus>("backup", (e) => onStatus(e.payload));

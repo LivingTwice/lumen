@@ -10,6 +10,7 @@ import { roughEstimate } from "./level";
 import type {
   BackupCounts,
   BackupInfo,
+  BackupPlace,
   BackupStatus,
   ChatMessage,
   ChatSummary,
@@ -329,6 +330,22 @@ export function createMockApi(): Api {
       langs: (db.settings.langs ?? "").split(",").filter(Boolean) as LangCode[],
     };
   };
+  // nuages de ce Mac simulé : iCloud Drive, Dropbox et un compte Google Drive
+  const MOCK_HOME = "/Users/vous";
+  const mockPlaces = (): BackupPlace[] => [
+    { kind: "icloud", name: "iCloud Drive", account: null, path: "" },
+    { kind: "dropbox", name: "Dropbox", account: null, path: `${MOCK_HOME}/Library/CloudStorage/Dropbox` },
+    { kind: "gdrive", name: "Google Drive", account: "lea@gmail.com", path: `${MOCK_HOME}/Library/CloudStorage/GoogleDrive-lea@gmail.com` },
+  ];
+  const placeOf = (custom: string): BackupPlace => {
+    if (!custom) return mockPlaces()[0];
+    const known = mockPlaces().find((p) => p.path && (custom === p.path || custom.startsWith(`${p.path}/`)));
+    if (known) return known;
+    if (/^\/Users\/[^/]+\/Dropbox(\/|$)/.test(custom)) return { kind: "dropbox", name: "Dropbox", account: null, path: custom };
+    const volume = custom.match(/^\/Volumes\/([^/]+)/);
+    if (volume) return { kind: "drive", name: volume[1], account: null, path: volume[0] };
+    return { kind: "folder", name: custom.split("/").filter(Boolean).pop() ?? custom, account: null, path: custom };
+  };
   const backupStatus = (): BackupStatus => {
     const b = (db.backup ??= { last_at: null, size: 0 });
     const custom = db.settings.backup_dir ?? "";
@@ -339,13 +356,14 @@ export function createMockApi(): Api {
       dir: custom ? `${custom}/Lumen` : "~/Library/Mobile Documents/com~apple~CloudDocs/Lumen",
       icloud: !custom,
       icloud_available: true,
+      place: placeOf(custom),
       running: false,
       last_at: saved ? b.last_at : null,
       size: saved ? b.size : 0,
       media_size: saved && db.settings.backup_audio !== "0" ? 186e6 : 0,
       media_count: saved ? 12 : 0,
       counts: backupCounts(),
-      cloud: saved ? (custom ? "local" : "uploaded") : "unknown",
+      cloud: saved ? (!custom || placeOf(custom).kind === "dropbox" || placeOf(custom).kind === "gdrive" ? "uploaded" : "local") : "unknown",
       cloud_error: null,
       error: null,
       local_audio: 186e6,
@@ -1011,7 +1029,23 @@ export function createMockApi(): Api {
       const now = Math.floor(Date.now() / 1000);
       const out: BackupInfo[] = [];
       if (db.backup?.last_at && db.settings.backup_on === "1") {
-        out.push({ key: "mock-ce-mac", device_name: "Ce navigateur", mine: true, this_device: true, saved_at: db.backup.last_at, app_version: "0.1.0", size: db.backup.size, media_size: 186e6, counts: backupCounts(), versions: [], newer: false });
+        const me = db.settings;
+        out.push({
+          key: "mock-ce-mac",
+          device_name: t("Ce navigateur", "This browser"),
+          mine: true,
+          this_device: true,
+          saved_at: db.backup.last_at,
+          app_version: "0.1.0",
+          size: db.backup.size,
+          media_size: 186e6,
+          counts: backupCounts(),
+          versions: [],
+          newer: false,
+          name: me.user_name ?? "",
+          avatar: me.user_avatar ?? "",
+          photo: (me.user_avatar ?? "").startsWith("photo:") ? (me.user_photo ?? "") : "",
+        });
       }
       out.push({
         key: "mock-imac",
@@ -1025,6 +1059,9 @@ export function createMockApi(): Api {
         counts: OTHER_MAC,
         versions: [3, 4, 6].map((n, i) => ({ day: dayAgo(n), saved_at: now - n * 86400, known: OTHER_MAC.known - 30 * (i + 1), lessons: OTHER_MAC.lessons - i })),
         newer: false,
+        name: "Marta",
+        avatar: "dawn:16:4242",
+        photo: "",
       });
       return out.sort((a, b) => b.saved_at - a.saved_at);
     },
@@ -1040,7 +1077,7 @@ export function createMockApi(): Api {
       await sleep(400);
       if (key !== "mock-imac") return { counts: backupCounts(), missing_media: 0 };
       // la progression de l'autre Mac : quelques leçons et des mots, réglages de ce navigateur conservés
-      db.settings = { ...db.settings, onboarded: "1", langs: "it,en", lang: "it", backup_on: db.settings.backup_on || "1" };
+      db.settings = { ...db.settings, onboarded: "1", langs: "it,en", lang: "it", backup_on: db.settings.backup_on || "1", user_name: "Marta", user_avatar: "dawn:16:4242", user_photo: "", user_why: t("Lire les romans de Calvino dans le texte", "Read Calvino's novels in the original") };
       const lessons: [LangCode, string, string][] = [
         ["it", "Il faro", "Ogni mattina, Marta saliva le scale strette del vecchio faro. Dall'alto, il mare sembrava infinito e calmo."],
         ["it", "La lettera", "Un giorno trovò una lettera nascosta tra due pietre. La carta era umida, ma le parole si leggevano ancora."],
@@ -1058,6 +1095,17 @@ export function createMockApi(): Api {
     async backupListen(onStatus) {
       backupListeners.add(onStatus);
       return () => backupListeners.delete(onStatus);
+    },
+
+    async backupPlaces() {
+      await sleep(120);
+      return mockPlaces();
+    },
+
+    async backupPlaceDir(path) {
+      await sleep(200);
+      // Google Drive : rien à la racine du compte, tout dans « Mon Drive »
+      return path.includes("GoogleDrive-") ? `${path}/${t("Mon Drive", "My Drive")}` : path;
     },
     async discoverList(lang) {
       const d = discover.get(lang);

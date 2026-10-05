@@ -26,7 +26,7 @@ const W = 320;
 const H = 180;
 
 /** Générateur pseudo-aléatoire reproductible (mulberry32). */
-function rng(seed: number) {
+export function rng(seed: number) {
   let a = seed >>> 0;
   return () => {
     a = (a + 0x6d2b79f5) | 0;
@@ -36,7 +36,7 @@ function rng(seed: number) {
   };
 }
 
-const hsl = (h: number, s: number, l: number) => `hsl(${(((h % 360) + 360) % 360).toFixed(0)}, ${s}%, ${l}%)`;
+export const hsl = (h: number, s: number, l: number) => `hsl(${(((h % 360) + 360) % 360).toFixed(0)}, ${s}%, ${l}%)`;
 
 /** Ligne d'horizon ondulée, fermée vers le bas. */
 function wave(y: number, amp: number, freq: number, phase: number): string {

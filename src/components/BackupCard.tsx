@@ -1,5 +1,6 @@
 import { AnimatePresence, motion } from "motion/react";
-import { useBackup } from "../lib/backup";
+import { useEffect } from "react";
+import { isCloud, placeDir, useBackup } from "../lib/backup";
 import { useApp } from "../lib/store";
 import { Icon } from "./Icon";
 import { t } from "../lib/i18n";
@@ -8,7 +9,8 @@ import { t } from "../lib/i18n";
 const SNOOZE = 7 * 86400;
 
 /** Barre latérale : propose la sauvegarde tant qu'elle n'est pas choisie,
- * et signale une sauvegarde qui échoue (iCloud refusé, disque débranché…). */
+ * (dans iCloud Drive, sinon dans un autre nuage du Mac), et signale une
+ * sauvegarde qui échoue (accès refusé, disque débranché…). */
 export function BackupCard() {
   const status = useBackup((s) => s.status);
   const saving = useBackup((s) => s.saving);
@@ -19,12 +21,27 @@ export function BackupCard() {
   const snooze = useApp((s) => Number(s.settings.backup_snooze) || 0);
   const setSetting = useApp((s) => s.setSetting);
 
-  const offer = !!status && !status.decided && !!status.dir && Date.now() / 1000 - snooze > SNOOZE;
+  // sans iCloud Drive, un autre nuage du Mac (Dropbox, Google Drive…) peut la recevoir
+  const places = useBackup((s) => s.places);
+  const undecided = !!status && !status.decided;
+  const noDir = undecided && !status.dir;
+  useEffect(() => {
+    if (noDir && !useBackup.getState().places) void useBackup.getState().loadPlaces();
+  }, [noDir]);
+  const fallback = noDir ? places?.find((p) => p.kind !== "icloud") : undefined;
+  const offer = undecided && (!!status.dir || !!fallback) && Date.now() / 1000 - snooze > SNOOZE;
   const failing = !!status?.enabled && !!status.error && !saving && !status.running && !here;
+  // « iCloud Drive », « Dropbox »… ; rien pour un dossier ordinaire
+  const cloud = status?.dir ? (status.icloud ? "iCloud Drive" : isCloud(status.place) ? status.place.name : "") : (fallback?.name ?? "");
 
   const activate = async () => {
+    if (fallback) {
+      const dir = await placeDir(fallback);
+      if (dir === null) return;
+      await setSetting("backup_dir", dir);
+    }
     if (!(await useBackup.getState().enable(true))) return;
-    const where = useBackup.getState().status?.icloud ? t("dans iCloud Drive", "to iCloud Drive") : t("dans le dossier choisi", "to the chosen folder");
+    const where = cloud ? t(`dans ${cloud}`, `to ${cloud}`) : t("dans le dossier choisi", "to the chosen folder");
     toast(useBackup.getState().status?.last_at ? t(`Progression sauvegardée ${where}`, `Progress backed up ${where}`) : t(`Sauvegarde activée ${where}`, `Backup turned on, ${where}`), "light");
   };
 
@@ -57,8 +74,8 @@ export function BackupCard() {
           </div>
           <span className="muted" style={{ fontSize: 11.5, lineHeight: 1.45 }}>
             {t(
-              `Une copie de vos mots et de vos leçons dans votre ${status.icloud ? "iCloud Drive" : "dossier de sauvegarde"}, si ce Mac venait à s'effacer.`,
-              `A copy of your words and lessons in your ${status.icloud ? "iCloud Drive" : "backup folder"}, in case this Mac is ever wiped.`,
+              `Une copie de vos mots et de vos leçons dans votre ${cloud || "dossier de sauvegarde"}, si ce Mac venait à s'effacer.`,
+              `A copy of your words and lessons in your ${cloud || "backup folder"}, in case this Mac is ever wiped.`,
             )}
           </span>
           <button className="btn sm primary glow" disabled={saving} onClick={() => void activate()}>

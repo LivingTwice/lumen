@@ -8,7 +8,7 @@ import { STARTERS, starterCollection } from "./langs";
 export type View = "library" | "discover" | "playlists" | "reader" | "chat" | "vocab" | "progress" | "settings";
 
 /** Catégories des Réglages, chacune sur sa propre page. */
-export type SettingsTab = "general" | "langs" | "reading" | "voice" | "discover" | "podcasts" | "ai" | "videos" | "backup" | "lingq" | "about";
+export type SettingsTab = "profile" | "general" | "langs" | "reading" | "voice" | "discover" | "podcasts" | "ai" | "videos" | "backup" | "lingq" | "about";
 
 /** Onglets de la feuille d'import. */
 export type ImportTab = "text" | "link" | "file" | "media" | "podcast";
@@ -64,6 +64,15 @@ export const DEFAULTS: Record<string, string> = {
   discover_auto: "1",
   // progrès : minutes de temps actif dans les leçons pour que la journée compte dans la série
   daily_goal: "10",
+  // profil (lib/user.ts) : nom ou pseudo, avatar (« style:teinte:graine »), photo en data URL,
+  // ce qui motive, centres d'intérêt (JSON) ; sur ce Mac et dans la sauvegarde, jamais ailleurs
+  user_name: "",
+  user_avatar: "",
+  user_photo: "",
+  user_why: "",
+  user_interests: "",
+  // accords quand le chat s'adresse à l'apprenant : "f", "m", "" (sans préférence)
+  user_agree: "",
 };
 
 interface AppStore {

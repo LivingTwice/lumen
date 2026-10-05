@@ -4,11 +4,12 @@ import { Icon } from "../../components/Icon";
 import { Markdown, frenchSpaces, plainText } from "../../components/Markdown";
 import { Orb } from "../../components/ui";
 import { api } from "../../lib/api";
-import { attachedLesson, efforts, langWithArticle, suggestions, useChat, type LessonRef, type Pending } from "../../lib/chat";
+import { attachedLesson, efforts, langWithArticle, suggestions, useChat, type LessonRef, type Pending, type Suggestion } from "../../lib/chat";
 import { count, t } from "../../lib/i18n";
 import { inLang } from "../../lib/langs";
 import { useApp } from "../../lib/store";
 import type { ChatEffort, ChatMessage, LangCode, LessonSummary } from "../../lib/types";
+import { useUserName } from "../../lib/user";
 
 /**
  * Conversation avec l'IA locale : messages, réponse qui s'écrit, réflexion,
@@ -77,12 +78,27 @@ function Welcome({ lang, lesson, compact }: { lang: LangCode; lesson: LessonRef 
   const send = useChat((s) => s.send);
   const busy = useChat((s) => !!s.pending);
   const items = suggestions(lang, !!lesson);
+  const use = (q: Suggestion) => {
+    if (!q.draft) return void send(q.text);
+    // à compléter : le curseur attend le sujet au bout de la phrase
+    useChat.getState().setDraft(q.text);
+    useChat.getState().focus();
+  };
+  const name = useUserName();
   return (
     <motion.div className="chat-welcome" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4, ease: [0.2, 0.8, 0.2, 1] }}>
       <div className="chat-dawn" aria-hidden="true">
         <Orb size={compact ? 30 : 42} />
       </div>
-      <h2>{frenchSpaces(lesson ? t("Parlons de cette leçon", "Let's talk about this lesson") : t("Que voulez-vous comprendre ?", "What would you like to understand?"))}</h2>
+      <h2>
+        {frenchSpaces(
+          lesson
+            ? t("Parlons de cette leçon", "Let's talk about this lesson")
+            : name
+              ? t(`Que voulez-vous comprendre, ${name} ?`, `What would you like to understand, ${name}?`)
+              : t("Que voulez-vous comprendre ?", "What would you like to understand?"),
+        )}
+      </h2>
       <p>
         {frenchSpaces(
           lesson
@@ -99,14 +115,15 @@ function Welcome({ lang, lesson, compact }: { lang: LangCode; lesson: LessonRef 
       <div className="chat-suggest">
         {items.map((q, i) => (
           <motion.button
-            key={q}
+            key={q.text}
+            className={q.draft ? "draft" : undefined}
             disabled={busy}
-            onClick={() => void send(q)}
+            onClick={() => use(q)}
             initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.12 + i * 0.06, duration: 0.35, ease: [0.2, 0.8, 0.2, 1] }}
           >
-            {frenchSpaces(q)}
+            {frenchSpaces(q.label ?? q.text)}
           </motion.button>
         ))}
       </div>
@@ -278,7 +295,11 @@ function Composer({ compact, lang, lesson, lessonNow }: { compact: boolean; lang
     el.style.height = `${Math.min(el.scrollHeight, compact ? 150 : 200)}px`;
   }, [draft, compact]);
   useEffect(() => {
-    if (focusTick) ref.current?.focus();
+    const el = ref.current;
+    if (!focusTick || !el) return;
+    el.focus();
+    // le curseur au bout du texte déjà écrit (question à compléter)
+    el.setSelectionRange(el.value.length, el.value.length);
   }, [focusTick]);
 
   const toggleThink = () => void setSetting("chat_think", think ? "0" : "1");

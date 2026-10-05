@@ -302,6 +302,10 @@
   border-color: var(--border-strong);
   box-shadow: 0 0 22px var(--light-soft);
 }
+/* à compléter dans le champ : c'est l'apprenant qui choisit le sujet */
+.chat-suggest button.draft {
+  border-style: dashed;
+}
 .chat-suggest button:disabled {
   opacity: 0.5;
   cursor: default;

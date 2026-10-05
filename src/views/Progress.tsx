@@ -31,6 +31,7 @@ function formatValue(v: number, m: Metric): string {
 
 export function Progress() {
   const lang = useApp((s) => s.lang)();
+  const why = useApp((s) => (s.settings.user_why ?? "").trim());
   const [st, setSt] = useState<Stats | null>(null);
   const [period, setPeriod] = useState<Period>("day");
   const [metric, setMetric] = useState<Metric>("learn");
@@ -64,6 +65,13 @@ export function Progress() {
                   `Your progress ${inLang(lang)}, day after day: only time spent in lessons counts.`,
                 )}
               </p>
+              {/* ce qui fait apprendre, choisi dans le profil : un rappel, pour soi */}
+              {why && (
+                <motion.p className="page-why" initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5, ease: EASE }}>
+                  <span className="page-why-mark" aria-hidden="true" />
+                  {t(`« ${why} »`, `“${why}”`)}
+                </motion.p>
+              )}
             </div>
           </header>
 

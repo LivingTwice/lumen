@@ -438,6 +438,8 @@
 }
 .ob-actions {
   display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
   gap: 8px;
   align-items: center;
 }
@@ -822,4 +824,130 @@
 }
 .ob-uilang span {
   position: relative;
+}
+
+/* ---------- faisons connaissance : le nom et l'avatar ---------- */
+
+.ob-me {
+  margin-top: 26px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 18px;
+  width: min(560px, 100%);
+}
+.ob-me-avatar {
+  position: relative;
+  display: grid;
+  border-radius: 50%;
+  box-shadow: 0 0 0 5px var(--ob-glass), 0 0 0 6px var(--ob-border), 0 18px 50px rgba(255, 160, 70, 0.3);
+}
+/* une lumière qui respire derrière l'avatar */
+.ob-me-halo {
+  position: absolute;
+  inset: -46px;
+  z-index: -1;
+  border-radius: 50%;
+  background: radial-gradient(closest-side, rgba(255, 196, 120, 0.55), rgba(255, 180, 94, 0.18) 55%, transparent);
+  animation: ob-me-breathe 6s ease-in-out infinite;
+  pointer-events: none;
+}
+@keyframes ob-me-breathe {
+  0%,
+  100% {
+    opacity: 0.75;
+    scale: 0.94;
+  }
+  50% {
+    opacity: 1;
+    scale: 1.04;
+  }
+}
+.ob-name {
+  width: min(420px, 100%);
+  height: 58px;
+  padding: 0 24px;
+  border-radius: 999px;
+  border: 1px solid var(--ob-border);
+  background: var(--ob-glass);
+  -webkit-backdrop-filter: blur(22px) saturate(140%);
+  backdrop-filter: blur(22px) saturate(140%);
+  box-shadow: var(--ob-shadow), inset 0 0 0 1px var(--ob-edge);
+  outline: none;
+  text-align: center;
+  font-family: var(--font-display);
+  font-size: 26px;
+  font-weight: 450;
+  letter-spacing: -0.01em;
+  color: var(--ob-text);
+  transition: box-shadow 0.35s ease, border-color 0.3s ease, background-color 0.3s ease;
+}
+.ob-name::placeholder {
+  color: var(--ob-muted);
+  font-size: 22px;
+}
+.ob-name:focus {
+  background: var(--ob-glass-hover);
+  border-color: rgba(255, 170, 80, 0.8);
+  box-shadow: 0 0 0 4px rgba(255, 180, 94, 0.2), 0 16px 44px rgba(255, 160, 70, 0.22);
+}
+.ob-me-picker {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 18px 14px;
+  border-radius: 30px;
+  border: 1px solid var(--ob-border);
+  background: var(--ob-glass);
+  -webkit-backdrop-filter: blur(22px) saturate(140%);
+  backdrop-filter: blur(22px) saturate(140%);
+  box-shadow: var(--ob-shadow), inset 0 0 0 1px var(--ob-edge);
+}
+.ob-me-styles,
+.ob-me-hues {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.ob-me-opt {
+  display: grid;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  transition: transform 0.25s var(--ease-spring), box-shadow 0.3s ease;
+}
+.ob-me-opt:hover {
+  transform: translateY(-2px);
+}
+.ob-me-opt.on {
+  box-shadow: 0 0 0 2.5px var(--ob-bg), 0 0 0 4.5px var(--ob-accent), 0 6px 18px rgba(255, 160, 70, 0.35);
+}
+.avatar.ob-me-nophoto {
+  display: grid;
+  place-items: center;
+  background: transparent;
+  border: 1.5px dashed color-mix(in srgb, var(--ob-text) 30%, transparent);
+  color: var(--ob-muted);
+}
+.avatar.ob-me-nophoto::after {
+  display: none;
+}
+.ob-me-hues .me-hue {
+  width: 20px;
+  height: 20px;
+}
+.ob .me-hue.on {
+  box-shadow: 0 0 0 2.5px var(--ob-bg), 0 0 0 4px var(--ob-text);
+}
+/* « Bon retour » : l'avatar de la sauvegarde retrouvée, au-dessus du titre */
+.ob-me-back {
+  display: grid;
+  margin-bottom: 16px;
+  border-radius: 50%;
+  box-shadow: 0 0 0 4px var(--ob-glass), 0 0 0 5px var(--ob-border), 0 14px 40px rgba(255, 160, 70, 0.32);
+}
+.ob-device .avatar {
+  flex-shrink: 0;
 }

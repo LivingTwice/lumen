@@ -6,6 +6,7 @@ import { api, errorText, isNoModel, isTauri } from "../../lib/api";
 import { confirmAsk } from "../../lib/dialogs";
 import { t } from "../../lib/i18n";
 import { stopPronunciation } from "../../lib/pronounce";
+import { playbackRates } from "../../lib/reading";
 import { formatDuration, useApp } from "../../lib/store";
 import type { PageRange } from "../../lib/tokenize";
 import { loadVoices, speak, ttsAvailable, voicesFor, type SpeakHandle } from "../../lib/tts";
@@ -17,6 +18,8 @@ export interface PlayerHandle {
   pause(): void;
   stop(): void;
   isPlaying(): boolean;
+  /** avance ou recule dans l'audio ou la vidéo (secondes) */
+  skip(secs: number): void;
   /** oublie la position mémorisée (leçon terminée : la prochaine lecture repart du début) */
   forget(): void;
 }
@@ -517,6 +520,7 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player({ lesson, 
         setPlaying(false);
       },
       isPlaying: () => playing,
+      skip: (secs: number) => skip(secs),
       forget() {
         posRef.current = 0;
         savedPos.current = 0;
@@ -558,7 +562,7 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player({ lesson, 
   };
 
   const progress = hasMedia ? (duration ? time / duration : 0) : ttsPos;
-  const rates = hasMedia ? ["0.75", "0.9", "1", "1.25"] : ["0.75", "0.85", "0.95", "1.1"];
+  const rates = playbackRates(hasMedia);
 
   const masterEvents = {
     onPlay: () => {

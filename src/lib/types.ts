@@ -530,6 +530,8 @@ export interface BackupStatus {
   dir: string | null;
   icloud: boolean;
   icloud_available: boolean;
+  /** le nuage (ou le disque, le dossier) qui reçoit la sauvegarde */
+  place: BackupPlace;
   running: boolean;
   last_at: number | null;
   size: number;
@@ -542,6 +544,17 @@ export interface BackupStatus {
   /** audio et vidéos de ce Mac, pour les interrupteurs */
   local_audio: number;
   local_video: number;
+}
+
+/** Un nuage de ce Mac où sauvegarder (iCloud Drive, Dropbox, Google Drive…), un disque ou un dossier. */
+export interface BackupPlace {
+  kind: "icloud" | "dropbox" | "gdrive" | "onedrive" | "box" | "proton" | "pcloud" | "nextcloud" | "synology" | "mega" | "cloud" | "drive" | "folder";
+  /** nom du service (« Google Drive »), du disque ou du dossier */
+  name: string;
+  /** compte (adresse, équipe), quand il peut y en avoir plusieurs */
+  account: string | null;
+  /** dossier qui recevra « Lumen » (à passer par backupPlaceDir) ; vide : iCloud Drive */
+  path: string;
 }
 
 export interface BackupVersion {
@@ -567,6 +580,10 @@ export interface BackupInfo {
   versions: BackupVersion[];
   /** faite par une version plus récente de Lumen */
   newer: boolean;
+  /** nom et avatar de l'apprenant (vides pour une sauvegarde d'avant le profil) */
+  name: string;
+  avatar: string;
+  photo: string;
 }
 
 export interface BackupRestored {

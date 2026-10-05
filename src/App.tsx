@@ -4,12 +4,14 @@ import { Icon } from "./components/Icon";
 import { Guide } from "./components/Guide";
 import { News, useNewsOnUpdate } from "./components/News";
 import { Tour } from "./components/Tour";
+import { Shortcuts } from "./components/Shortcuts";
 import { Sidebar } from "./components/Sidebar";
 import { Orb, Toasts } from "./components/ui";
 import { isTauri } from "./lib/api";
 import { MEDIA_EXT, TEXT_EXT, extOf } from "./lib/importers";
 import { startBackupEvents } from "./lib/backup";
 import { setUiLang, t, type UiLang } from "./lib/i18n";
+import { useAppMenu } from "./lib/menu";
 import { useApp } from "./lib/store";
 import { startUpdateChecks } from "./lib/updater";
 import { ImportSheet } from "./views/ImportSheet";
@@ -94,6 +96,8 @@ export function App() {
   }, [sideHidden]);
 
   useTheme();
+  // barre des menus du Mac, dans la langue de Lumen et à jour de son état
+  useAppMenu();
   const dropping = useFileDrop(ready && !!onboarded);
   // après une mise à jour : ce qui a changé
   useNewsOnUpdate();
@@ -171,6 +175,7 @@ export function App() {
       <Guide />
       <News />
       <Tour />
+      <Shortcuts />
       <Toasts />
       <AnimatePresence>
         {dropping && (
