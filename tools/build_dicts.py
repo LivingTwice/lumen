@@ -13,7 +13,7 @@ Chaque fichier produit <code>.db.gz (SQLite compressé), même schéma dans les 
 Licence des données : CC BY-SA (Wiktionnaire), attribution affichée dans l'app.
 
 Version 2 : les 24 autres langues de Lumen, définitions en français et en anglais
-(version `dictionaries-2` de lumen-releases, fichiers fr-<code>.db.gz et en-<code>.db.gz).
+(version `dictionaries-2` du dépôt lumen, fichiers fr-<code>.db.gz et en-<code>.db.gz).
 Sources, dans un dossier hors iCloud (≈ 4 Go, puis ≈ 13 Go une fois découpées) :
   curl -LO https://kaikki.org/dictionary/raw-wiktextract-data.jsonl.gz      -> en-raw.jsonl.gz
   curl -LO https://kaikki.org/frwiktionary/raw-wiktextract-data.jsonl.gz    -> fr-raw.jsonl.gz

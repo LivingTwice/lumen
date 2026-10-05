@@ -30,11 +30,12 @@ pub const V2_LANGS: &[&str] = &[
 ];
 
 /// Dictionnaires téléchargés à la demande, publiés une fois pour toutes dans des versions
-/// de `lumen-releases` qui ne doivent jamais devenir « latest ».
+/// du dépôt `lumen` qui ne doivent jamais devenir « latest ». Les Lumen jusqu'à 0.7.0 les
+/// lisent dans `lumen-releases`, qui garde les mêmes versions.
 struct Remote {
     /// langue des définitions
     native: &'static str,
-    /// version de lumen-releases qui porte les fichiers
+    /// version du dépôt lumen qui porte les fichiers
     tag: &'static str,
     /// numéro dans le nom du fichier décompressé : le changer fait retélécharger
     version: &'static str,
@@ -49,7 +50,7 @@ const REMOTE: &[Remote] = &[
     Remote { native: "en", tag: "dictionaries-2", version: "2", prefixed: true, langs: V2_LANGS },
     Remote { native: "fr", tag: "dictionaries-2", version: "2", prefixed: true, langs: V2_LANGS },
 ];
-const RELEASES: &str = "https://github.com/LivingTwice/lumen-releases/releases/download";
+const RELEASES: &str = "https://github.com/LivingTwice/lumen/releases/download";
 
 fn remote(native: &str, lang: &str) -> Option<&'static Remote> {
     REMOTE.iter().find(|r| r.native == native && r.langs.contains(&lang))

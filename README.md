@@ -3,7 +3,7 @@
 **Learn languages by reading and listening to what you love, with an AI that runs on your own computer.**
 A desktop app for Mac (Apple silicon) and Windows 10/11, in the spirit of LingQ.
 
-**[Download Lumen](https://github.com/LivingTwice/lumen-releases/releases/latest)**: a DMG for Mac, an installer for Windows. Updates then install by themselves.
+**[Download Lumen](https://github.com/LivingTwice/lumen/releases/latest)**: a DMG for Mac, an installer for Windows. Updates then install by themselves.
 
 ## What Lumen does
 
