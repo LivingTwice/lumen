@@ -38,11 +38,15 @@ export const DEFAULTS: Record<string, string> = {
   // le mot touché ou le passage surligné se fait entendre (seulement leçon en pause)
   auto_pronounce: "1",
   finish_marks_known: "1",
+  // la page tourne quand l'audio ou la voix passe à la suivante ("0" : elle reste où l'on lit)
+  auto_turn: "1",
   reader_sidebar: "1",
   tts_voice: "0",
   tts_rate: "0.95",
   llm_model: "qwen3.5-2b",
   asr_model: "whisper-turbo",
+  // Windows : l'IA locale calcule sur la carte graphique ("0" : sur le processeur), propre à ce PC
+  ai_gpu: "1",
   // IA en ligne (lib/online.ts) : "1" quand l'apprenant la choisit ; fournisseur, et ce
   // qu'elle prend en charge ("0" : reste sur ce Mac). Clés, modèles et adresse : `online_*`,
   // propres à ce Mac (ni sauvegardés ni restaurés)

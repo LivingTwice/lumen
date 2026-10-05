@@ -9,7 +9,8 @@ import { pronounce } from "../../lib/pronounce";
 import { studyTime, useStudyClock } from "../../lib/progress";
 import { formatNumber, useApp } from "../../lib/store";
 import { fitPages, pageOfToken } from "../../lib/pagefit";
-import { readerLook } from "../../lib/reading";
+import { isWindows } from "../../lib/platform";
+import { panelMode, readerLook, roomForSidePanel } from "../../lib/reading";
 import { paginate, sentenceBounds, type PageRange } from "../../lib/tokenize";
 import type { LessonSummary, OpenedLesson, Term, Token } from "../../lib/types";
 import { Player, type PlayerHandle, type PlaybackState } from "./Player";
@@ -22,6 +23,7 @@ import { DisplayMenu } from "./Display";
 import { PlaylistStrip, UpNext, usePlaylist } from "./PlaylistBar";
 import { AsideTabs, ReaderChat, type AsideTab } from "./ReaderChat";
 import { VideoStage } from "./VideoStage";
+import { WordFloat } from "./WordFloat";
 import { EXPR_MAX_WORDS, WordPanel, type Selection } from "./WordPanel";
 
 interface Range {
@@ -84,6 +86,9 @@ export function Reader() {
   const openPlaylist = useApp((s) => s.openPlaylist);
   const autoplay = useApp((s) => s.autoplay);
   const streak = useApp((s) => s.streak);
+  const tour = useApp((s) => s.tour);
+  // une réponse du chat s'écrit : le bouton du chat flottant le signale
+  const chatBusy = useChat((s) => !!s.pending);
 
   const [data, setData] = useState<OpenedLesson | null>(null);
   const [terms, setTerms] = useState<Record<string, Term>>({});
@@ -108,7 +113,11 @@ export function Reader() {
 
   const look = readerLook(settings);
   const paged = look.layout === "pages";
+  // la page tourne avec la lecture ; sinon elle reste où l'on lit pendant que le son continue
+  const follow = settings.auto_turn !== "0";
 
+  const rootRef = useRef<HTMLDivElement>(null);
+  const colRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const pageRef = useRef<HTMLDivElement>(null);
   // mode pages : zone du texte, bloc invisible où l'on compose les pages, copie du titre
@@ -132,6 +141,10 @@ export function Reader() {
   const onPlayback = useCallback((s: PlaybackState) => setMediaPlaying(s.playing), []);
   const lanternPage = useRef(-1);
   const lanternBox = useRef<{ y: number; height: number } | null>(null);
+  // page qui ne tourne pas avec la lecture (mode défilement) : la lanterne est
+  // plus haut (-1) ou plus bas (1) que ce qu'on voit ; « Y aller » la rejoint
+  const [lanternOut, setLanternOut] = useState(0);
+  const seekLantern = useRef(false);
   // mot où reprendre la lecture : souhaité (want) et déjà écrit (saved)
   const anchorRef = useRef({ id: 0, want: 0, saved: 0 });
   const restoredFor = useRef<number | null>(null);
@@ -278,11 +291,15 @@ export function Reader() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data?.lesson.id]);
 
-  // le mot lu à voix haute (voix, audio ou vidéo) devient le point de reprise
+  // le mot lu à voix haute (voix, audio ou vidéo) devient le point de reprise ; s'il est
+  // sur la page affichée, c'est lui qu'on garde sous les yeux quand les pages se recomposent
+  // (la page qui ne tourne pas avec la lecture reste celle qu'on lit)
   useEffect(() => {
     if (cursor < 0) return;
     anchorRef.current.want = cursor;
-    keepTok.current = cursor;
+    const r = pages[pageNow.current];
+    if (!r || (cursor >= r.start && cursor < r.end)) keepTok.current = cursor;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cursor]);
 
   // ---------- mode pages : des pages qui tiennent dans l'écran ----------
@@ -376,6 +393,7 @@ export function Reader() {
   const onReaderScroll = (e: React.UIEvent<HTMLDivElement>) => {
     const sc = e.currentTarget;
     setScrolled(sc.scrollTop > 90);
+    if (!follow) setLanternOut(lanternSide());
     if (performance.now() < ignoreScrollUntil.current) return;
     window.clearTimeout(scrollTimer.current);
     scrollTimer.current = window.setTimeout(() => {
@@ -733,6 +751,64 @@ export function Reader() {
     }
   };
 
+  // ---------- dernière page atteinte : la leçon est lue, même sans « Terminer la leçon » ----------
+  // Feuilleter n'est pas lire : la dernière page compte quand elle est restée affichée le temps
+  // de compter ses mots (comme une page qu'on quitte en avançant). Les mots nouveaux ne changent
+  // pas de statut et la reprise reste sur cette page : seul le bouton fait les deux.
+  const doneRef = useRef(false);
+  useEffect(() => {
+    doneRef.current = !!data?.lesson.completed;
+  }, [data]);
+  const onLastPage = !!lesson && tokens.length > 0 && page === pages.length - 1;
+  useEffect(() => {
+    if (!lesson || !onLastPage || complete || doneRef.current) return;
+    const r = pages[page];
+    const wait = Math.min(15, (r?.words ?? 0) / 4) * 1000 - (performance.now() - pageShownAt.current);
+    const timer = window.setTimeout(
+      () => {
+        doneRef.current = true;
+        logRead(creditPage(page, false));
+        api()
+          .lessonUpdate(lesson.id, { completed: true })
+          .then(bump)
+          .catch(() => {
+            doneRef.current = false;
+          });
+      },
+      Math.max(0, wait) + 50,
+    );
+    return () => window.clearTimeout(timer);
+  }, [lesson, onLastPage, page, pages, complete, logRead, creditPage, bump]);
+
+  // ---------- panneau du mot : à droite, ou flottant au-dessus du mot ----------
+  // « Auto » : il flotte quand le lecteur est trop étroit pour le garder à droite sans serrer
+  // le texte (écran de 13 pouces avec la barre latérale). Jamais en plein écran vidéo ni
+  // pendant la visite guidée, qui l'éclaire à droite.
+  const need = roomForSidePanel(look.width);
+  const [narrow, setNarrow] = useState(() => window.innerWidth - (settings.reader_sidebar === "0" ? 0 : 244) < need);
+  useLayoutEffect(() => {
+    const el = rootRef.current;
+    if (!el) return;
+    const check = () => setNarrow(el.clientWidth < need);
+    check();
+    const ro = new ResizeObserver(check);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [data, need]);
+  const wanted = panelMode(settings.word_panel);
+  const floating = (wanted === "float" || (wanted === "auto" && narrow)) && !cinema && tour === null;
+  // le panneau revient à droite : son contenu attend qu'il ait fini de s'ouvrir
+  const dockFade = useRef(false);
+  useEffect(() => {
+    dockFade.current = floating;
+  }, [floating]);
+  /** ⌃⌘I (Ctrl+I) : à droite ou flottant ; deux fois de suite, on revient au choix automatique. */
+  const togglePanel = () => {
+    if (cinema) return;
+    const next = floating ? "side" : "float";
+    void setSetting("word_panel", wanted === "auto" || (next === "float") !== narrow ? next : "auto");
+  };
+
   // ---------- clavier ----------
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -784,6 +860,7 @@ export function Reader() {
         void finishPage();
       } else if (e.key === "Escape") {
         if (cinema) setCinema(false);
+        else if (floating && aside === "chat") setAside("word");
         else setRange(null);
       } else if (e.key === "PageDown") {
         goPage(page + 1);
@@ -837,7 +914,7 @@ export function Reader() {
     bump();
     go("library");
   };
-  useLessonMenu(lesson ? { media: !!lesson.media_path, video: !!lesson.video_path } : null, {
+  useLessonMenu(lesson ? { media: !!lesson.media_path, video: !!lesson.video_path, float: floating } : null, {
     toggle: () => playerRef.current?.toggle(),
     skip: (secs) => playerRef.current?.skip(secs),
     prev: () => goPage(page - 1),
@@ -853,6 +930,7 @@ export function Reader() {
     playlist: () => void addToPlaylist(),
     cover: () => void changeCover(),
     remove: () => void removeLesson(),
+    panel: () => togglePanel(),
   });
 
   // le chat cadre l'extrait des longues leçons sur la page lue
@@ -915,14 +993,41 @@ export function Reader() {
       lantern.set(target);
       setLanternOn(true);
     } else void lantern.start({ ...target, transition: { type: "spring", stiffness: 760, damping: 50, mass: 0.5 } });
-    // garde le mot visible
+    // garde le mot visible, sauf si la page reste où l'on lit (« Y aller » le rejoint)
     const sc = scrollRef.current;
-    if (sc) {
+    const seek = seekLantern.current;
+    seekLantern.current = false;
+    if (sc && (follow || seek)) {
       const sr = sc.getBoundingClientRect();
       if (r.top < sr.top + 80 || r.bottom > sr.bottom - 120) sc.scrollBy({ top: r.top - sr.top - sr.height * 0.35, behavior: "smooth" });
-    }
+      setLanternOut(0);
+    } else setLanternOut(sc ? lanternSide() : 0);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cursor, page, pr.start, pr.end, relayout]);
+
+  /** Mode défilement : la lanterne est-elle au-dessus (-1), en vue (0) ou au-dessous (1) ? */
+  function lanternSide() {
+    const sc = scrollRef.current;
+    const el = cursorNow.current >= 0 ? pageRef.current?.querySelector(`[data-i="${cursorNow.current}"]`) : null;
+    if (!sc || !el) return 0;
+    const sr = sc.getBoundingClientRect();
+    const r = el.getBoundingClientRect();
+    return r.bottom < sr.top + 20 ? -1 : r.top > sr.bottom - 40 ? 1 : 0;
+  }
+
+  /** Rejoint la lanterne : la page où la lecture en est, et le mot lu. */
+  const catchUp = () => {
+    const c = cursorNow.current;
+    if (c < 0) return;
+    const p = pageOfToken(pages, c);
+    const turned = p !== pageNow.current;
+    if (turned) goPage(p);
+    keepTok.current = c;
+    anchorRef.current.want = c;
+    seekLantern.current = true;
+    // la nouvelle page arrive après l'animation : la lanterne s'y pose ensuite
+    window.setTimeout(() => setRelayout((n) => n + 1), turned ? 380 : 0);
+  };
 
   // la visite guidée arrête la lecture à voix haute quand elle passe à la suite
   useEffect(() => {
@@ -1094,6 +1199,49 @@ export function Reader() {
       {paragraphs}
     </div>
   );
+  const wordPanel = (
+    <WordPanel
+      lang={lang}
+      sel={selection}
+      term={selection ? terms[selection.key] : undefined}
+      onStatus={(k, s) => setStatus(k, s)}
+      onTranslation={onTranslation}
+      onSelectPhrase={(a, b) => select(a, b)}
+      onAsk={(q) => {
+        setAside("chat");
+        void useChat.getState().ask({ id: lesson.id, title: lesson.title, lang }, q);
+      }}
+      onClose={() => setRange(null)}
+    />
+  );
+
+  // page qui ne tourne pas avec la lecture : où en est la lanterne ?
+  const cursorPage = cursor >= 0 ? pageOfToken(pages, cursor) : -1;
+  const away = follow || cursor < 0 || cinema || complete ? 0 : cursorPage !== page ? (cursorPage > page ? 1 : -1) : lanternOut;
+
+  const followPill = (
+    <motion.button
+      key="follow"
+      className="follow-pill"
+      onClick={catchUp}
+      initial={{ opacity: 0, y: 8, scale: 0.96 }}
+      animate={{ opacity: 1, y: 0, scale: 1 }}
+      exit={{ opacity: 0, y: 6, scale: 0.97, transition: { duration: 0.15 } }}
+      transition={{ type: "spring", stiffness: 420, damping: 32 }}
+      title={t("Rejoindre la lanterne : la page et le mot où la lecture en est", "Catch up with the lantern: the page and the word playback has reached")}
+    >
+      <span className="follow-dot" />
+      <span className="follow-text">
+        {cursorPage !== page
+          ? t(`La lecture est page ${cursorPage + 1}`, `Playback is on page ${cursorPage + 1}`)
+          : away > 0
+            ? t("La lecture continue plus bas", "Playback continues further down")
+            : t("La lecture est plus haut", "Playback is further up")}
+      </span>
+      <strong>{t("Y aller", "Go there")}</strong>
+    </motion.button>
+  );
+
   const turnProps = {
     custom: turn * flip,
     variants: TURN,
@@ -1131,8 +1279,8 @@ export function Reader() {
   };
 
   return (
-    <div className={`reader ${cinema ? "cinema" : ""} ${look.className}`} style={look.style}>
-      <div className="reader-col">
+    <div ref={rootRef} className={`reader ${cinema ? "cinema" : ""} ${floating ? "wp-floating" : ""} ${look.className}`} style={look.style}>
+      <div className="reader-col" ref={colRef}>
         <div className="reader-top drag" data-tauri-drag-region>
           {!cinema && (
             <button
@@ -1181,6 +1329,32 @@ export function Reader() {
           <button className="btn sm soft no-drag" onClick={() => setSimplify(true)} title={t("Réécrire ce texte à un niveau plus simple", "Rewrite this text at a simpler level")}>
             <Icon name="sparkle" size={14} /> {t("Simplifier", "Simplify")}
           </button>
+          {floating && (
+            <button
+              className={`icon-btn no-drag chat-float-btn ${aside === "chat" ? "on" : ""}`}
+              onClick={() => setAside(aside === "chat" ? "word" : "chat")}
+              aria-expanded={aside === "chat"}
+              aria-label={t("Discuter de la leçon", "Chat about the lesson")}
+              title={t("Discuter de la leçon (C)", "Chat about the lesson (C)")}
+            >
+              <Icon name="chat" size={17} />
+              {chatBusy && aside !== "chat" && <span className="tab-live" />}
+            </button>
+          )}
+          {!cinema && (
+            <button
+              className="icon-btn no-drag panel-btn"
+              onClick={togglePanel}
+              aria-label={floating ? t("Fixer le panneau du mot à droite", "Dock the word panel on the right") : t("Panneau du mot flottant", "Floating word panel")}
+              title={`${
+                floating
+                  ? t("Fixer le panneau du mot à droite", "Dock the word panel on the right")
+                  : t("Panneau du mot flottant, au-dessus du mot touché : tout l'écran pour le texte", "Floating word panel, above the word you tap: the whole screen for the text")
+              } (${isWindows ? "Ctrl+I" : "⌃⌘I"})`}
+            >
+              <Icon name="panel" size={18} />
+            </button>
+          )}
         </div>
 
         {isVideo && (
@@ -1238,7 +1412,18 @@ export function Reader() {
                     </span>
                   )}
                 </div>
-                <p className="leaf-hint">{hint}</p>
+                {/* la page ne tourne pas avec la lecture : le conseil cède la place à « Y aller » */}
+                <div className="leaf-mid">
+                  <AnimatePresence mode="wait" initial={false}>
+                    {away !== 0 ? (
+                      followPill
+                    ) : (
+                      <motion.p key="hint" className="leaf-hint" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0, transition: { duration: 0.12 } }}>
+                        {hint}
+                      </motion.p>
+                    )}
+                  </AnimatePresence>
+                </div>
                 <button className="btn primary glow" onClick={finishPage} disabled={illum} data-tour="finish">
                   {finishLabel}
                   <Icon name="forward" size={15} stroke={2} />
@@ -1299,6 +1484,41 @@ export function Reader() {
           autoplay={autoplay}
           onFinished={onFinished}
         />
+
+        <AnimatePresence>
+          {floating && aside === "word" && range && selection && (
+            <WordFloat key="word-float" col={colRef} page={pageRef} scroller={scrollRef} a={range.a} b={range.b} layout={`${page}:${pr.start}:${pr.end}:${paged}:${look.size}:${look.lineHeight}:${look.font.id}:${relayout}`}>
+              {wordPanel}
+            </WordFloat>
+          )}
+        </AnimatePresence>
+
+        <AnimatePresence>
+          {floating && aside === "chat" && (
+            <motion.div
+              key="chat-float"
+              className="chat-float"
+              role="dialog"
+              aria-label={t("Chat sur la leçon", "Chat about the lesson")}
+              initial={{ opacity: 0, x: 18, scale: 0.98 }}
+              animate={{ opacity: 1, x: 0, scale: 1 }}
+              exit={{ opacity: 0, x: 14, scale: 0.98, transition: { duration: 0.16 } }}
+              transition={{ type: "spring", stiffness: 420, damping: 36 }}
+              onKeyDown={(e) => {
+                if (e.key === "Escape" && !e.defaultPrevented) setAside("word");
+              }}
+            >
+              <ReaderChat lesson={{ id: lesson.id, title: lesson.title, lang }} onClose={() => setAside("word")} />
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* mode défilement : au-dessus du lecteur audio (en mode pages, dans le bas de page) */}
+        {!paged && (
+          <div className="follow-slot">
+            <AnimatePresence>{away !== 0 && followPill}</AnimatePresence>
+          </div>
+        )}
 
         <AnimatePresence>
           {upNext && pl && (
@@ -1388,38 +1608,32 @@ export function Reader() {
         </AnimatePresence>
       </div>
 
-      <aside className="word-panel" data-tour="panel" aria-label={t("Panneau latéral", "Side panel")}>
-        <div className="wp-top drag" data-tauri-drag-region>
-          <AsideTabs value={aside} onChange={setAside} />
-        </div>
-        <AnimatePresence mode="wait" initial={false}>
+      <aside className={`word-panel ${floating ? "away" : ""}`} data-tour={floating ? undefined : "panel"} aria-label={t("Panneau latéral", "Side panel")} aria-hidden={floating || undefined}>
+        {!floating && (
           <motion.div
-            key={aside}
-            className="aside-body"
-            initial={{ opacity: 0, x: aside === "chat" ? 12 : -12 }}
-            animate={{ opacity: 1, x: 0 }}
-            exit={{ opacity: 0, x: aside === "chat" ? -12 : 12 }}
-            transition={{ duration: 0.2, ease: [0.2, 0.8, 0.2, 1] }}
+            className="wp-dock"
+            // revenu de l'état flottant : le contenu paraît quand le panneau a fini de s'ouvrir
+            initial={dockFade.current ? { opacity: 0 } : false}
+            animate={{ opacity: 1 }}
+            transition={{ delay: 0.3, duration: 0.25 }}
           >
-            {aside === "word" ? (
-              <WordPanel
-                lang={lang}
-                sel={selection}
-                term={selection ? terms[selection.key] : undefined}
-                onStatus={(k, s) => setStatus(k, s)}
-                onTranslation={onTranslation}
-                onSelectPhrase={(a, b) => select(a, b)}
-                onAsk={(q) => {
-                  setAside("chat");
-                  void useChat.getState().ask({ id: lesson.id, title: lesson.title, lang }, q);
-                }}
-                onClose={() => setRange(null)}
-              />
-            ) : (
-              <ReaderChat lesson={{ id: lesson.id, title: lesson.title, lang }} />
-            )}
+            <div className="wp-top drag" data-tauri-drag-region>
+              <AsideTabs value={aside} onChange={setAside} />
+            </div>
+            <AnimatePresence mode="wait" initial={false}>
+              <motion.div
+                key={aside}
+                className="aside-body"
+                initial={{ opacity: 0, x: aside === "chat" ? 12 : -12 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: aside === "chat" ? -12 : 12 }}
+                transition={{ duration: 0.2, ease: [0.2, 0.8, 0.2, 1] }}
+              >
+                {aside === "word" ? wordPanel : <ReaderChat lesson={{ id: lesson.id, title: lesson.title, lang }} />}
+              </motion.div>
+            </AnimatePresence>
           </motion.div>
-        </AnimatePresence>
+        )}
       </aside>
 
       <SimplifySheet open={simplify} onClose={() => setSimplify(false)} lessonTitle={lesson.title} text={lesson.text} lang={lang} />

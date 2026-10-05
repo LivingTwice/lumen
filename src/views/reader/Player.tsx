@@ -187,6 +187,13 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player({ lesson, 
   // pages du moment : elles se recomposent (fenêtre, police) pendant que la voix lit
   const pagesRef = useRef(pages);
   pagesRef.current = pages;
+  // la page tourne avec la lecture (réglage auto_turn) ; sinon elle reste où l'on lit
+  const follow = settings.auto_turn !== "0";
+  const followRef = useRef(follow);
+  followRef.current = follow;
+  // début de la page affichée quand la lecture s'est arrêtée : la page n'a pas
+  // bougé depuis, la lecture reprend là où elle en était, même sur une autre page
+  const pausedOn = useRef<number | null>(null);
   const listenSecs = useRef(0);
   // lu une seule fois, à l'ouverture de la leçon
   const autoplayRef = useRef(!!autoplay);
@@ -274,7 +281,7 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player({ lesson, 
       if (i === cursorRef.current) return;
       cursorRef.current = i;
       onCursor(i);
-      if (i >= 0) {
+      if (i >= 0 && followRef.current) {
         const p = pageOf(i);
         if (p !== pageRef.current) onPage(p);
       }
@@ -382,10 +389,11 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player({ lesson, 
         onEnd(completed) {
           speakRef.current = null;
           // la suite : le premier mot après la page lue, dans les pages du moment
+          // (la page affichée ne la suit que si elle tourne avec la lecture)
           const next = range.end;
           if (completed && next < tokens.length) {
             window.setTimeout(() => {
-              onPage(pageOf(next));
+              if (followRef.current) onPage(pageOf(next));
               if (speakFromRef.current(next)) return;
               setPlaying(false);
               setCursor(-1);
@@ -444,6 +452,15 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player({ lesson, 
     master()?.pause();
     if (dual) videoRef.current?.pause();
   };
+  const markPause = () => {
+    pausedOn.current = pagesRef.current[pageRef.current]?.start ?? null;
+  };
+  /**
+   * Reprise quand la page ne tourne pas avec la lecture : si l'on n'a pas tourné
+   * la page depuis l'arrêt, la lecture repart du mot où elle en était (même sur
+   * une autre page) ; sinon, du début de la page affichée, comme d'habitude.
+   */
+  const resumesAway = (cur: number) => !followRef.current && cur >= 0 && (pausedOn.current === null || pausedOn.current === pagesRef.current[pageRef.current]?.start);
 
   const toggle = useCallback(() => {
     if (hasMedia) {
@@ -452,7 +469,7 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player({ lesson, 
       if (m.paused) {
         const cur = cursorRef.current;
         const r = pages[pageRef.current];
-        if (timing && (cur < r.start || cur >= r.end)) seekToToken(r.start);
+        if (timing && !resumesAway(cur) && (cur < r.start || cur >= r.end)) seekToToken(r.start);
         playMedia();
       } else pauseMedia();
       return;
@@ -473,10 +490,11 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player({ lesson, 
     if (playing) {
       speakRef.current?.stop();
       setPlaying(false);
+      markPause();
     } else {
       const cur = cursorRef.current >= 0 ? cursorRef.current : resumeRef.current;
       const r = pages[pageRef.current];
-      speakFrom(cur >= r.start && cur < r.end ? cur : r.start);
+      speakFrom(resumesAway(cur) || (cur >= r.start && cur < r.end) ? cur : r.start);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hasMedia, playing, pages, timing, seekToToken, speakFrom, lesson.lang, single, dual]);
@@ -512,6 +530,7 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player({ lesson, 
         else if (playing) {
           speakRef.current?.stop();
           setPlaying(false);
+          markPause();
         }
       },
       stop() {
@@ -572,6 +591,7 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player({ lesson, 
     },
     onPause: (e: React.SyntheticEvent<HTMLMediaElement>) => {
       setPlaying(false);
+      markPause();
       if (dual) videoRef.current?.pause();
       if (!e.currentTarget.ended) remember(e.currentTarget.currentTime, true);
     },
@@ -666,6 +686,30 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player({ lesson, 
           title={t("Vitesse de lecture", "Playback speed")}
         >
           {t(String(rate).replace(".", ","), String(rate))}×
+        </button>
+        {/* la page tourne avec la lecture, ou reste où l'on lit pendant que le son continue */}
+        <button
+          className={`icon-btn player-follow ${follow ? "" : "off"}`}
+          onClick={() => {
+            void setSetting("auto_turn", follow ? "0" : "1");
+            useApp
+              .getState()
+              .toast(
+                follow
+                  ? t("La page reste où vous lisez : la lecture continue sans la tourner", "The page stays where you're reading: playback goes on without turning it")
+                  : t("Les pages tournent avec la lecture", "Pages turn with playback"),
+                "light",
+              );
+          }}
+          aria-pressed={follow}
+          aria-label={t("Tourner les pages avec la lecture", "Turn pages with playback")}
+          title={
+            follow
+              ? t("Les pages tournent avec la lecture. Cliquez pour garder la page où vous lisez.", "Pages turn with playback. Click to keep the page where you're reading.")
+              : t("La page reste où vous lisez pendant que la lecture continue. Cliquez pour que les pages tournent avec elle.", "The page stays where you're reading while playback goes on. Click to make pages turn with it.")
+          }
+        >
+          <Icon name={follow ? "pageturn" : "pagestay"} size={18} />
         </button>
         {canResync &&
           (resync === null ? (

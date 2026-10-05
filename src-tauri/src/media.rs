@@ -67,6 +67,10 @@ pub async fn transcribe(
     if let Some(p) = pcm_out {
         cmd.arg("--pcm").arg(p);
     }
+    // Windows : le processeur seul, si l'apprenant l'a choisi (Réglages › IA)
+    if !crate::ai::gpu_wanted() {
+        cmd.arg("--cpu");
+    }
     let mut child = cmd
         .stdout(Stdio::piped())
         .stderr(Stdio::null())

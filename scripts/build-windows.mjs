@@ -8,11 +8,13 @@
 // Outils, installés au besoin la première fois : rustup et sa cible Windows (le Rust
 // de Homebrew ne compile que pour le Mac), cargo-xwin (il télécharge une fois les
 // bibliothèques de Windows et de Visual C++ de Microsoft), LLVM et lld (compilateur
-// et éditeur de liens à la manière de Microsoft), NSIS (l'installateur).
+// et éditeur de liens à la manière de Microsoft), NSIS (l'installateur), et pour
+// l'IA sur la carte graphique (Vulkan) : ses en-têtes, ceux de SPIR-V et glslc, le
+// compilateur des programmes de la carte (shaders).
 // Un dossier de compilation à part (target/windows) : la compilation pour le Mac n'est
 // jamais à refaire après celle-ci.
 import { execSync, spawnSync } from "node:child_process";
-import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -54,9 +56,12 @@ const missing = [
   ["llvm", existsSync(join(prefix, "opt/llvm/bin/clang-cl"))],
   ["lld", existsSync(join(prefix, "opt/lld/bin/lld-link"))],
   ["nsis", has("makensis")],
+  ["vulkan-headers", existsSync(join(prefix, "opt/vulkan-headers/include/vulkan/vulkan.hpp"))],
+  ["spirv-headers", existsSync(join(prefix, "opt/spirv-headers/include/spirv"))],
+  ["shaderc", existsSync(join(prefix, "opt/shaderc/bin/glslc"))],
 ].filter(([, ok]) => !ok);
 if (missing.length) {
-  if (!brew) fail("Homebrew est introuvable : il faut LLVM, lld et NSIS pour compiler la version Windows.");
+  if (!brew) fail("Homebrew est introuvable : il faut LLVM, lld, NSIS et les outils de Vulkan pour compiler la version Windows.");
   console.log(`  Installation de ${missing.map(([n]) => n).join(", ")}…`);
   run(`"${brew}" install ${missing.map(([n]) => n).join(" ")}`);
 }
@@ -66,11 +71,34 @@ console.log("  ok");
 // la bibliothèque ggml-blas des Mac (une bibliothèque vide en tient lieu, rien ne l'appelle
 // sous Windows) et oublie celle du registre de Windows (advapi32), qu'on ajoute. Sur un
 // PC, il fait ce qu'il faut.
+// Même méprise pour Vulkan : il réclame la bibliothèque « vulkan » des Mac, vide elle aussi.
 const crossLib = join(targetDir, "cross-lib");
 mkdirSync(crossLib, { recursive: true });
-writeFileSync(join(crossLib, "ggml-blas.lib"), "!<arch>\n");
+const emptyLib = "!<arch>\n";
+writeFileSync(join(crossLib, "ggml-blas.lib"), emptyLib);
+writeFileSync(join(crossLib, "vulkan.lib"), emptyLib);
 if (/\s/.test(crossLib)) fail(`le chemin du projet ne doit pas contenir d'espace : ${crossLib}`);
 env.RUSTFLAGS = `-L native=${crossLib} -l advapi32`;
+
+// Vulkan, pour que llama.cpp et whisper.cpp calculent sur la carte graphique : les outils
+// de Homebrew réunis en un SDK minimal (dossier lu par leurs scripts, variable VULKAN_SDK).
+// Sa bibliothèque vulkan-1.lib est vide : Lumen fournit lui-même les quelques fonctions de
+// Vulkan appelées directement et n'ouvre vulkan-1.dll que si le pilote graphique l'a
+// installée (src-tauri/src/vulkan.rs), sinon un PC sans elle ne lancerait pas Lumen.
+const vk = join(targetDir, "vulkan-sdk");
+for (const dir of ["include", "bin", "lib", "Lib", "share/cmake"]) mkdirSync(join(vk, dir), { recursive: true });
+const link = (target, path) => {
+  rmSync(path, { force: true });
+  symlinkSync(target, path);
+};
+link(join(prefix, "opt/vulkan-headers/include/vulkan"), join(vk, "include/vulkan"));
+link(join(prefix, "opt/vulkan-headers/include/vk_video"), join(vk, "include/vk_video"));
+link(join(prefix, "opt/spirv-headers/include/spirv"), join(vk, "include/spirv"));
+link(join(prefix, "opt/spirv-headers/share/cmake/SPIRV-Headers"), join(vk, "share/cmake/SPIRV-Headers"));
+link(join(prefix, "opt/shaderc/bin/glslc"), join(vk, "bin/glslc"));
+// « lib » pour CMake, « Lib » pour llama.cpp (le même dossier, sauf sur un disque sensible à la casse)
+for (const dir of ["lib", "Lib"]) writeFileSync(join(vk, dir, "vulkan-1.lib"), emptyLib);
+env.VULKAN_SDK = vk;
 
 if (process.argv.includes("--check") || process.argv.includes("--tests")) {
   step("Vérification de la compilation pour Windows");

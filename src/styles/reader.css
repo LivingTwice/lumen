@@ -355,6 +355,12 @@ span.player-voice .icon-btn {
     display: none;
   }
 }
+/* la page reste où l'on lit : le bouton le rappelle d'une lueur */
+.player-follow.off {
+  color: var(--text);
+  background: var(--light-veil);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--light-strong) 35%, transparent);
+}
 .player-resync.busy {
   display: inline-flex;
   align-items: center;
@@ -524,6 +530,12 @@ span.player-voice .icon-btn {
   background: linear-gradient(90deg, var(--light-strong), var(--light));
   box-shadow: 0 0 8px var(--light);
   transition: width 0.45s var(--ease-out);
+}
+.leaf-mid {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
 }
 .leaf-hint {
   flex: 1;
@@ -1457,8 +1469,23 @@ span.player-voice .icon-btn {
   flex-direction: column;
   background: var(--panel);
   border-left: 1px solid var(--border);
-  transition: background-color 0.4s ease;
+  transition: background-color 0.4s ease, width 0.45s var(--ease-out), border-color 0.3s ease;
   min-height: 0;
+  overflow: hidden;
+}
+/* panneau flottant : la colonne de droite se replie, le texte prend toute la place */
+.word-panel.away {
+  width: 0;
+  border-left-color: transparent;
+}
+/* contenu à sa largeur pendant que le panneau s'ouvre (le surplus est caché) */
+.wp-dock {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  min-width: calc(var(--panel-w) - 1px);
+  display: flex;
+  flex-direction: column;
 }
 .wp-top {
   height: var(--titlebar-h);
@@ -1708,6 +1735,193 @@ span.player-voice .icon-btn {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+
+/* ---------- panneau du mot flottant (petit écran, ⌃⌘I) ----------
+   Une carte posée au-dessus du mot touché (dessous s'il n'y a pas la place),
+   dans la couleur de la page. Elle glisse d'un mot à l'autre. */
+.wp-float-at {
+  position: absolute;
+  z-index: 15;
+  height: 0;
+  transition: left 0.32s var(--ease-out), top 0.32s var(--ease-out), opacity 0.18s ease, visibility 0s;
+}
+.wp-float-at.gone {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity 0.18s ease, visibility 0s linear 0.18s;
+}
+.wp-float {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  flex-direction: column;
+  border-radius: 18px;
+  border: 1px solid var(--border-strong);
+  background: var(--bg-elev);
+  box-shadow: var(--shadow-l), 0 0 80px -26px var(--light-soft);
+  color: var(--text);
+  cursor: default;
+}
+.wp-float.down {
+  top: 0;
+  bottom: auto;
+}
+/* pointe vers le mot */
+.wp-float-tip {
+  position: absolute;
+  bottom: -7px;
+  width: 13px;
+  height: 13px;
+  margin-left: -6.5px;
+  background: var(--bg-elev);
+  border-right: 1px solid var(--border-strong);
+  border-bottom: 1px solid var(--border-strong);
+  border-bottom-right-radius: 3px;
+  transform: rotate(45deg);
+  transition: left 0.32s var(--ease-out);
+}
+.wp-float.down .wp-float-tip {
+  top: -7px;
+  bottom: auto;
+  border: 0;
+  border-left: 1px solid var(--border-strong);
+  border-top: 1px solid var(--border-strong);
+  border-radius: 3px 0 0 0;
+}
+/* la carte prend la hauteur de son contenu, puis défile au-delà de la place libre */
+.wp-float .wp-pane,
+.wp-float .wp-scroll {
+  flex: 0 1 auto;
+}
+.wp-float .wp-scroll {
+  padding: 16px 18px;
+  gap: 15px;
+}
+/* l'essentiel d'abord : le mot, son sens ici, son statut ; puis le dictionnaire et ma traduction */
+.wp-float .wp-scroll > * {
+  order: 3;
+}
+.wp-float .wp-scroll > :first-child,
+.wp-float .wp-expr,
+.wp-float .wp-sense {
+  order: 1;
+}
+.wp-float .wp-scroll > [data-tour="status"] {
+  order: 2;
+}
+.wp-float .wp-word h2 {
+  font-size: 27px;
+}
+.wp-float .wp-word h2.long {
+  font-size: 18px;
+}
+.wp-float .wp-ai {
+  font-size: 20px;
+  min-height: 26px;
+}
+.wp-float .wp-ai.passage {
+  font-size: 16px;
+}
+.wp-float .wp-foot {
+  padding: 9px 18px;
+  font-size: 11px;
+}
+
+/* chat flottant : un volet sur le bord droit, au-dessus du texte */
+.chat-float {
+  position: absolute;
+  z-index: 16;
+  top: calc(var(--titlebar-h) + 2px);
+  right: 12px;
+  /* au-dessus du lecteur audio */
+  bottom: 88px;
+  width: min(400px, calc(100% - 24px));
+  display: flex;
+  flex-direction: column;
+  padding-top: 10px;
+  border-radius: 20px;
+  border: 1px solid var(--border-strong);
+  background: var(--panel);
+  box-shadow: var(--shadow-l), 0 0 90px -30px var(--light-soft);
+  overflow: hidden;
+}
+.chat-float-btn {
+  position: relative;
+}
+.chat-float-btn .tab-live {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+}
+
+/* la page reste où l'on lit : « Y aller » rejoint la lanterne */
+.follow-slot {
+  position: absolute;
+  z-index: 14;
+  left: 0;
+  right: 0;
+  /* au-dessus du lecteur audio (76 px) */
+  bottom: 90px;
+  display: flex;
+  justify-content: center;
+  pointer-events: none;
+}
+.follow-pill {
+  pointer-events: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  height: 36px;
+  padding: 0 5px 0 14px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--bg-elev) 90%, transparent);
+  backdrop-filter: blur(16px) saturate(1.2);
+  -webkit-backdrop-filter: blur(16px) saturate(1.2);
+  box-shadow: var(--shadow-m), 0 0 30px -8px var(--light-soft);
+  font-size: 13px;
+  color: var(--muted);
+  white-space: nowrap;
+  cursor: pointer;
+}
+/* dans le bas de page : posée sur la ligne, sans ombre portée */
+.leaf-mid .follow-pill {
+  max-width: 100%;
+  min-width: 0;
+  box-shadow: 0 0 24px -8px var(--light-soft);
+}
+.follow-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.follow-pill strong {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  height: 26px;
+  padding: 0 12px;
+  border-radius: 999px;
+  background: var(--light-veil);
+  color: var(--text);
+  font-size: 12.5px;
+  font-weight: 600;
+  transition: background-color 0.2s ease, box-shadow 0.25s ease;
+}
+.follow-pill:hover strong {
+  background: var(--light-soft);
+  box-shadow: 0 0 14px var(--light-soft);
+}
+.follow-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--light-strong);
+  box-shadow: 0 0 10px var(--light);
 }
 
 /* ---------- fin de leçon ---------- */

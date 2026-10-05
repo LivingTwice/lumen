@@ -11,7 +11,6 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use anyhow::{anyhow, Result};
 use llama_cpp_2::context::params::LlamaContextParams;
 use llama_cpp_2::llama_batch::LlamaBatch;
-use llama_cpp_2::model::params::LlamaModelParams;
 use llama_cpp_2::model::LlamaModel;
 use llama_cpp_2::mtmd::{mtmd_default_marker, MtmdBitmap, MtmdContext, MtmdContextParams, MtmdInputText};
 use llama_cpp_2::sampling::LlamaSampler;
@@ -71,11 +70,13 @@ pub fn transcribe(
 ) -> Result<String> {
     let name = language_name(lang).ok_or_else(|| anyhow!(crate::i18n::t("langue non prise en charge par Qwen3-ASR", "language not supported by Qwen3-ASR")))?;
     let be = backend()?;
-    let model = engine.exclusive(|| LlamaModel::load_from_file(be, model_path, &LlamaModelParams::default().with_n_gpu_layers(999)))
+    // sur la carte graphique, ou sur le processeur (Windows : pas de carte, pas la place, réglage)
+    let (model, gpu) = engine
+        .exclusive(|| crate::ai::load_model(be, model_path))
         .map_err(|e| anyhow!(crate::tr!("modèle de transcription illisible : {e}", "unreadable transcription model: {e}")))?;
     let threads = crate::ai::threads();
     let params = MtmdContextParams {
-        use_gpu: true,
+        use_gpu: gpu,
         print_timings: false,
         n_threads: threads,
         media_marker: CString::new(mtmd_default_marker())?,

@@ -1,4 +1,4 @@
-import type { AppInfo, BackupInfo, BackupPlace, BackupRestored, BackupStatus, ChatEvent, ChatOptions, ChatPatch, ChatReply, ChatSummary, ChatThread, DictResult, DictStatus, DiscoverFeed, DiscoverReport, DownloadEvent, GeminiModels, GoalReached, ImportEvent, LangCode, LessonSummary, LevelEstimate, LinkInfo, LinkMedia, LingqEvent, LingqLang, LingqPlan, LingqReport, Lyrics, MediaStream, ModelRow, NewLesson, OnlineCheck, OpenedLesson, Playlist, PlaylistPatch, PodcastRequest, SearchPage, SearchPlatform, SongItem, Stats, Term, TermQuery, TextStats, WordAnswer, VoicedLesson } from "./types";
+import type { AppInfo, BackupInfo, BackupPlace, BackupRestored, BackupStatus, ChatEvent, ChatOptions, ChatPatch, ChatReply, ChatSummary, ChatThread, DictResult, DictStatus, DiscoverFeed, DiscoverReport, DownloadEvent, GeminiModels, GoalReached, GpuInfo, ImportEvent, LangCode, LessonSummary, LevelEstimate, LinkInfo, LinkMedia, LingqEvent, LingqLang, LingqPlan, LingqReport, Lyrics, MediaStream, ModelRow, NewLesson, OnlineCheck, OpenedLesson, Playlist, PlaylistPatch, PodcastRequest, SearchPage, SearchPlatform, SongItem, Stats, Term, TermQuery, TextStats, WordAnswer, VoicedLesson } from "./types";
 
 export const isTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
@@ -55,6 +55,8 @@ export interface Api {
   aiSentence(lang: LangCode, sentence: string, onPiece: (t: string) => void): Promise<string>;
   aiSimplify(lang: LangCode, text: string, level: string, onPiece: (t: string) => void): Promise<string>;
   aiWarmup(): Promise<boolean>;
+  /** cartes graphiques que l'IA locale peut employer, et où calcule le modèle chargé (Réglages › IA, sous Windows) */
+  gpuInfo(): Promise<GpuInfo>;
   chatsList(lang: LangCode): Promise<ChatSummary[]>;
   chatOpen(id: number): Promise<ChatThread>;
   /** nouvelle conversation, avec une leçon jointe ou non */
@@ -174,6 +176,7 @@ async function createTauriApi(): Promise<Api> {
     aiSimplify: (lang, text, level, onPiece) =>
       invoke("ai_simplify", { lang, text, level, onEvent: ch<{ type: string; text: string }>((e) => onPiece(e.text)) }),
     aiWarmup: () => invoke("ai_warmup"),
+    gpuInfo: () => invoke("gpu_info"),
     chatsList: (lang) => invoke("chats_list", { lang }),
     chatOpen: (id) => invoke("chat_open", { id }),
     chatCreate: (lang, lesson) => invoke("chat_create", { lang, lesson }),

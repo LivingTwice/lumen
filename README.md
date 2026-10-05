@@ -30,7 +30,7 @@ The code is public precisely so that anyone can check this.
 ## Install
 
 - **Mac** (M1 or later, macOS 13 Ventura or later): open the DMG and drag Lumen into Applications. Lumen isn't verified by Apple yet: on first launch, go to **System Settings › Privacy & Security** and click **Open Anyway**.
-- **Windows** (10 or 11, 64-bit): run `Lumen_<version>_x64-setup.exe`. No administrator password needed. The installer isn't signed yet: if Windows shows “Windows protected your PC”, click **More info**, then **Run anyway**. The local AI runs on the processor and needs AVX2 (Intel since 2013, AMD since 2015).
+- **Windows** (10 or 11, 64-bit): run `Lumen_<version>_x64-setup.exe`. No administrator password needed. The installer isn't signed yet: if Windows shows “Windows protected your PC”, click **More info**, then **Run anyway**. The local AI runs on the graphics card through Vulkan (NVIDIA, AMD or Intel, with an up-to-date driver), or on the processor when there is no compatible card; the processor needs AVX2 (Intel since 2013, AMD since 2015).
 
 The AI models (about 0.5 to 3 GB depending on the profile you choose) download on first launch. After that, everything works offline.
 

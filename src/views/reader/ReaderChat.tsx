@@ -38,8 +38,8 @@ export function AsideTabs({ value, onChange }: { value: AsideTab; onChange(v: As
   );
 }
 
-/** Le chat dans le lecteur : la conversation de la leçon ouverte. */
-export function ReaderChat({ lesson }: { lesson: LessonRef & { lang: LangCode } }) {
+/** Le chat dans le lecteur : la conversation de la leçon ouverte (`onClose` : panneau flottant, à refermer). */
+export function ReaderChat({ lesson, onClose }: { lesson: LessonRef & { lang: LangCode }; onClose?(): void }) {
   const forLesson = useChat((s) => s.forLesson);
   const thread = useChat((s) => s.thread);
   const fresh = useChat((s) => s.fresh);
@@ -66,6 +66,11 @@ export function ReaderChat({ lesson }: { lesson: LessonRef & { lang: LangCode } 
         >
           <Icon name="expand" size={15} />
         </button>
+        {onClose && (
+          <button className="icon-btn" onClick={onClose} aria-label={t("Fermer le chat", "Close the chat")} title={t("Fermer le chat (Échap)", "Close the chat (Esc)")}>
+            <Icon name="close" size={14} />
+          </button>
+        )}
       </div>
       <ChatThread compact lessonNow={lesson} />
     </div>

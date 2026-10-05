@@ -2,6 +2,70 @@
   "_lisezmoi": "Nouveautés montrées après chaque mise à jour (components/News.tsx) et notes de publication. Ajouter ce qui change sous la version \"next\" au fil du travail ; « Publier une version » lui donne son numéro et sa date. Icônes : noms de components/Icon.tsx. Actions : \"tour\" (visite guidée), \"guide\", \"settings:<page>\" (profile, general, langs, reading, voice, discover, podcasts, ai, videos, backup, lingq, about), \"import:<onglet>\" (text, link, file, media, podcast), \"view:<vue>\" (library, discover, playlists, chat, vocab, progress).",
   "releases": [
     {
+      "version": "0.8.0",
+      "date": "2026-10-05",
+      "title": { "fr": "Plus de place pour lire", "en": "More room to read" },
+      "items": [
+        {
+          "icon": "cpu",
+          "title": { "fr": "L'IA sur la carte graphique", "en": "The AI on the graphics card" },
+          "body": {
+            "fr": "Sur PC, la traduction des mots, le chat et la transcription calculent désormais sur la carte graphique (NVIDIA, AMD ou Intel, par Vulkan), le plus souvent bien plus vite que sur le processeur. Sans carte compatible, ou quand sa mémoire ne suffit pas au modèle, le processeur prend le relais de lui-même. Réglages › IA montre la carte utilisée et permet de revenir au processeur.",
+            "en": "On a PC, word translation, the chat and transcription now run on the graphics card (NVIDIA, AMD or Intel, through Vulkan), usually much faster than on the processor. Without a compatible card, or when its memory can't hold the model, the processor takes over on its own. Settings › AI shows the card in use and lets you go back to the processor."
+          },
+          "action": "settings:ai",
+          "only": "windows"
+        },
+        {
+          "icon": "panel",
+          "title": { "fr": "Le texte en grand, le mot en carte", "en": "The text in full, the word on a card" },
+          "body": {
+            "fr": "Sur un petit écran, le panneau du mot ne mange plus la page : il se pose en carte au-dessus du mot touché, et le texte prend toute la place. C'est automatique quand la fenêtre est étroite (écran de 13 pouces) ; ⌃⌘I ou le bouton en haut à droite le fixe à droite ou le fait flotter, et le chat s'ouvre en volet par-dessus le texte (touche C).",
+            "en": "On a small screen, the word panel no longer eats into the page: it sits as a card above the word you tap, and the text gets all the room. It happens on its own when the window is narrow (13-inch screen); ⌃⌘I or the button at the top right docks it or makes it float, and the chat opens as a pane over the text (C key)."
+          },
+          "action": "settings:reading",
+          "only": "mac"
+        },
+        {
+          "icon": "panel",
+          "title": { "fr": "Le texte en grand, le mot en carte", "en": "The text in full, the word on a card" },
+          "body": {
+            "fr": "Sur un petit écran, le panneau du mot ne mange plus la page : il se pose en carte au-dessus du mot touché, et le texte prend toute la place. C'est automatique quand la fenêtre est étroite (écran de 13 pouces) ; Ctrl+I ou le bouton en haut à droite le fixe à droite ou le fait flotter, et le chat s'ouvre en volet par-dessus le texte (touche C).",
+            "en": "On a small screen, the word panel no longer eats into the page: it sits as a card above the word you tap, and the text gets all the room. It happens on its own when the window is narrow (13-inch screen); Ctrl+I or the button at the top right docks it or makes it float, and the chat opens as a pane over the text (C key)."
+          },
+          "action": "settings:reading",
+          "only": "windows"
+        },
+        {
+          "icon": "pageturn",
+          "title": { "fr": "La page reste où vous lisez", "en": "The page stays where you're reading" },
+          "body": {
+            "fr": "Un nouveau bouton, à côté des vitesses de lecture, empêche la page de tourner toute seule : l'audio ou la voix continue, vous restez sur votre page. Si la lecture va plus loin, « Y aller » vous ramène d'un geste à la lanterne. Aussi dans Réglages › Lecture.",
+            "en": "A new button, next to the playback speeds, keeps the page from turning on its own: the audio or the voice goes on, and you stay on your page. If playback moves ahead, “Go there” takes you back to the lantern in one tap. Also in Settings › Reading."
+          },
+          "action": "settings:reading"
+        },
+        {
+          "icon": "check",
+          "title": { "fr": "Arrivé à la dernière page, c'est lu", "en": "Reach the last page, and it's read" },
+          "body": {
+            "fr": "Une leçon lue jusqu'à sa dernière page compte comme terminée, même sans toucher « Terminer la leçon » : elle prend sa pastille « Lu » dans la bibliothèque et ses mots comptent dans vos progrès. Le bouton reste là pour faire passer les mots bleus en connus et voir le bilan de la séance.",
+            "en": "A lesson read to its last page counts as finished, even if you don't tap “Finish the lesson”: it gets its “Read” badge in the library and its words count toward your progress. The button is still there to move the blue words to known and see your session summary."
+          },
+          "action": "view:library"
+        },
+        {
+          "icon": "chart",
+          "title": { "fr": "Le calendrier des progrès réparé", "en": "The progress calendar, fixed" },
+          "body": {
+            "fr": "Dans Progrès, le calendrier des 26 dernières semaines s'affichait en énormes pavés qui débordaient de la carte. Chaque jour retrouve sa petite case, qui s'éclaire selon le temps passé.",
+            "en": "In Progress, the calendar of the last 26 weeks showed up as huge blocks spilling out of its card. Each day is back to its small square, lit by the time you spent."
+          },
+          "action": "view:progress"
+        }
+      ]
+    },
+    {
       "version": "0.7.0",
       "date": "2026-10-05",
       "title": { "fr": "Lumen arrive sur Windows", "en": "Lumen comes to Windows" },

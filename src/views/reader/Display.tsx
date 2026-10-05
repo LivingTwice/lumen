@@ -3,7 +3,7 @@ import { useEffect, useRef } from "react";
 import { Icon } from "../../components/Icon";
 import { Segmented } from "../../components/ui";
 import { t } from "../../lib/i18n";
-import { glyphSample, LOOK_DEFAULTS, PAPERS, readFont, readFonts, SIZE_MAX, SIZE_MIN, type ReaderLayout } from "../../lib/reading";
+import { glyphSample, LOOK_DEFAULTS, PAPERS, panelMode, panelOptions, readFont, readFonts, SIZE_MAX, SIZE_MIN, type ReaderLayout } from "../../lib/reading";
 import { useApp } from "../../lib/store";
 
 const RING = { type: "spring", stiffness: 520, damping: 40 } as const;
@@ -249,6 +249,12 @@ export function DisplayMenu({ open, onClose, lang }: { open: boolean; onClose():
                   { value: "line", label: t("Soulignés", "Underlined") },
                 ]}
               />
+            </div>
+            <div className="look-row">
+              <span title={t("À droite du texte, ou flottant au-dessus du mot touché. « Auto » le fait flotter quand la fenêtre est étroite.", "On the right of the text, or floating above the word you tap. “Auto” floats it when the window is narrow.")}>
+                {t("Panneau", "Panel")}
+              </span>
+              <Segmented id="pop-wp" value={panelMode(settings.word_panel)} onChange={set("word_panel")} options={panelOptions()} />
             </div>
           </section>
         </motion.div>

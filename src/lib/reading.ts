@@ -107,6 +107,26 @@ export const PAPERS: Paper[] = [
 /** Largeur de la colonne de texte (sans les marges). */
 export const WIDTHS: Record<string, number> = { narrow: 540, normal: 624, wide: 820 };
 
+/** Panneau du mot : à droite du texte, flottant au-dessus du mot touché, ou selon la place. */
+export type PanelMode = "auto" | "side" | "float";
+
+export const panelMode = (v: string | undefined): PanelMode => (v === "side" || v === "float" ? v : "auto");
+
+export function panelOptions(): { value: PanelMode; label: string }[] {
+  return [
+    { value: "auto", label: "Auto" },
+    { value: "side", label: t("À droite", "Docked") },
+    { value: "float", label: t("Flottant", "Floating") },
+  ];
+}
+
+/**
+ * Largeur du lecteur sous laquelle le panneau « Auto » flotte : la colonne, les
+ * flèches et de l'air de part et d'autre, plus le panneau (360 px). Sur un écran
+ * de 13 pouces avec la barre latérale, le texte prend alors toute la place.
+ */
+export const roomForSidePanel = (colW: number) => colW + 620;
+
 export const SIZE_MIN = 16;
 export const SIZE_MAX = 40;
 
@@ -121,6 +141,8 @@ export const LOOK_DEFAULTS: Record<string, string> = {
   // couleur de la page : "auto" suit le thème de Lumen
   read_paper: "auto",
   word_style: "tint",
+  // panneau du mot : "auto" flotte au-dessus du mot quand la fenêtre est étroite
+  word_panel: "auto",
 };
 
 /** Vitesses de lecture : audio et vidéo, ou voix (réglages `media_rate` et `tts_rate`). */

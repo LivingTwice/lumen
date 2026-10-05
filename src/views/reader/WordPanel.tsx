@@ -367,7 +367,7 @@ export function WordPanel({ lang, sel, term, onStatus, onTranslation, onSelectPh
             </button>
           )}
 
-          <div className="wp-block">
+          <div className="wp-block wp-sense">
             <span className="eyebrow">{sel.words > SENSE_MAX_WORDS ? t("Traduction", "Translation") : t("Dans cette phrase", "In this sentence")}</span>
             {aiState === "nomodel" ? (
               <div className="wp-note" style={{ display: "flex", flexDirection: "column", gap: 10, alignItems: "flex-start" }}>

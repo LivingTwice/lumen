@@ -32,6 +32,11 @@ const P: Record<string, string> = {
   wave: "M3 12h2 M7 8v8 M11 5v14 M15 9v6 M19 7v10 M21 12h0",
   video: "M4 6h11v12H4z M15 10l5-3v10l-5-3z",
   sidebar: "M6 5h12a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2z M9.5 5v14",
+  // panneau du mot, à droite du texte
+  panel: "M6 5h12a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2z M14.5 5v14",
+  // la page tourne avec la lecture (barrée : elle reste où l'on lit)
+  pageturn: "M6.5 3.5h7.5l4 4v13H6.5z M14 3.5v4h4 M9.5 14h5.5 M12.8 11.6l2.4 2.4-2.4 2.4",
+  pagestay: "M6.5 3.5h7.5l4 4v13H6.5z M14 3.5v4h4 M9.5 14h5.5 M12.8 11.6l2.4 2.4-2.4 2.4 M3.5 4l17 16",
   expand: "M4 9V4h5 M20 9V4h-5 M4 15v5h5 M20 15v5h-5",
   shrink: "M9 4v5H4 M15 4v5h5 M9 20v-5H4 M15 20v-5h5",
   sparkle: "M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z M19 16l.8 2.2L22 19l-2.2.8L19 22l-.8-2.2L16 19l2.2-.8z",

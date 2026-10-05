@@ -798,6 +798,18 @@ export function createMockApi(): Api {
     async aiWarmup() {
       return db.installed.some((m) => m.startsWith("qwen"));
     },
+    async gpuInfo() {
+      await sleep(250);
+      // un PC portable de jeu : carte dédiée, et celle intégrée au processeur
+      return {
+        vulkan: true,
+        devices: [
+          { name: "NVIDIA GeForce RTX 4060 Laptop GPU", memory: 8 * 2 ** 30, integrated: false },
+          { name: "Intel(R) UHD Graphics", memory: 16 * 2 ** 30, integrated: true },
+        ],
+        model_on_gpu: db.installed.some((m) => m.startsWith("qwen")) ? db.settings.ai_gpu !== "0" : null,
+      };
+    },
     async chatsList(lang) {
       return chats()
         .filter((c) => c.lang === lang)

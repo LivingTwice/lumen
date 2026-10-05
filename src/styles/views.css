@@ -1938,7 +1938,11 @@
 .calendar-head .muted {
   font-size: 12.5px;
 }
+/* Taille des cases calculée sur la largeur du calendrier (unités cqw), pas par aspect-ratio :
+   dans ces grilles imbriquées, WebKit et Chromium en tiraient des cases de 140 px qui débordaient. */
 .cal {
+  container-type: inline-size;
+  --cell: calc((100cqw - 20px - (var(--weeks) - 1) * 3px) / var(--weeks));
   display: grid;
   grid-template-columns: 14px minmax(0, 1fr);
   gap: 5px 6px;
@@ -1959,7 +1963,7 @@
 }
 .cal-names {
   display: grid;
-  grid-template-rows: repeat(7, minmax(0, 1fr));
+  grid-template-rows: repeat(7, var(--cell));
   gap: 3px;
   align-items: center;
   font-size: 10px;
@@ -1967,12 +1971,13 @@
 }
 .cal-week {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: repeat(7, var(--cell));
   gap: 3px;
 }
 .cal-day {
   position: relative;
   display: block;
-  aspect-ratio: 1;
   border-radius: 3px;
   background: var(--chip);
 }

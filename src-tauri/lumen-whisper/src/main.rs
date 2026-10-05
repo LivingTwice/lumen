@@ -3,9 +3,11 @@
 //! Lancé par Lumen comme processus séparé (whisper.cpp et llama.cpp embarquent
 //! chacun leur propre copie de ggml, qu'on ne peut pas lier dans le même binaire).
 //!
-//! Usage : lumen-whisper <modèle.bin> <fichier audio/vidéo> <code langue> [--pcm <sortie.f32>]
+//! Usage : lumen-whisper <modèle.bin> <fichier audio/vidéo> <code langue> [--pcm <sortie.f32>] [--cpu]
 //! `--pcm` : enregistre aussi le son décodé (mono, 16 kHz, f32 petit-boutiste),
 //! que Lumen confie ensuite à Qwen3-ASR sans avoir à décoder le fichier.
+//! `--cpu` : le processeur seul (choisi dans Lumen, sous Windows) ; sinon la carte
+//! graphique (Metal sur Mac, Vulkan sous Windows) si elle est là et a la place.
 //! Sortie (stdout, une ligne JSON par événement) :
 //!   {"type":"stage","stage":"decode"}
 //!   {"type":"progress","value":42}
@@ -31,6 +33,11 @@ use symphonia::core::probe::Hint;
 use whisper_rs::{
     DtwMode, DtwModelPreset, DtwParameters, FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters,
 };
+
+// Windows : Vulkan chargé seulement s'il est là (le même fichier que l'app)
+#[cfg(windows)]
+#[path = "../../src/vulkan.rs"]
+mod vulkan;
 
 const TARGET_RATE: u32 = 16_000;
 
@@ -315,8 +322,8 @@ fn refine(words: &mut [Word], env: &Envelope, duration: f64) {
     }
 }
 
-/// Fils de calcul (8 au plus). Sous Windows, où Whisper calcule sur le
-/// processeur, un par cœur physique : l'hyperthreading le ralentit.
+/// Fils de calcul (8 au plus). Sous Windows, un par cœur physique :
+/// l'hyperthreading ralentit ce qui se calcule sur le processeur.
 fn threads() -> i32 {
     let n = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4);
     #[cfg(windows)]
@@ -344,6 +351,37 @@ fn physical_cores() -> Option<usize> {
     }
 }
 
+/// Windows : la carte graphique dédiée plutôt que celle intégrée au processeur.
+/// whisper.cpp prend la première que Vulkan présente, souvent l'intégrée sur un
+/// portable qui a les deux. Rang parmi les cartes graphiques.
+#[cfg(windows)]
+fn gpu_device() -> i32 {
+    use whisper_rs_sys::{
+        ggml_backend_dev_count, ggml_backend_dev_get, ggml_backend_dev_type, ggml_backend_dev_type_GGML_BACKEND_DEVICE_TYPE_GPU as GPU,
+        ggml_backend_dev_type_GGML_BACKEND_DEVICE_TYPE_IGPU as IGPU,
+    };
+    let kinds: Vec<_> = unsafe { (0..ggml_backend_dev_count()).map(|i| ggml_backend_dev_type(ggml_backend_dev_get(i))).collect() };
+    kinds.into_iter().filter(|k| *k == GPU || *k == IGPU).position(|k| k == GPU).unwrap_or(0) as i32
+}
+
+/// Le modèle et son état de travail, sur la carte graphique ou sur le processeur.
+fn load(model: &str, gpu: bool) -> Result<(WhisperContext, whisper_rs::WhisperState)> {
+    let mut cparams = WhisperContextParameters::default();
+    cparams.use_gpu(gpu);
+    #[cfg(windows)]
+    if gpu {
+        cparams.gpu_device(gpu_device());
+    }
+    if let Some(model_preset) = dtw_preset(model) {
+        // l'alignement DTW exige l'attention classique
+        cparams.flash_attn(false);
+        cparams.dtw_parameters(DtwParameters { mode: DtwMode::ModelPreset { model_preset }, ..Default::default() });
+    }
+    let ctx = WhisperContext::new_with_params(model, cparams).map_err(|e| anyhow!("modèle Whisper illisible : {e:?}"))?;
+    let state = ctx.create_state().map_err(|e| anyhow!("{e:?}"))?;
+    Ok((ctx, state))
+}
+
 fn run() -> Result<()> {
     let args: Vec<String> = std::env::args().collect();
     if args.len() < 4 {
@@ -351,6 +389,7 @@ fn run() -> Result<()> {
     }
     let (model, media, lang) = (&args[1], Path::new(&args[2]), args[3].clone());
     let pcm_out = args.iter().position(|a| a == "--pcm").and_then(|i| args.get(i + 1));
+    let gpu = !args.iter().any(|a| a == "--cpu");
 
     emit(serde_json::json!({"type":"stage","stage":"decode"}));
     let (raw, rate) = decode(media)?;
@@ -366,17 +405,13 @@ fn run() -> Result<()> {
     }
 
     emit(serde_json::json!({"type":"stage","stage":"model","duration":duration}));
-    let mut cparams = WhisperContextParameters::default();
-    let preset = dtw_preset(model);
-    let use_dtw = preset.is_some();
-    if let Some(model_preset) = preset {
-        // l'alignement DTW exige l'attention classique
-        cparams.flash_attn(false);
-        cparams.dtw_parameters(DtwParameters { mode: DtwMode::ModelPreset { model_preset }, ..Default::default() });
-    }
-    let ctx = WhisperContext::new_with_params(model, cparams).map_err(|e| anyhow!("modèle Whisper illisible : {e:?}"))?;
+    let use_dtw = dtw_preset(model).is_some();
+    // Windows : une carte graphique sans la place pour Whisper laisse faire le processeur
+    let (ctx, mut state) = match load(model, gpu) {
+        Err(_) if gpu && cfg!(windows) => load(model, false)?,
+        r => r?,
+    };
     let eot = ctx.token_eot();
-    let mut state = ctx.create_state().map_err(|e| anyhow!("{e:?}"))?;
 
     let threads = threads();
     let mut params = FullParams::new(SamplingStrategy::BeamSearch { beam_size: 3, patience: -1.0 });

@@ -2465,7 +2465,7 @@ checksum = "4050469837a6ff301cd14c1f8f24f88549e6d548f24f64e2148eb0f72cebc51f"
 
 [[package]]
 name = "lumen"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -2506,6 +2506,7 @@ dependencies = [
  "serde_json",
  "symphonia",
  "whisper-rs",
+ "whisper-rs-sys",
  "windows-sys 0.61.2",
 ]
 
@@ -5584,6 +5585,7 @@ version = "0.16.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2088172d00f936c348d6a72f488dc2660ab3f507263a195df308a3c2383229f6"
 dependencies = [
+ "libc",
  "whisper-rs-sys",
 ]
 

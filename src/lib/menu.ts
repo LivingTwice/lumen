@@ -25,6 +25,8 @@ export interface LessonMenu {
   /** leçon audio ou vidéo (avancer, reculer) */
   media: boolean;
   video: boolean;
+  /** panneau du mot flottant (sinon à droite) */
+  float: boolean;
 }
 
 /** Actions du lecteur, appelées par le menu Leçon. */
@@ -41,6 +43,8 @@ export interface LessonActions {
   playlist(): void;
   cover(): void;
   remove(): void;
+  /** panneau du mot : à droite ou flottant */
+  panel(): void;
 }
 
 interface MenuState {
@@ -69,9 +73,9 @@ export function useLessonMenu(flags: LessonMenu | null, actions: LessonActions) 
   useEffect(() => {
     lessonActions = actions;
   });
-  const key = flags ? `${flags.media}:${flags.video}` : "";
+  const key = flags ? [flags.media, flags.video, flags.float].map(Number).join("") : "";
   useEffect(() => {
-    useMenu.setState({ lesson: key ? { media: key.startsWith("true"), video: key.endsWith("true") } : null });
+    useMenu.setState({ lesson: key ? { media: key[0] === "1", video: key[1] === "1", float: key[2] === "1" } : null });
   }, [key]);
   useEffect(
     () => () => {
@@ -240,7 +244,7 @@ function sub(text: string, items: Item[], enabled = true): SubmenuOptions {
   return { text, items, enabled };
 }
 
-const LOOK_KEYS = ["read_font", "read_paper", "font_size", "line_height", "read_width", "reader_layout", "word_style", "theme", "reader_sidebar", "media_rate", "tts_rate"] as const;
+const LOOK_KEYS = ["read_font", "read_paper", "font_size", "line_height", "read_width", "reader_layout", "word_style", "word_panel", "theme", "reader_sidebar", "auto_turn", "media_rate", "tts_rate"] as const;
 
 /** Ce dont le menu dépend : il n'est refait que si cela change. */
 function snapshot() {
@@ -367,6 +371,8 @@ function viewMenu(s: Snap): SubmenuOptions {
       // hors leçon, la barre latérale est toujours là
       { key: "Ctrl+CmdOrCtrl+S", on: on && s.view === "reader" },
     ),
+    // à droite du texte, ou flottant au-dessus du mot touché (lecture en grand sur un petit écran)
+    pick(t("Panneau du mot flottant", "Floating Word Panel"), on && !!s.lesson?.float, onLesson((a) => a.panel()), { key: "Ctrl+CmdOrCtrl+I", on: on && !!s.lesson }),
     sub(
       t("Apparence", "Appearance"),
       themes.map(([v, label]) => pick(label, theme === v, () => app().setSetting("theme", v), { on })),
@@ -463,6 +469,7 @@ function lessonMenu(s: Snap): SubmenuOptions {
       rates.map((r) => pick(`${t(r.replace(".", ","), r)}×`, rate === r, () => app().setSetting(rateKey, r), { on })),
       on,
     ),
+    pick(t("Tourner les pages avec la lecture", "Turn Pages with Playback"), s.look.auto_turn !== "0", () => app().setSetting("auto_turn", s.look.auto_turn === "0" ? "1" : "0"), { on }),
     sep,
     act(t("Page précédente", "Previous Page"), onLesson((a) => a.prev()), { on }),
     act(t("Page suivante", "Next Page"), onLesson((a) => a.next()), { on }),
@@ -561,7 +568,7 @@ const VIEW_KEYS: View[] = ["library", "discover", "playlists", "chat", "vocab", 
 /**
  * Sous Windows, pas de barre des menus : ses raccourcis passent par Ctrl
  * (Ctrl+N, Ctrl+O, Ctrl+1 à 6…), F11 pour le plein écran, Ctrl+B pour la barre
- * latérale d'une leçon. Les chiffres se lisent à leur place sur le clavier
+ * latérale d'une leçon, Ctrl+I pour son panneau du mot (à droite ou flottant). Les chiffres se lisent à leur place sur le clavier
  * (`code`) : sur un clavier AZERTY, Ctrl+1 se tape sans Maj. Les raccourcis du
  * navigateur (recharger, imprimer, chercher dans la page) n'ont pas leur place
  * dans une app. Appelé une fois, dans App.
@@ -622,6 +629,9 @@ export function useWindowsKeys() {
           return run(resumeLesson);
         case "b":
           if (app.view === "reader") run(toggleSidebar);
+          return;
+        case "i":
+          if (app.view === "reader") run(onLesson((a) => a.panel()));
           return;
       }
     };

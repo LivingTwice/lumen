@@ -19,9 +19,9 @@ import { formatBytes, useApp, type SettingsTab } from "../lib/store";
 import { naturalVoiceFor, naturalVoices, pronounce } from "../lib/pronounce";
 import { loadVoices, sayWord, voicesFor } from "../lib/tts";
 import { useUpdate } from "../lib/updater";
-import { readerLook, readFont, SIZE_MAX, SIZE_MIN } from "../lib/reading";
+import { panelMode, panelOptions, readerLook, readFont, SIZE_MAX, SIZE_MIN } from "../lib/reading";
 import { FontPicker, LayoutPicker, PaperPicker, lineHeightOptions, widthOptions } from "./reader/Display";
-import type { LangCode, ModelRow } from "../lib/types";
+import type { GpuInfo, LangCode, ModelRow } from "../lib/types";
 import { BackupSection } from "./BackupSection";
 import { LingqSection } from "./LingqSection";
 import { EnginePicker, OnlineSection } from "./OnlineSection";
@@ -98,7 +98,7 @@ const groups = (): { title: string | null; tabs: Tab[] }[] => [
           "Adjust the page to your eye. You can also change all of this inside a lesson, with the “Aa” button at the top right.",
         ),
         keys:
-          "lecture page pages defilement mise en page police taille texte couleur papier sepia crepuscule nuit encre interligne largeur lignes marquage teinte soulignement terminer connus traduire phrase prononcer automatique reading layout scroll font size color paper sepia dusk night ink line spacing width highlighting tint underline finish known translate sentence pronounce aa",
+          "lecture page pages defilement mise en page police taille texte couleur papier sepia crepuscule nuit encre interligne largeur lignes marquage teinte soulignement terminer connus traduire phrase prononcer automatique panneau mot flottant droite immersion petit ecran tourner pages audio voix suivre lanterne reading layout scroll font size color paper sepia dusk night ink line spacing width highlighting tint underline finish known translate sentence pronounce panel word floating docked immersion small screen turn pages playback audio voice follow lantern aa",
       },
       {
         id: "voice",
@@ -143,7 +143,7 @@ const groups = (): { title: string | null; tabs: Tab[] }[] => [
           "Sur ce Mac, les modèles sont téléchargés une seule fois puis fonctionnent hors ligne. Si vous le souhaitez, une IA en ligne peut prendre le relais pour la traduction et le chat, avec votre clé.",
           "On this Mac, the models are downloaded once, then work offline. If you wish, an online AI can take over translation and the chat, with your key.",
         ),
-        keys: "ia locale modele modeles qwen whisper asr transcription traduction chat profil leger equilibre maximum telecharger en ligne api cle fournisseur deepseek gemini mistral openai chatgpt claude anthropic openrouter ollama lm studio serveur abonnement local ai model models translation profile light balanced download online key provider server subscription",
+        keys: "ia locale modele modeles qwen whisper asr transcription traduction chat profil leger equilibre maximum telecharger en ligne api cle fournisseur deepseek gemini mistral openai chatgpt claude anthropic openrouter ollama lm studio serveur abonnement carte graphique gpu vulkan processeur nvidia geforce amd radeon intel local ai model models translation profile light balanced download online key provider server subscription graphics card processor",
       },
       {
         id: "videos",
@@ -721,6 +721,18 @@ function ReadingPane() {
               ]}
             />
           </div>
+          <div className="set-row">
+            <div className="grow">
+              <strong>{t("Panneau du mot", "Word panel")}</strong>
+              <span>
+                {t(
+                  `À droite du texte, ou flottant au-dessus du mot touché pour laisser tout l'écran au texte. « Auto » le fait flotter quand la fenêtre est étroite (écran de 13 pouces). Dans une leçon : ${isWindows ? "Ctrl+I" : "⌃⌘I"}.`,
+                  `On the right of the text, or floating above the word you tap to give the text the whole screen. “Auto” floats it when the window is narrow (13-inch screen). In a lesson: ${isWindows ? "Ctrl+I" : "⌃⌘I"}.`,
+                )}
+              </span>
+            </div>
+            <Segmented id="wp" value={panelMode(settings.word_panel)} onChange={(v) => setSetting("word_panel", v)} options={panelOptions()} />
+          </div>
         </div>
       </Section>
       <Section title={t("En lisant", "While reading")}>
@@ -745,6 +757,18 @@ function ReadingPane() {
               <span>{t("Et le passage surligné, seulement quand l'audio de la leçon est en pause", "And the highlighted passage, only while the lesson audio is paused")}</span>
             </div>
             <Switch on={settings.auto_pronounce !== "0"} onChange={(v) => setSetting("auto_pronounce", v ? "1" : "0")} label={t("Prononcer le mot touché", "Pronounce the word you tap")} />
+          </div>
+          <div className="set-row">
+            <div className="grow">
+              <strong>{t("Tourner les pages avec la lecture", "Turn pages with playback")}</strong>
+              <span>
+                {t(
+                  "Quand l'audio ou la voix passe à la page suivante, la page tourne avec. Désactivé : la page reste où vous lisez et la lecture continue ; « Y aller » vous ramène à la lanterne.",
+                  "When the audio or the voice moves on to the next page, the page turns with it. Off: the page stays where you're reading while playback goes on; “Go there” brings you back to the lantern.",
+                )}
+              </span>
+            </div>
+            <Switch on={settings.auto_turn !== "0"} onChange={(v) => setSetting("auto_turn", v ? "1" : "0")} label={t("Tourner les pages avec la lecture", "Turn pages with playback")} />
           </div>
         </div>
       </Section>
@@ -1076,6 +1100,7 @@ function AiPane() {
           ))}
         </div>
       </Section>
+      {isWindows && <GpuSection />}
       <Section title={t("Traduction et chat", "Translation and chat")} note={t("Le sens de chaque mot dans sa phrase, les réécritures et le chat.", "The meaning of each word in its sentence, rewriting and the chat.")}>
         <div className="set-card">{lines("llm")}</div>
       </Section>
@@ -1092,6 +1117,70 @@ function AiPane() {
         <div className="set-card">{lines("asrtext")}</div>
       </Section>
     </>
+  );
+}
+
+/** Mémoire d'une carte graphique, comptée comme ses fabricants (8 Go, 12 Go). */
+function gpuMemory(bytes: number): string {
+  const gb = bytes / 2 ** 30;
+  const n = gb < 2 ? gb.toFixed(1) : String(Math.round(gb));
+  return t(`${n.replace(".", ",")} Go`, `${n} GB`);
+}
+
+/** Windows : la carte graphique sur laquelle l'IA locale calcule (Vulkan), ou le processeur. */
+function GpuSection() {
+  const on = useApp((s) => s.settings.ai_gpu !== "0");
+  const setSetting = useApp((s) => s.setSetting);
+  const [info, setInfo] = useState<GpuInfo | null>(null);
+  // relue après un changement : le modèle se recharge sur la carte ou sur le processeur
+  useEffect(() => {
+    let alive = true;
+    api()
+      .gpuInfo()
+      .then((i) => alive && setInfo(i))
+      .catch(() => alive && setInfo({ vulkan: false, devices: [], model_on_gpu: null }));
+    return () => {
+      alive = false;
+    };
+  }, [on]);
+  const gpu = info?.devices[0];
+
+  let detail: string;
+  if (!info) detail = t("Recherche de la carte graphique…", "Looking for the graphics card…");
+  else if (!gpu)
+    detail = info.vulkan
+      ? t("Elle ne prend pas en charge Vulkan 1.2, que demande l'IA : tout se calcule sur le processeur.", "It doesn't support Vulkan 1.2, which the AI needs: everything runs on the processor.")
+      : t(
+          "Son pilote ne fournit pas Vulkan : tout se calcule sur le processeur. Le pilote du fabricant (NVIDIA, AMD, Intel) l'apporte souvent.",
+          "Its driver doesn't provide Vulkan: everything runs on the processor. The manufacturer's driver (NVIDIA, AMD, Intel) often adds it.",
+        );
+  else {
+    detail = gpu.integrated
+      ? t(`Intégrée au processeur, ${gpuMemory(gpu.memory)} de mémoire partagée`, `Built into the processor, ${gpuMemory(gpu.memory)} of shared memory`)
+      : t(`${gpuMemory(gpu.memory)} de mémoire`, `${gpuMemory(gpu.memory)} of memory`);
+    if (!on) detail += t(" · inutilisée : l'IA calcule sur le processeur", " · unused: the AI runs on the processor");
+    else if (info.model_on_gpu === false)
+      detail += t(" · le modèle choisi n'y tient pas : il calcule sur le processeur", " · the chosen model doesn't fit: it runs on the processor");
+  }
+
+  return (
+    <Section
+      title={t("Carte graphique", "Graphics card")}
+      note={t(
+        "L'IA locale et la transcription calculent sur la carte graphique, bien plus vite que sur le processeur. Sans carte compatible, ou quand sa mémoire ne suffit pas au modèle, le processeur prend le relais.",
+        "The local AI and transcription run on the graphics card, much faster than on the processor. Without a compatible card, or when its memory can't hold the model, the processor takes over.",
+      )}
+    >
+      <div className="set-card">
+        <div className="set-row">
+          <div className="grow">
+            <strong>{gpu ? gpu.name : info ? t("Aucune carte graphique compatible", "No compatible graphics card") : t("Carte graphique", "Graphics card")}</strong>
+            <span>{detail}</span>
+          </div>
+          {gpu && <Switch on={on} onChange={(v) => setSetting("ai_gpu", v ? "1" : "0")} label={t("Calculer sur la carte graphique", "Compute on the graphics card")} />}
+        </div>
+      </div>
+    </Section>
   );
 }
 

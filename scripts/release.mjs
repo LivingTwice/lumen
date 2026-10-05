@@ -60,8 +60,12 @@ if (cmd === "bump") {
 } else if (cmd === "manifest") {
   const [plain, arch, repo] = rest;
   // l'app affiche les titres des nouveautés dans sa carte de mise à jour, dans sa langue
+  // Le manifeste est le même pour Mac et Windows : seulement les nouveautés des deux
+  // systèmes (une nouveauté écrite pour chacun, `only`, y figure une fois).
   const r = release(version, { next: false });
-  const notes = r ? JSON.stringify({ fr: r.items.map((it) => it.title.fr), en: r.items.map((it) => it.title.en) }) : plain;
+  const shared = r ? r.items.filter((it) => !it.only || r.items.some((o) => o.only && o.only !== it.only && o.title.fr === it.title.fr)) : [];
+  const titles = (lang) => [...new Set(shared.map((it) => it.title[lang]))];
+  const notes = r ? JSON.stringify({ fr: titles("fr"), en: titles("en") }) : plain;
   const bundle = "src-tauri/target/release/bundle";
   const tar = join(bundle, "macos", "Lumen.app.tar.gz");
   const sig = tar + ".sig";

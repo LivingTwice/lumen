@@ -198,6 +198,23 @@ export interface GoalReached {
   goal_min: number;
 }
 
+/** Carte graphique vue par l'IA locale (Vulkan sous Windows, Metal sur Mac). */
+export interface GpuDevice {
+  name: string;
+  /** mémoire de la carte, en octets (partagée avec le processeur pour une carte intégrée) */
+  memory: number;
+  integrated: boolean;
+}
+
+export interface GpuInfo {
+  /** le pilote graphique fournit Vulkan (toujours vrai sur Mac) */
+  vulkan: boolean;
+  /** cartes utilisables, celle que l'IA emploie d'abord */
+  devices: GpuDevice[];
+  /** le modèle de traduction chargé calcule sur la carte (null : aucun modèle chargé) */
+  model_on_gpu: boolean | null;
+}
+
 export interface ModelRow {
   id: string;
   /** asr : Whisper (transcription et minutage des mots) ; asrtext : Qwen3-ASR (texte plus juste) */

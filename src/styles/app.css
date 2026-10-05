@@ -1495,6 +1495,10 @@ button.chip.on {
   justify-content: flex-start;
   padding-right: 156px;
 }
+/* panneau du mot flottant : la barre du lecteur va jusqu'au bord de la fenêtre */
+:root.win .reader.wp-floating:not(.cinema) .reader-top {
+  padding-right: 156px;
+}
 :root.win .ob-uilang {
   right: 158px;
 }

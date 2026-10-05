@@ -47,11 +47,12 @@ const FORMAT: i64 = 1;
 /// Versions quotidiennes gardées dans l'historique.
 const HISTORY_DAYS: usize = 14;
 /// Réglages qui ne quittent pas ce Mac : les clés LingQ et Gemini (promis :
-/// « elle reste sur ce Mac ») et l'emplacement de la sauvegarde, propre à ce disque.
-const LOCAL_ONLY: [&str; 3] = ["lingq_key", "gemini_key", "backup_dir"];
+/// « elle reste sur ce Mac »), l'emplacement de la sauvegarde, propre à ce disque,
+/// et le choix de la carte graphique d'un PC.
+const LOCAL_ONLY: [&str; 4] = ["lingq_key", "gemini_key", "backup_dir", "ai_gpu"];
 /// Réglages de ce Mac conservés quand on restaure une sauvegarde (la langue de
 /// l'interface aussi : celle qu'on vient de choisir à l'accueil reste).
-const KEEP_ON_RESTORE: [&str; 8] = ["lingq_key", "gemini_key", "backup_dir", "backup_on", "backup_audio", "backup_video", "backup_snooze", "ui_lang"];
+const KEEP_ON_RESTORE: [&str; 9] = ["lingq_key", "gemini_key", "backup_dir", "backup_on", "backup_audio", "backup_video", "backup_snooze", "ui_lang", "ai_gpu"];
 /// IA en ligne (`online_*` : clés, fournisseur, modèle, adresse) : ni sauvegardée
 /// ni remplacée par une restauration, comme les réglages ci-dessus.
 const LOCAL_PREFIX: &str = "online_";

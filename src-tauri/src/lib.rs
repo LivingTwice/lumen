@@ -24,6 +24,8 @@ mod tools;
 mod user;
 mod voice;
 #[cfg(windows)]
+mod vulkan;
+#[cfg(windows)]
 mod win;
 
 use std::collections::HashMap;
@@ -43,6 +45,8 @@ pub fn run() {
             let conn = db::open(&db::path(&data_dir))?;
             // langue de l'interface, des messages et des traductions
             i18n::set(&db::setting(&conn, "ui_lang").unwrap_or_default());
+            // Windows : la carte graphique pour l'IA, sauf si l'apprenant a choisi le processeur
+            ai::set_gpu(db::setting(&conn, "ai_gpu").as_deref() != Some("0"));
             let resource_dir = app.path().resource_dir()?.join("dicts");
             let dicts = dict::Dicts::new(resource_dir, dict::dict_dir(&data_dir));
             let discover = discover::Store::open(&data_dir);
@@ -96,6 +100,7 @@ pub fn run() {
             commands::ai_sentence,
             commands::ai_simplify,
             commands::ai_warmup,
+            commands::gpu_info,
             commands::chats_list,
             commands::chat_open,
             commands::chat_create,

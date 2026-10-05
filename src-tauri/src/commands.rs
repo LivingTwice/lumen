@@ -80,6 +80,11 @@ pub async fn settings_set(app: tauri::AppHandle, state: State<'_, AppState>, key
     if key == "ui_lang" {
         i18n::set(&value);
     }
+    // Windows : carte graphique ou processeur ; le modèle est rechargé à la demande suivante
+    if key == "ai_gpu" {
+        ai::set_gpu(value != "0");
+        state.ai.unload();
+    }
     // nouvel objectif du jour : une journée déjà au-dessus est acquise
     if key == "daily_goal" {
         db::goal_refresh(&state.db.lock()).map_err(err)?;
@@ -504,6 +509,14 @@ pub async fn ai_warmup(state: State<'_, AppState>) -> R<bool> {
     let st = state.inner();
     tokio::task::block_in_place(|| st.ai.load(&path)).map_err(err)?;
     Ok(true)
+}
+
+/// Cartes graphiques que l'IA locale peut employer, et où calcule le modèle
+/// chargé (Réglages › IA, sous Windows). La première lecture interroge Vulkan.
+#[tauri::command]
+pub async fn gpu_info(state: State<'_, AppState>) -> R<ai::GpuInfo> {
+    let st = state.inner();
+    tokio::task::block_in_place(|| ai::gpu_info(&st.ai)).map_err(err)
 }
 
 // ---------- chat ----------

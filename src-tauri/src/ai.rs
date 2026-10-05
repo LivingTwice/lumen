@@ -1,4 +1,5 @@
-//! IA locale : Qwen3.5 exécuté par llama.cpp (Metal sur Mac).
+//! IA locale : Qwen3.5 exécuté par llama.cpp (Metal sur Mac ; Vulkan sur PC,
+//! le processeur sans carte graphique compatible).
 //! Sert à la traduction contextuelle des mots, des phrases, à la
 //! réécriture de textes à un niveau plus simple et au chat.
 
@@ -14,7 +15,9 @@ use llama_cpp_2::llama_batch::LlamaBatch;
 use llama_cpp_2::model::params::LlamaModelParams;
 use llama_cpp_2::model::LlamaModel;
 use llama_cpp_2::sampling::LlamaSampler;
+use llama_cpp_2::{list_llama_ggml_backend_devices, LlamaBackendDeviceType};
 use parking_lot::Mutex;
+use serde::Serialize;
 
 static BACKEND: OnceLock<LlamaBackend> = OnceLock::new();
 
@@ -43,8 +46,8 @@ pub(crate) fn cpu_check() -> Result<()> {
     Ok(())
 }
 
-/// Fils de calcul de llama.cpp (8 au plus). Sous Windows, où tout se calcule
-/// sur le processeur, un par cœur physique : l'hyperthreading le ralentit.
+/// Fils de calcul de llama.cpp (8 au plus). Sous Windows, un par cœur physique :
+/// l'hyperthreading ralentit ce qui se calcule sur le processeur.
 pub(crate) fn threads() -> i32 {
     let n = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4);
     #[cfg(windows)]
@@ -52,8 +55,117 @@ pub(crate) fn threads() -> i32 {
     n.min(8) as i32
 }
 
+/// Windows : calcul sur la carte graphique (réglage `ai_gpu`, oui par défaut).
+static GPU: AtomicBool = AtomicBool::new(true);
+
+pub(crate) fn set_gpu(on: bool) {
+    GPU.store(on, Ordering::Relaxed);
+}
+
+/// L'IA calcule sur la carte graphique si elle le peut (sur Mac, toujours : Metal).
+pub(crate) fn gpu_wanted() -> bool {
+    !cfg!(windows) || GPU.load(Ordering::Relaxed)
+}
+
+/// Cartes graphiques que llama.cpp peut employer (Vulkan sous Windows, Metal sur
+/// Mac), les cartes dédiées d'abord : llama.cpp ne prend la carte intégrée au
+/// processeur que s'il n'y en a pas d'autre.
+fn gpus() -> Vec<llama_cpp_2::LlamaBackendDevice> {
+    let mut gpus: Vec<_> = list_llama_ggml_backend_devices()
+        .into_iter()
+        .filter(|d| matches!(d.device_type, LlamaBackendDeviceType::Gpu | LlamaBackendDeviceType::IntegratedGpu))
+        .collect();
+    gpus.sort_by_key(|d| d.device_type != LlamaBackendDeviceType::Gpu);
+    gpus
+}
+
+/// Tout sur la carte graphique, ou tout sur le processeur (ni les couches, ni le
+/// cache, ni les calculs ponctuels que llama.cpp confie sinon à la carte).
+fn model_params(gpu: bool) -> LlamaModelParams {
+    if gpu {
+        return LlamaModelParams::default().with_n_gpu_layers(999);
+    }
+    let cpu = || LlamaModelParams::default().with_n_gpu_layers(0);
+    cpu().with_devices(&[]).unwrap_or_else(|_| cpu())
+}
+
+/// Charge un modèle sur la carte graphique, ou sur le processeur si l'apprenant
+/// l'a choisi, s'il n'y a pas de carte compatible ou si elle n'a pas la place
+/// (le fichier, plus environ 1 Go pour le contexte et les calculs ; on ne coupe
+/// pas un modèle en deux). Renvoie aussi s'il est sur la carte. Sur Mac, Metal.
+pub(crate) fn load_model(be: &LlamaBackend, path: &Path) -> Result<(LlamaModel, bool), llama_cpp_2::LlamaModelLoadError> {
+    if !cfg!(windows) {
+        return LlamaModel::load_from_file(be, path, &model_params(true)).map(|m| (m, true));
+    }
+    let size = std::fs::metadata(path).map(|m| m.len() as usize).unwrap_or(0);
+    let room = gpus().iter().any(|d| d.memory_free >= size + (1 << 30));
+    if gpu_wanted() && room {
+        // refus de la carte (mémoire prise entre-temps, pilote) : le processeur prend le relais
+        if let Ok(m) = LlamaModel::load_from_file(be, path, &model_params(true)) {
+            return Ok((m, true));
+        }
+    }
+    LlamaModel::load_from_file(be, path, &model_params(false)).map(|m| (m, false))
+}
+
+/// La carte graphique n'a pas eu la place du contexte (Windows) : la requête
+/// est reprise avec le modèle sur le processeur.
+#[derive(Debug)]
+struct NoRoom;
+
+impl std::fmt::Display for NoRoom {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(crate::i18n::t("mémoire de la carte graphique insuffisante", "not enough graphics card memory"))
+    }
+}
+
+impl std::error::Error for NoRoom {}
+
+/// Carte graphique vue par l'IA locale (Réglages › IA, sous Windows).
+#[derive(Serialize)]
+pub struct GpuDevice {
+    pub name: String,
+    /// mémoire de la carte, en octets (partagée avec le processeur pour une carte intégrée)
+    pub memory: u64,
+    pub integrated: bool,
+}
+
+#[derive(Serialize)]
+pub struct GpuInfo {
+    /// le pilote graphique fournit Vulkan (toujours vrai sur Mac)
+    pub vulkan: bool,
+    /// cartes utilisables, celle que l'IA emploie d'abord
+    pub devices: Vec<GpuDevice>,
+    /// le modèle de traduction chargé calcule sur la carte (`None` : aucun modèle chargé)
+    pub model_on_gpu: Option<bool>,
+}
+
+pub fn gpu_info(engine: &Engine) -> Result<GpuInfo> {
+    backend()?;
+    #[cfg(windows)]
+    let vulkan = crate::vulkan::present();
+    #[cfg(not(windows))]
+    let vulkan = true;
+    let devices = gpus()
+        .into_iter()
+        .map(|d| GpuDevice {
+            name: d.description.trim().to_string(),
+            memory: d.memory_total as u64,
+            integrated: d.device_type == LlamaBackendDeviceType::IntegratedGpu,
+        })
+        .collect();
+    Ok(GpuInfo { vulkan, devices, model_on_gpu: engine.loaded.lock().as_ref().map(|l| l.gpu) })
+}
+
+struct Loaded {
+    path: PathBuf,
+    model: Arc<LlamaModel>,
+    /// sur la carte graphique (sinon, sur le processeur)
+    gpu: bool,
+}
+
 pub struct Engine {
-    loaded: Mutex<Option<(PathBuf, Arc<LlamaModel>)>>,
+    loaded: Mutex<Option<Loaded>>,
     run_lock: Mutex<()>,
     /// incrémenté à chaque requête interactive : une requête plus récente
     /// interrompt la précédente (clics rapides sur plusieurs mots).
@@ -137,7 +249,7 @@ impl Engine {
     }
 
     pub fn is_loaded(&self, path: &Path) -> bool {
-        self.loaded.lock().as_ref().map(|(p, _)| p == path).unwrap_or(false)
+        self.loaded.lock().as_ref().map(|l| l.path == path).unwrap_or(false)
     }
 
     pub fn unload(&self) {
@@ -146,18 +258,28 @@ impl Engine {
 
     pub fn load(&self, path: &Path) -> Result<Arc<LlamaModel>> {
         let mut guard = self.loaded.lock();
-        if let Some((p, m)) = guard.as_ref() {
-            if p == path {
-                return Ok(m.clone());
+        if let Some(l) = guard.as_ref() {
+            if l.path == path {
+                return Ok(l.model.clone());
             }
         }
         *guard = None;
         let be = backend()?;
-        let params = LlamaModelParams::default().with_n_gpu_layers(999);
-        let model = LlamaModel::load_from_file(be, path, &params).map_err(|e| anyhow!(crate::tr!("modèle illisible : {e}", "unreadable model: {e}")))?;
+        let (model, gpu) = load_model(be, path).map_err(|e| anyhow!(crate::tr!("modèle illisible : {e}", "unreadable model: {e}")))?;
         let model = Arc::new(model);
-        *guard = Some((path.to_path_buf(), model.clone()));
+        *guard = Some(Loaded { path: path.to_path_buf(), model: model.clone(), gpu });
         Ok(model)
+    }
+
+    /// Recharge le modèle sur le processeur (la carte graphique a manqué de place).
+    fn load_on_cpu(&self, path: &Path) -> Result<()> {
+        let mut guard = self.loaded.lock();
+        // la carte est libérée avant le nouveau chargement
+        *guard = None;
+        let model = LlamaModel::load_from_file(backend()?, path, &model_params(false))
+            .map_err(|e| anyhow!(crate::tr!("modèle illisible : {e}", "unreadable model: {e}")))?;
+        *guard = Some(Loaded { path: path.to_path_buf(), model: Arc::new(model), gpu: false });
+        Ok(())
     }
 
     /// Génère une réponse (format de conversation ChatML de Qwen, mode
@@ -189,6 +311,17 @@ impl Engine {
         mut on_piece: impl FnMut(Piece) -> bool,
     ) -> Result<Output> {
         let _run = self.run_lock.lock();
+        match self.run_locked(model_path, messages, &g, &mut on_piece) {
+            // Windows : la carte graphique n'a pas eu la place, rien n'est encore écrit
+            Err(e) if e.is::<NoRoom>() => {
+                self.load_on_cpu(model_path)?;
+                self.run_locked(model_path, messages, &g, &mut on_piece)
+            }
+            r => r,
+        }
+    }
+
+    fn run_locked(&self, model_path: &Path, messages: &[(&str, String)], g: &Gen, on_piece: &mut impl FnMut(Piece) -> bool) -> Result<Output> {
         let mut out = Output { thought: String::new(), answer: String::new(), stopped: false };
         // requête dépassée (interactive) ou arrêtée (conversation) pendant l'attente du moteur
         let halted = |out: &mut Output| -> Result<bool> {
@@ -205,6 +338,7 @@ impl Engine {
             return Ok(out);
         }
         let model = self.load(model_path)?;
+        let on_gpu = self.loaded.lock().as_ref().is_some_and(|l| l.gpu);
         let be = backend()?;
         let mut prompt = String::new();
         for (role, content) in messages {
@@ -234,7 +368,11 @@ impl Engine {
             .with_n_batch(n_ctx.min(2048))
             .with_n_threads(threads)
             .with_n_threads_batch(threads);
-        let mut ctx = model.new_context(be, ctx_params).map_err(|e| anyhow!("contexte : {e}"))?;
+        let mut ctx = match model.new_context(be, ctx_params) {
+            Ok(ctx) => ctx,
+            Err(_) if cfg!(windows) && on_gpu => return Err(NoRoom.into()),
+            Err(e) => return Err(anyhow!("contexte : {e}")),
+        };
 
         let mut batch = LlamaBatch::new(n_ctx as usize, 1);
         // le prompt est envoyé par blocs pour respecter n_batch
@@ -330,16 +468,16 @@ impl Engine {
                             out.thought.truncate(i);
                             sampler.reset();
                             thinking = false;
-                            if !answer_piece(&mut out, &rest, &mut on_piece) {
+                            if !answer_piece(&mut out, &rest, on_piece) {
                                 break;
                             }
                         } else if !on_piece(Piece::Thought(&piece)) {
                             break;
                         }
                     } else if let Some(i) = piece.find("<|im_end|>") {
-                        answer_piece(&mut out, &piece[..i], &mut on_piece);
+                        answer_piece(&mut out, &piece[..i], on_piece);
                         break;
-                    } else if !answer_piece(&mut out, &piece, &mut on_piece) {
+                    } else if !answer_piece(&mut out, &piece, on_piece) {
                         break;
                     }
                 }
@@ -1242,6 +1380,41 @@ mod live {
             .generate(Path::new(&path), &sentence_messages("fr", "en", "If you are reading this, you are not alone."), 120, Priority::Background, |_| true)
             .unwrap();
         println!("phrase -> {out}");
+    }
+
+    /// Carte graphique ou processeur : ce que voit l'IA, où se charge le modèle, et le temps d'un mot.
+    /// LUMEN_TEST_MODEL=/chemin/modele.gguf cargo test --release --lib gpu_live -- --ignored --nocapture
+    /// (LUMEN_TEST_CPU=1 : le processeur seul, comme le réglage de Windows ; essayable sur Mac)
+    #[test]
+    #[ignore]
+    fn gpu_live() {
+        let Ok(path) = std::env::var("LUMEN_TEST_MODEL") else { return };
+        let cpu = std::env::var("LUMEN_TEST_CPU").is_ok();
+        if cpu {
+            set_gpu(false);
+        }
+        let engine = Engine::new();
+        let info = gpu_info(&engine).unwrap();
+        println!("Vulkan : {} ; cartes :", info.vulkan);
+        for d in &info.devices {
+            println!("  {} ({} Mo{})", d.name, d.memory >> 20, if d.integrated { ", intégrée" } else { "" });
+        }
+        let t = std::time::Instant::now();
+        if cpu {
+            engine.load_on_cpu(Path::new(&path)).unwrap();
+        } else {
+            engine.load(Path::new(&path)).unwrap();
+        }
+        let on_gpu = gpu_info(&engine).unwrap().model_on_gpu;
+        println!("modèle chargé en {:?}, sur la carte : {on_gpu:?}", t.elapsed());
+        if cpu || (cfg!(windows) && info.devices.is_empty()) {
+            assert_eq!(on_gpu, Some(false));
+        }
+        let t = std::time::Instant::now();
+        let messages = word_messages("fr", "it", "andavo", "Quando ero piccolo andavo sempre al mare con mio nonno.", "forme de andare : aller");
+        let raw = engine.generate(Path::new(&path), &messages, 72, Priority::Background, |_| true).unwrap();
+        println!("andavo -> {raw:?} ({:?})", t.elapsed());
+        assert!(!parse_word_answer(&raw).0.is_empty());
     }
 
     /// Test réel en anglais (apprenant anglophone) : sens en contexte, phrase et chat.

@@ -51,6 +51,7 @@ function groups(): { title: string; rows: Row[] }[] {
         { keys: [[M, "="], [M, "-"]], label: t("Agrandir ou réduire le texte", "Bigger or smaller text") },
         { keys: [[M, "0"]], label: t("Taille d'origine", "Default size") },
         { keys: [isWindows ? [M, "B"] : ["⌃", "⌘", "S"]], label: t("Barre latérale, dans une leçon", "Sidebar, in a lesson") },
+        { keys: [isWindows ? [M, "I"] : ["⌃", "⌘", "I"]], label: t("Panneau du mot à droite ou flottant", "Word panel docked or floating") },
         { keys: [isWindows ? ["F11"] : ["⌃", "⌘", "F"]], label: t("Plein écran", "Full screen") },
       ],
     },
