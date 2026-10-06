@@ -54,6 +54,7 @@ llvmPackages.stdenv.mkDerivation {
   BINDGEN_EXTRA_CLANG_ARGS = "-I${lib.getDev llvmPackages.stdenv.cc.libc}/include";
 
   # dialogues GTK, schémas de réglages, et vidéos qui se lisent dans la fenêtre
+  # (le contournement du rendu DMABUF de WebKitGTK vit dans lib.rs)
   shellHook = ''
     export XDG_DATA_DIRS="${gsettings-desktop-schemas}/share/gsettings-schemas/${gsettings-desktop-schemas.name}:${gtk3}/share/gsettings-schemas/${gtk3.name}:$XDG_DATA_DIRS"
     export GST_PLUGIN_SYSTEM_PATH_1_0="${lib.makeSearchPath "lib/gstreamer-1.0" [
