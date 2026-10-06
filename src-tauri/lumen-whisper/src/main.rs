@@ -322,11 +322,13 @@ fn refine(words: &mut [Word], env: &Envelope, duration: f64) {
     }
 }
 
-/// Fils de calcul (8 au plus). Sous Windows, un par cœur physique :
+/// Fils de calcul (8 au plus). Sous Windows et Linux, un par cœur physique :
 /// l'hyperthreading ralentit ce qui se calcule sur le processeur.
 fn threads() -> i32 {
     let n = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4);
     #[cfg(windows)]
+    let n = physical_cores().unwrap_or(n);
+    #[cfg(target_os = "linux")]
     let n = physical_cores().unwrap_or(n);
     n.min(8) as i32
 }
@@ -351,10 +353,37 @@ fn physical_cores() -> Option<usize> {
     }
 }
 
-/// Windows : la carte graphique dédiée plutôt que celle intégrée au processeur.
-/// whisper.cpp prend la première que Vulkan présente, souvent l'intégrée sur un
-/// portable qui a les deux. Rang parmi les cartes graphiques.
-#[cfg(windows)]
+/// Linux : cœurs physiques, lus dans le noyau (un groupe de frères par cœur).
+#[cfg(target_os = "linux")]
+fn physical_cores() -> Option<usize> {
+    let mut siblings: Vec<std::collections::HashSet<u32>> = Vec::new();
+    for entry in std::fs::read_dir("/sys/devices/system/cpu").ok()? {
+        let name = entry.ok()?.file_name();
+        let name = name.to_str()?;
+        let Some(cpu) = name.strip_prefix("cpu") else { continue };
+        if !cpu.bytes().all(|b| b.is_ascii_digit()) {
+            continue;
+        }
+        let list = std::fs::read_to_string(format!("/sys/devices/system/cpu/{name}/topology/thread_siblings_list")).ok()?;
+        let group: std::collections::HashSet<u32> = list.split(',').flat_map(|part| {
+            let mut ends = part.split('-');
+            let a = ends.next()?.trim().parse().ok()?;
+            match ends.next() {
+                Some(b) => Some(a..=b.trim().parse().ok()?),
+                None => Some(a..=a),
+            }
+        }).flatten().collect();
+        if !siblings.iter().any(|s| s == &group) {
+            siblings.push(group);
+        }
+    }
+    (!siblings.is_empty()).then_some(siblings.len())
+}
+
+/// Windows et Linux : la carte graphique dédiée plutôt que celle intégrée au
+/// processeur. whisper.cpp prend la première que Vulkan présente, souvent
+/// l'intégrée sur un portable qui a les deux. Rang parmi les cartes graphiques.
+#[cfg(any(windows, target_os = "linux"))]
 fn gpu_device() -> i32 {
     use whisper_rs_sys::{
         ggml_backend_dev_count, ggml_backend_dev_get, ggml_backend_dev_type, ggml_backend_dev_type_GGML_BACKEND_DEVICE_TYPE_GPU as GPU,
@@ -368,7 +397,7 @@ fn gpu_device() -> i32 {
 fn load(model: &str, gpu: bool) -> Result<(WhisperContext, whisper_rs::WhisperState)> {
     let mut cparams = WhisperContextParameters::default();
     cparams.use_gpu(gpu);
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "linux"))]
     if gpu {
         cparams.gpu_device(gpu_device());
     }
@@ -407,9 +436,9 @@ fn run() -> Result<()> {
 
     emit(serde_json::json!({"type":"stage","stage":"model","duration":duration}));
     let use_dtw = dtw_preset(model).is_some();
-    // Windows : une carte graphique sans la place pour Whisper laisse faire le processeur
+    // une carte graphique sans la place pour Whisper laisse faire le processeur
     let (ctx, mut state) = match load(model, gpu) {
-        Err(_) if gpu && cfg!(windows) => load(model, false)?,
+        Err(_) if gpu && !cfg!(target_os = "macos") => load(model, false)?,
         r => r?,
     };
     let eot = ctx.token_eot();
