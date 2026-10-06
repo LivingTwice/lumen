@@ -7,7 +7,7 @@ import { count, formatNumber, t } from "../lib/i18n";
 import { extractArticle, firstWords, wordCount } from "../lib/importers";
 import { stageText, useImports, useJob } from "../lib/imports";
 import { LANGS, inLang } from "../lib/langs";
-import { isWindows } from "../lib/platform";
+import { isPc } from "../lib/platform";
 import { jobOf, usePreview, type Previewable } from "../lib/preview";
 import { formatBytes, formatDuration, useApp } from "../lib/store";
 import type { LangCode, Lyrics, MediaStream, TextStats } from "../lib/types";
@@ -140,7 +140,7 @@ const isHls = (url: string) => /\.m3u8|hls_playlist|\/hls\//i.test(url);
 function useWindowsSource(el: React.RefObject<HTMLMediaElement | null>, url: string) {
   useEffect(() => {
     const media = el.current;
-    if (!isWindows || !media || !url) return;
+    if (!isPc || !media || !url) return;
     if (!isHls(url) || media.canPlayType("application/vnd.apple.mpegurl")) {
       media.src = url;
       return;
@@ -264,7 +264,7 @@ function Player({ source, poster, cover, known, onTime }: { source: MediaStream;
         <video
           ref={video}
           className="pv-video"
-          src={isWindows ? undefined : source.video}
+          src={isPc ? undefined : source.video}
           poster={poster || undefined}
           playsInline
           autoPlay={!dual}
@@ -275,7 +275,7 @@ function Player({ source, poster, cover, known, onTime }: { source: MediaStream;
       ) : (
         cover
       )}
-      {source.audio && <audio ref={audio} src={isWindows ? undefined : source.audio} autoPlay muted={muted} {...events} />}
+      {source.audio && <audio ref={audio} src={isPc ? undefined : source.audio} autoPlay muted={muted} {...events} />}
       {failed && (
         <div className="pv-failed">
           <Icon name="ban" size={18} /> {t("La lecture n'a pas pu commencer.", "Playback couldn't start.")}

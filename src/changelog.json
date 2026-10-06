@@ -4,11 +4,17 @@
     {
       "version": "1.0.0",
       "date": "2026-10-06",
-      "title": { "fr": "Plus léger que jamais", "en": "Lighter than ever" },
+      "title": {
+        "fr": "Plus léger que jamais",
+        "en": "Lighter than ever"
+      },
       "items": [
         {
           "icon": "disk",
-          "title": { "fr": "De 40 à 75 % de place en moins, sans attendre", "en": "40 to 75% less space, without waiting" },
+          "title": {
+            "fr": "De 40 à 75 % de place en moins, sans attendre",
+            "en": "40 to 75% less space, without waiting"
+          },
           "body": {
             "fr": "Vos vidéos et vos sons prennent de 40 à environ 75 % de place en moins. 40 % sans perte de qualité visible, avec le réglage « Allégée » choisi d'office ; jusqu'à environ 75 % en « Compacte » (vidéos en 720p). Rien de plus à attendre : la puce vidéo du Mac réencode l'image pendant que Lumen transcrit, et votre leçon est prête aussi vite qu'avant.",
             "en": "Your videos and sounds take 40 to about 75% less space. 40% with no visible loss of quality, with the “Lighter” setting chosen for you; up to about 75% with “Compact” (videos in 720p). Nothing more to wait for: the Mac's video chip re-encodes the picture while Lumen transcribes, and your lesson is ready as fast as before."
@@ -18,7 +24,10 @@
         },
         {
           "icon": "wave",
-          "title": { "fr": "Pas une milliseconde de décalage", "en": "Not a millisecond out of sync" },
+          "title": {
+            "fr": "Pas une milliseconde de décalage",
+            "en": "Not a millisecond out of sync"
+          },
           "body": {
             "fr": "Le son allégé ne bouge pas d'une milliseconde : la lanterne reste calée au mot près, comme avant. Il passe en AAC, en mono quand il n'y a qu'une voix : les MP3 de LingQ prennent souvent moitié moins de place.",
             "en": "The lighter sound doesn't move by a single millisecond: the lantern stays in sync word by word, as before. It becomes AAC, in mono when there's a single voice: LingQ MP3s often take half the space."
@@ -27,7 +36,10 @@
         },
         {
           "icon": "sparkle",
-          "title": { "fr": "Vos leçons déjà importées aussi", "en": "Your lessons already imported too" },
+          "title": {
+            "fr": "Vos leçons déjà importées aussi",
+            "en": "Your lessons already imported too"
+          },
           "body": {
             "fr": "Réglages › Stockage montre ce qui occupe la place (modèles d'IA, vidéos, sons, dictionnaires) et allège d'un clic les leçons déjà importées, pendant que vous continuez à lire. Les leçons et la lanterne ne changent pas.",
             "en": "Settings › Storage shows what takes up space (AI models, videos, sounds, dictionaries) and lightens the lessons already imported in one click, while you keep reading. The lessons and the lantern don't change."
@@ -37,7 +49,10 @@
         },
         {
           "icon": "video",
-          "title": { "fr": "Le format le plus léger, sans rien perdre", "en": "The lightest format, losing nothing" },
+          "title": {
+            "fr": "Le format le plus léger, sans rien perdre",
+            "en": "The lightest format, losing nothing"
+          },
           "body": {
             "fr": "Les vidéos en ligne arrivent dans le format le plus léger que Lumen sait lire : du VP9 ou de l'AV1 quand YouTube en propose, souvent deux fois moins lourds que le H.264, à qualité égale.",
             "en": "Online videos arrive in the lightest format Lumen can play: VP9 or AV1 when YouTube offers them, often half the weight of H.264, at equal quality."
@@ -45,7 +60,10 @@
         },
         {
           "icon": "disk",
-          "title": { "fr": "Réglages › Stockage", "en": "Settings › Storage" },
+          "title": {
+            "fr": "Réglages › Stockage",
+            "en": "Settings › Storage"
+          },
           "body": {
             "fr": "Ce qui occupe la place sur ce PC (modèles d'IA, vidéos, sons, dictionnaires), et des vidéos en ligne en 720p si votre disque est à l'étroit.",
             "en": "What takes up space on this PC (AI models, videos, sounds, dictionaries), and online videos in 720p if your disk is short on space."
@@ -56,71 +74,19 @@
       ]
     },
     {
-      "version": "0.8.2",
-      "date": "2026-10-06",
-      "title": { "fr": "Une IA en ligne gratuite", "en": "A free online AI" },
-      "items": [
-        {
-          "icon": "cloud",
-          "title": { "fr": "NVIDIA, gratuit, dans l'IA en ligne", "en": "NVIDIA, free, in the online AI" },
-          "body": {
-            "fr": "Dans Réglages › IA, NVIDIA rejoint les fournisseurs : une clé gratuite, sans carte bancaire, ouvre des modèles comme Nemotron 3 Super, qui traduit un mot en moins d'une demi-seconde, ou DeepSeek, Kimi et GLM. Lumen ne vous propose que les modèles vraiment ouverts à votre clé, et choisit d'office celui qui répond tout de suite. Si un modèle très demandé fait attendre, la traduction passe au modèle de ce Mac et Lumen vous le dit.",
-            "en": "In Settings › AI, NVIDIA joins the providers: a free key, no credit card, opens models like Nemotron 3 Super, which translates a word in under half a second, or DeepSeek, Kimi and GLM. Lumen only offers the models actually open to your key, and picks the one that answers right away. If a popular model keeps you waiting, translation switches to this Mac's model and Lumen tells you."
-          },
-          "action": "settings:ai"
-        },
-        {
-          "icon": "library",
-          "title": { "fr": "Une grande bibliothèque, plus légère", "en": "A big library, lighter" },
-          "body": {
-            "fr": "La bibliothèque montre d'abord vos 24 leçons les plus récentes ; les plus anciennes attendent derrière « Voir plus », par 24 à la fois. Même avec des centaines de leçons importées de LingQ, elle s'ouvre vite et reste claire. La recherche, elle, trouve toujours toutes vos leçons.",
-            "en": "The library first shows your 24 most recent lessons; older ones wait behind “Show more”, 24 at a time. Even with hundreds of lessons imported from LingQ, it opens quickly and stays clear. Search still finds all your lessons."
-          },
-          "action": "view:library"
-        },
-        {
-          "icon": "up",
-          "title": { "fr": "Au premier plan après une mise à jour", "en": "In front after an update" },
-          "body": {
-            "fr": "Dès la prochaine mise à jour, Lumen se rouvre devant vos autres fenêtres quand vous cliquez sur « Redémarrer », au lieu de s'ouvrir derrière elles.",
-            "en": "From the next update on, Lumen reopens in front of your other windows when you click “Restart”, instead of opening behind them."
-          },
-          "only": "mac"
-        }
-      ]
-    },
-    {
-      "version": "0.8.1",
-      "date": "2026-10-06",
-      "title": { "fr": "Une visite qui vous emmène partout", "en": "A tour that takes you everywhere" },
-      "items": [
-        {
-          "icon": "bulb",
-          "title": { "fr": "La visite guidée sort de la leçon", "en": "The guided tour steps out of the lesson" },
-          "body": {
-            "fr": "La fin de la visite ne reste plus dans la leçon : elle vous emmène dans Découvrir (votre niveau, la recherche et l'aperçu), montre Importer et les podcasts écrits pour vous, puis Progrès et l'objectif du jour, avant de revenir à votre leçon. Elle présente aussi les ajouts récents : le panneau du mot en carte, les expressions, l'IA en ligne, la voix naturelle et la page qui reste où vous lisez.",
-            "en": "The end of the tour no longer stays in the lesson: it takes you to Discover (your level, search and preview), shows Import and the podcasts written for you, then Progress and the daily goal, before coming back to your lesson. It also presents recent additions: the word panel as a card, phrases, the online AI, the natural voice and the page that stays where you're reading."
-          },
-          "action": "tour"
-        },
-        {
-          "icon": "sun",
-          "title": { "fr": "Une nouvelle icône", "en": "A new icon" },
-          "body": {
-            "fr": "Lumen change de visage : un astre doré se lève au-dessus d'un livre ouvert, la lumière qui éclaire vos lectures.",
-            "en": "Lumen has a new face: a golden sun rising above an open book, the light over everything you read."
-          }
-        }
-      ]
-    },
-    {
       "version": "0.8.0",
       "date": "2026-10-05",
-      "title": { "fr": "Plus de place pour lire", "en": "More room to read" },
+      "title": {
+        "fr": "Plus de place pour lire",
+        "en": "More room to read"
+      },
       "items": [
         {
           "icon": "cpu",
-          "title": { "fr": "L'IA sur la carte graphique", "en": "The AI on the graphics card" },
+          "title": {
+            "fr": "L'IA sur la carte graphique",
+            "en": "The AI on the graphics card"
+          },
           "body": {
             "fr": "Sur PC, la traduction des mots, le chat et la transcription calculent désormais sur la carte graphique (NVIDIA, AMD ou Intel, par Vulkan), le plus souvent bien plus vite que sur le processeur. Sans carte compatible, ou quand sa mémoire ne suffit pas au modèle, le processeur prend le relais de lui-même. Réglages › IA montre la carte utilisée et permet de revenir au processeur.",
             "en": "On a PC, word translation, the chat and transcription now run on the graphics card (NVIDIA, AMD or Intel, through Vulkan), usually much faster than on the processor. Without a compatible card, or when its memory can't hold the model, the processor takes over on its own. Settings › AI shows the card in use and lets you go back to the processor."
@@ -130,7 +96,10 @@
         },
         {
           "icon": "panel",
-          "title": { "fr": "Le texte en grand, le mot en carte", "en": "The text in full, the word on a card" },
+          "title": {
+            "fr": "Le texte en grand, le mot en carte",
+            "en": "The text in full, the word on a card"
+          },
           "body": {
             "fr": "Sur un petit écran, le panneau du mot ne mange plus la page : il se pose en carte au-dessus du mot touché, et le texte prend toute la place. C'est automatique quand la fenêtre est étroite (écran de 13 pouces) ; ⌃⌘I ou le bouton en haut à droite le fixe à droite ou le fait flotter, et le chat s'ouvre en volet par-dessus le texte (touche C).",
             "en": "On a small screen, the word panel no longer eats into the page: it sits as a card above the word you tap, and the text gets all the room. It happens on its own when the window is narrow (13-inch screen); ⌃⌘I or the button at the top right docks it or makes it float, and the chat opens as a pane over the text (C key)."
@@ -140,7 +109,10 @@
         },
         {
           "icon": "panel",
-          "title": { "fr": "Le texte en grand, le mot en carte", "en": "The text in full, the word on a card" },
+          "title": {
+            "fr": "Le texte en grand, le mot en carte",
+            "en": "The text in full, the word on a card"
+          },
           "body": {
             "fr": "Sur un petit écran, le panneau du mot ne mange plus la page : il se pose en carte au-dessus du mot touché, et le texte prend toute la place. C'est automatique quand la fenêtre est étroite (écran de 13 pouces) ; Ctrl+I ou le bouton en haut à droite le fixe à droite ou le fait flotter, et le chat s'ouvre en volet par-dessus le texte (touche C).",
             "en": "On a small screen, the word panel no longer eats into the page: it sits as a card above the word you tap, and the text gets all the room. It happens on its own when the window is narrow (13-inch screen); Ctrl+I or the button at the top right docks it or makes it float, and the chat opens as a pane over the text (C key)."
@@ -150,7 +122,10 @@
         },
         {
           "icon": "pageturn",
-          "title": { "fr": "La page reste où vous lisez", "en": "The page stays where you're reading" },
+          "title": {
+            "fr": "La page reste où vous lisez",
+            "en": "The page stays where you're reading"
+          },
           "body": {
             "fr": "Un nouveau bouton, à côté des vitesses de lecture, empêche la page de tourner toute seule : l'audio ou la voix continue, vous restez sur votre page. Si la lecture va plus loin, « Y aller » vous ramène d'un geste à la lanterne. Aussi dans Réglages › Lecture.",
             "en": "A new button, next to the playback speeds, keeps the page from turning on its own: the audio or the voice goes on, and you stay on your page. If playback moves ahead, “Go there” takes you back to the lantern in one tap. Also in Settings › Reading."
@@ -159,7 +134,10 @@
         },
         {
           "icon": "check",
-          "title": { "fr": "Arrivé à la dernière page, c'est lu", "en": "Reach the last page, and it's read" },
+          "title": {
+            "fr": "Arrivé à la dernière page, c'est lu",
+            "en": "Reach the last page, and it's read"
+          },
           "body": {
             "fr": "Une leçon lue jusqu'à sa dernière page compte comme terminée, même sans toucher « Terminer la leçon » : elle prend sa pastille « Lu » dans la bibliothèque et ses mots comptent dans vos progrès. Le bouton reste là pour faire passer les mots bleus en connus et voir le bilan de la séance.",
             "en": "A lesson read to its last page counts as finished, even if you don't tap “Finish the lesson”: it gets its “Read” badge in the library and its words count toward your progress. The button is still there to move the blue words to known and see your session summary."
@@ -168,7 +146,10 @@
         },
         {
           "icon": "chart",
-          "title": { "fr": "Le calendrier des progrès réparé", "en": "The progress calendar, fixed" },
+          "title": {
+            "fr": "Le calendrier des progrès réparé",
+            "en": "The progress calendar, fixed"
+          },
           "body": {
             "fr": "Dans Progrès, le calendrier des 26 dernières semaines s'affichait en énormes pavés qui débordaient de la carte. Chaque jour retrouve sa petite case, qui s'éclaire selon le temps passé.",
             "en": "In Progress, the calendar of the last 26 weeks showed up as huge blocks spilling out of its card. Each day is back to its small square, lit by the time you spent."
@@ -180,11 +161,17 @@
     {
       "version": "0.7.0",
       "date": "2026-10-05",
-      "title": { "fr": "Lumen arrive sur Windows", "en": "Lumen comes to Windows" },
+      "title": {
+        "fr": "Lumen arrive sur Windows",
+        "en": "Lumen comes to Windows"
+      },
       "items": [
         {
           "icon": "laptop",
-          "title": { "fr": "Lumen sur PC", "en": "Lumen on PC" },
+          "title": {
+            "fr": "Lumen sur PC",
+            "en": "Lumen on PC"
+          },
           "body": {
             "fr": "Lumen existe désormais pour Windows 10 et 11, avec tout ce qu'il sait faire : lecture, écoute, Découvrir, chat, podcasts sur mesure, voix naturelle, sauvegarde dans OneDrive ou le nuage de votre choix. Sur PC, l'IA locale calcule sur le processeur (il faut l'AVX2, présent depuis 2013) : le profil Léger y est le plus rapide, et l'IA en ligne peut prendre le relais. Votre progression passe d'un Mac à un PC par la sauvegarde.",
             "en": "Lumen now runs on Windows 10 and 11, with everything it can do: reading, listening, Discover, chat, custom podcasts, natural voice, backup to OneDrive or the cloud of your choice. On a PC, the local AI runs on the processor (it needs AVX2, available since 2013): the Light profile is the fastest there, and the online AI can take over. Your progress moves from a Mac to a PC through the backup."
@@ -192,7 +179,10 @@
         },
         {
           "icon": "cloud",
-          "title": { "fr": "Une IA en ligne, si vous le voulez", "en": "An online AI, if you want one" },
+          "title": {
+            "fr": "Une IA en ligne, si vous le voulez",
+            "en": "An online AI, if you want one"
+          },
           "body": {
             "fr": "Dans Réglages › IA, le sens des mots, Simplifier et le chat peuvent passer par une IA en ligne, avec votre propre clé : DeepSeek (le moins cher), Gemini (clé gratuite, celle des podcasts), Mistral, OpenAI, Claude, OpenRouter, ou un serveur comme Ollama. Des modèles bien plus grands, rapides même sur un petit Mac. Par défaut, tout reste sur ce Mac ; votre profil, la transcription et la voix n'en sortent jamais, et sans connexion la traduction revient au modèle de ce Mac.",
             "en": "In Settings › AI, word meanings, Simplify and the chat can go through an online AI, with your own key: DeepSeek (the cheapest), Gemini (free key, the podcast one), Mistral, OpenAI, Claude, OpenRouter, or a server like Ollama. Much bigger models, fast even on a small Mac. By default, everything stays on this Mac; your profile, transcription and the voice never leave it, and without a connection translation falls back to this Mac's model."
@@ -201,7 +191,10 @@
         },
         {
           "icon": "globe",
-          "title": { "fr": "Le code de Lumen est ouvert", "en": "Lumen's code is open" },
+          "title": {
+            "fr": "Le code de Lumen est ouvert",
+            "en": "Lumen's code is open"
+          },
           "body": {
             "fr": "Lumen devient un logiciel libre, sous licence GPL-3.0 : son code est public sur GitHub. Chacun peut le lire, vérifier que vos mots, vos leçons et votre profil restent bien sur ce Mac, et proposer des améliorations. Le lien est dans Réglages › À propos.",
             "en": "Lumen is now free software, under the GPL-3.0 licence: its code is public on GitHub. Anyone can read it, check that your words, lessons and profile really stay on this Mac, and suggest improvements. The link is in Settings › About."
@@ -213,11 +206,17 @@
     {
       "version": "0.6.0",
       "date": "2026-10-05",
-      "title": { "fr": "Un profil à vous", "en": "A profile of your own" },
+      "title": {
+        "fr": "Un profil à vous",
+        "en": "A profile of your own"
+      },
       "items": [
         {
           "icon": "user",
-          "title": { "fr": "Votre profil : un nom, un avatar", "en": "Your profile: a name, an avatar" },
+          "title": {
+            "fr": "Votre profil : un nom, un avatar",
+            "en": "Your profile: a name, an avatar"
+          },
           "body": {
             "fr": "Dans Réglages › Profil, choisissez comment Lumen vous appelle, et votre avatar : une lumière à vous (aube, halo, aurore ou nuit, dans la teinte de votre choix), votre initiale ou une photo. Il vous accompagne dans la barre latérale, et la bibliothèque vous salue par votre nom. Pas de compte, pas de communauté : personne d'autre ne le voit.",
             "en": "In Settings › Profile, choose what Lumen calls you, and your avatar: a light of your own (dawn, halo, aurora or night, in the hue you like), your initial or a photo. It stays with you in the sidebar, and the library greets you by name. No account, no community: no one else sees it."
@@ -226,7 +225,10 @@
         },
         {
           "icon": "chat",
-          "title": { "fr": "Un chat qui vous connaît", "en": "A chat that knows you" },
+          "title": {
+            "fr": "Un chat qui vous connaît",
+            "en": "A chat that knows you"
+          },
           "body": {
             "fr": "Dites ce qui vous fait apprendre et ce qui vous passionne : le chat de votre Mac s'en inspire quand vous lui demandez de choisir un sujet ou des exemples, vous appelle par votre nom et fait les bons accords (« prête » ou « prêt », « pronta » ou « pronto »). Vos centres d'intérêt reviennent aussi comme idées de podcasts sur mesure, et la phrase qui vous motive vous attend dans Progrès.",
             "en": "Tell Lumen why you're learning and what you love: your Mac's chat draws on it when you ask it to choose a topic or examples, calls you by name and gets the agreement right (“pronta” or “pronto”). Your interests also come back as custom podcast ideas, and the sentence that motivates you is waiting for you in Progress."
@@ -234,7 +236,10 @@
         },
         {
           "icon": "chat",
-          "title": { "fr": "C'est vous qui menez la conversation", "en": "You lead the conversation" },
+          "title": {
+            "fr": "C'est vous qui menez la conversation",
+            "en": "You lead the conversation"
+          },
           "body": {
             "fr": "Le chat répond à ce que vous demandez, puis s'arrête : plus d'exercice, de question ni de proposition que vous n'avez pas demandés, et vos centres d'intérêt ne détournent plus ses réponses. Pour converser, « Discutons en italien de… » attend votre sujet dans le champ. Quand vous écrivez dans la langue étudiée, les corrections n'apparaissent que s'il y a des fautes.",
             "en": "The chat answers what you ask, then stops: no more exercises, questions or offers you didn't ask for, and your interests no longer steer its answers. To have a conversation, “Let's chat in Italian about…” waits for your topic in the field. When you write in the language you're learning, corrections only appear if there are mistakes."
@@ -244,7 +249,10 @@
         {
           "icon": "keyboard",
           "only": "mac",
-          "title": { "fr": "Les menus du Mac", "en": "The Mac menu bar" },
+          "title": {
+            "fr": "Les menus du Mac",
+            "en": "The Mac menu bar"
+          },
           "body": {
             "fr": "Lumen a ses vrais menus, en français ou en anglais. Fichier : ouvrir un fichier (⌘O), importer un lien (⌘L), exporter le vocabulaire, sauvegarder maintenant (⌘S). Présentation : passer d'une vue à l'autre (⌘1 à ⌘6), changer de langue étudiée ou d'apparence. Format : police, couleur de la page, taille du texte (⌘= et ⌘-). Leçon : reprendre la lecture (⌘R), la vitesse, reculer de 5 secondes, ajouter à une playlist, changer la couverture ou supprimer la leçon sans quitter la page. Aide › Raccourcis clavier (⌘/) les réunit tous, avec ceux du lecteur.",
             "en": "Lumen has real menus, in English or French. File: open a file (⌘O), import a link (⌘L), export your vocabulary, back up now (⌘S). View: switch views (⌘1 to ⌘6), change the language you're learning or the appearance. Format: font, page color, text size (⌘= and ⌘-). Lesson: resume reading (⌘R), speed, go back 5 seconds, add to a playlist, change the cover or delete the lesson without leaving the page. Help › Keyboard Shortcuts (⌘/) gathers them all, along with the reader's."
@@ -253,7 +261,10 @@
         },
         {
           "icon": "cloud",
-          "title": { "fr": "Sauvegarder dans le nuage de votre choix", "en": "Back up to the cloud you use" },
+          "title": {
+            "fr": "Sauvegarder dans le nuage de votre choix",
+            "en": "Back up to the cloud you use"
+          },
           "body": {
             "fr": "Réglages › Sauvegarde montre les nuages installés sur votre Mac : iCloud Drive, Dropbox, Google Drive, OneDrive, Box, Proton Drive… Un clic, et la sauvegarde y part ; le service l'envoie lui-même dans votre compte, sans serveur de Lumen. Sans iCloud Drive, Lumen propose d'emblée l'un des autres, et à l'accueil, une progression se retrouve dans chacun d'eux. Une clé USB ou un disque restent possibles.",
             "en": "Settings › Backup shows the clouds installed on your Mac: iCloud Drive, Dropbox, Google Drive, OneDrive, Box, Proton Drive… One click, and the backup goes there; the service itself sends it to your account, with no Lumen server. Without iCloud Drive, Lumen offers one of the others right away, and on the welcome screen your progress can be found in any of them. A USB drive or a disk still work too."
@@ -262,7 +273,10 @@
         },
         {
           "icon": "user",
-          "title": { "fr": "D'un Mac à l'autre", "en": "From one Mac to the next" },
+          "title": {
+            "fr": "D'un Mac à l'autre",
+            "en": "From one Mac to the next"
+          },
           "body": {
             "fr": "Votre profil part avec la sauvegarde de votre progression. Sur un nouveau Mac, vous reconnaissez la vôtre à votre nom et à votre avatar, et Lumen vous souhaite un bon retour.",
             "en": "Your profile goes with the backup of your progress. On a new Mac, you recognize yours by your name and avatar, and Lumen welcomes you back."
@@ -274,11 +288,17 @@
     {
       "version": "0.5.0",
       "date": "2026-10-04",
-      "title": { "fr": "Chercher, regarder, apprendre", "en": "Search, watch, learn" },
+      "title": {
+        "fr": "Chercher, regarder, apprendre",
+        "en": "Search, watch, learn"
+      },
       "items": [
         {
           "icon": "search",
-          "title": { "fr": "Chercher en ligne, sans navigateur", "en": "Search online, no browser needed" },
+          "title": {
+            "fr": "Chercher en ligne, sans navigateur",
+            "en": "Search online, no browser needed"
+          },
           "body": {
             "fr": "Dans Découvrir, un champ de recherche interroge YouTube, Dailymotion, les chansons, les podcasts, Wikipédia et Vikidia, dans la langue que vous étudiez. Choisissez la catégorie (YouTube, chansons, podcasts, articles…) avant même de chercher, ou passez de l'une à l'autre ensuite. Les résultats dans une autre langue passent après. Collez aussi un lien (TikTok, Instagram, Vimeo, un article) : Lumen regarde ce qu'il y a derrière.",
             "en": "In Discover, a search field looks through YouTube, Dailymotion, songs, podcasts, Wikipedia and Vikidia, in the language you're learning. Pick the category (YouTube, songs, podcasts, articles…) before you even search, or switch between them afterwards. Results in another language come last. You can also paste a link (TikTok, Instagram, Vimeo, an article): Lumen looks at what's behind it."
@@ -287,7 +307,10 @@
         },
         {
           "icon": "play",
-          "title": { "fr": "Regarder avant de choisir", "en": "Watch before you choose" },
+          "title": {
+            "fr": "Regarder avant de choisir",
+            "en": "Watch before you choose"
+          },
           "body": {
             "fr": "Touchez une vidéo, un épisode, une chanson ou un article : il s'ouvre aussitôt dans un aperçu, pour le regarder, l'écouter ou en lire le début. Pour un article ou des paroles, Lumen montre la part de mots que vous connaissez déjà.",
             "en": "Tap a video, an episode, a song or an article: it opens right away in a preview, to watch it, listen to it or read the beginning. For an article or lyrics, Lumen shows the share of words you already know."
@@ -295,7 +318,10 @@
         },
         {
           "icon": "sparkle",
-          "title": { "fr": "La leçon se prépare pendant que vous explorez", "en": "The lesson gets ready while you explore" },
+          "title": {
+            "fr": "La leçon se prépare pendant que vous explorez",
+            "en": "The lesson gets ready while you explore"
+          },
           "body": {
             "fr": "« En faire une leçon » lance le téléchargement et la transcription en arrière-plan ; une carte dans la barre latérale suit l'avancement, et une notification ouvre la leçon dès qu'elle est prête. Vous pouvez en lancer plusieurs.",
             "en": "“Make it a lesson” starts the download and the transcription in the background; a card in the sidebar follows the progress, and a notification opens the lesson as soon as it's ready. You can start several."
@@ -303,7 +329,10 @@
         },
         {
           "icon": "podcast",
-          "title": { "fr": "Des podcasts écrits pour vous", "en": "Podcasts made for you" },
+          "title": {
+            "fr": "Des podcasts écrits pour vous",
+            "en": "Podcasts made for you"
+          },
           "body": {
             "fr": "Importer › Podcast : choisissez un sujet, une forme (conversation, histoire ou débat), votre niveau et une durée. Gemini, l'IA de Google, écrit le podcast dans la langue que vous apprenez, y glisse les mots que vous étudiez et le fait dire par deux voix. Il devient une leçon complète, sans faute de transcription, avec la lanterne calée par Whisper. Il faut une clé Gemini gratuite (Réglages › Podcasts).",
             "en": "Import › Podcast: choose a topic, a format (conversation, story or debate), your level and a length. Gemini, Google's AI, writes the podcast in the language you're learning, works in the words you're studying and has two voices perform it. It becomes a full lesson, with no transcription errors, and the lantern set by Whisper. You need a free Gemini key (Settings › Podcasts)."
@@ -312,7 +341,10 @@
         },
         {
           "icon": "music",
-          "title": { "fr": "Des chansons, avec leurs paroles", "en": "Songs, with their lyrics" },
+          "title": {
+            "fr": "Des chansons, avec leurs paroles",
+            "en": "Songs, with their lyrics"
+          },
           "body": {
             "fr": "Le rayon « Chansons du moment » propose les titres les plus écoutés du pays dont les paroles sont dans la langue étudiée. Les paroles deviennent le texte de la leçon et la lanterne suit la chanson : mot à mot si Whisper est installé, sinon ligne après ligne. Une chanson se cherche aussi par son titre.",
             "en": "The “Songs of the moment” shelf offers the country's most played songs whose lyrics are in the language you're learning. The lyrics become the lesson's text and the lantern follows the song: word by word if Whisper is installed, otherwise line by line. You can also search for a song by its title."
@@ -320,7 +352,10 @@
         },
         {
           "icon": "sparkle",
-          "title": { "fr": "Découvrir a sa place dans la barre latérale", "en": "Discover has its own place in the sidebar" },
+          "title": {
+            "fr": "Découvrir a sa place dans la barre latérale",
+            "en": "Discover has its own place in the sidebar"
+          },
           "body": {
             "fr": "Découvrir n'est plus un onglet de la bibliothèque : il a son entrée dans la barre latérale, juste sous Bibliothèque. Son étoile scintille quand des vidéos, des podcasts ou des chansons nouvelles vous attendent à votre niveau, et elle dit combien. En haut de la page, l'essentiel : la recherche, et l'heure de la dernière mise à jour avec le bouton « Actualiser ».",
             "en": "Discover is no longer a tab inside the library: it has its own entry in the sidebar, right below Library. Its star twinkles when new videos, podcasts or songs are waiting at your level, and it shows how many. At the top of the page, just the essentials: the search, and the time of the last update with the “Refresh” button."
@@ -329,7 +364,10 @@
         },
         {
           "icon": "refresh",
-          "title": { "fr": "Plus de sources, toujours fraîches", "en": "More sources, always fresh" },
+          "title": {
+            "fr": "Plus de sources, toujours fraîches",
+            "en": "More sources, always fresh"
+          },
           "body": {
             "fr": "Près de 290 sources vérifiées, dont des actualités lentes par niveau (A1 à B1), de la vulgarisation et des podcasts pour les langues qui en manquaient. Chaque source a son rythme : les actualités se relisent toutes les trois heures, et une trouvaille reste proposée même quand la chaîne a publié depuis. Les chaînes en danois, en finnois et en indonésien, restées vides, fonctionnent de nouveau.",
             "en": "Nearly 290 checked sources, including slow news by level (A1 to B1), science and history channels, and podcasts for the languages that lacked them. Each source has its own pace: news is checked every three hours, and a find stays suggested even after the channel has published more. Danish, Finnish and Indonesian channels, which had gone empty, work again."
@@ -337,7 +375,10 @@
         },
         {
           "icon": "chart",
-          "title": { "fr": "Un niveau estimé plus juste", "en": "A fairer level estimate" },
+          "title": {
+            "fr": "Un niveau estimé plus juste",
+            "en": "A fairer level estimate"
+          },
           "body": {
             "fr": "Le niveau de Découvrir comptait chaque forme d'un mot : un russe ou un finnois paraissaient bien plus avancés qu'ils ne l'étaient. Lumen regroupe désormais vos mots connus par mot de base grâce au dictionnaire, avec les mêmes seuils pour toutes les langues (les kanji en japonais).",
             "en": "Discover's level counted every form of a word: Russian or Finnish learners looked far more advanced than they were. Lumen now groups your known words by base word thanks to the dictionary, with the same thresholds for every language (kanji in Japanese)."
@@ -346,7 +387,10 @@
         },
         {
           "icon": "library",
-          "title": { "fr": "La part de mots nouveaux", "en": "The share of new words" },
+          "title": {
+            "fr": "La part de mots nouveaux",
+            "en": "The share of new words"
+          },
           "body": {
             "fr": "Chaque leçon indique le pourcentage de ses mots différents encore nouveaux pour vous, comme sur LingQ : de quoi choisir une leçon à votre portée. La jauge dessous compte de la même façon les mots déjà rencontrés : les deux font toujours 100 %.",
             "en": "Each lesson shows the percentage of its distinct words that are still new to you, as on LingQ: an easy way to pick a lesson within reach. The gauge below counts the words you've already met the same way: together they always make 100%."
@@ -355,7 +399,10 @@
         },
         {
           "icon": "bulb",
-          "title": { "fr": "Une lanterne plus douce", "en": "A softer lantern" },
+          "title": {
+            "fr": "Une lanterne plus douce",
+            "en": "A softer lantern"
+          },
           "body": {
             "fr": "La lumière qui suit le mot prononcé est plus légère : on la suit tout aussi bien, et le texte respire davantage.",
             "en": "The light that follows the spoken word is lighter: it's just as easy to follow, and the text has more room to breathe."
@@ -363,7 +410,10 @@
         },
         {
           "icon": "book",
-          "title": { "fr": "Toucher le vide pour désélectionner", "en": "Tap empty space to deselect" },
+          "title": {
+            "fr": "Toucher le vide pour désélectionner",
+            "en": "Tap empty space to deselect"
+          },
           "body": {
             "fr": "Dans une leçon, un clic dans la marge, entre deux lignes ou sur le titre éteint le mot ou l'expression sélectionnés, comme la touche Échap.",
             "en": "In a lesson, a click in the margin, between two lines or on the title clears the selected word or phrase, just like the Escape key."
@@ -371,7 +421,10 @@
         },
         {
           "icon": "up",
-          "title": { "fr": "Revenir en haut d'un clic", "en": "Back to the top in one click" },
+          "title": {
+            "fr": "Revenir en haut d'un clic",
+            "en": "Back to the top in one click"
+          },
           "body": {
             "fr": "Quand on descend loin dans la bibliothèque, une flèche apparaît en bas à droite pour remonter tout en haut. Et les coins des cartes restent bien arrondis au survol.",
             "en": "When you scroll far down the library, an arrow appears at the bottom right to take you straight back to the top. And card corners now stay nicely rounded on hover."
@@ -379,7 +432,10 @@
         },
         {
           "icon": "sparkle",
-          "title": { "fr": "Une nouvelle icône", "en": "A new icon" },
+          "title": {
+            "fr": "Une nouvelle icône",
+            "en": "A new icon"
+          },
           "body": {
             "fr": "L'astre de Lumen se lève derrière un livre ouvert, dans les couleurs chaudes de l'app, et un mot y luit sous la lanterne. La fenêtre d'installation a été redessinée dans le même esprit.",
             "en": "Lumen's sun rises behind an open book, in the app's warm colors, with one word glowing under the lantern. The install window has been redrawn in the same spirit."
@@ -390,11 +446,17 @@
     {
       "version": "0.4.0",
       "date": "2026-10-04",
-      "title": { "fr": "Une lecture plus belle, des Réglages plus clairs", "en": "Lovelier reading, clearer Settings" },
+      "title": {
+        "fr": "Une lecture plus belle, des Réglages plus clairs",
+        "en": "Lovelier reading, clearer Settings"
+      },
       "items": [
         {
           "icon": "book",
-          "title": { "fr": "Des pages, comme dans un livre", "en": "Pages, like in a book" },
+          "title": {
+            "fr": "Des pages, comme dans un livre",
+            "en": "Pages, like in a book"
+          },
           "body": {
             "fr": "Le texte tient dans l'écran : on tourne la page avec les flèches, deux doigts sur le trackpad ou PageDown. Le défilement reste au choix.",
             "en": "The text fits on the screen: turn the page with the arrows, two fingers on the trackpad or Page Down. Scrolling is still an option."
@@ -403,7 +465,10 @@
         },
         {
           "icon": "type",
-          "title": { "fr": "Le bouton « Aa »", "en": "The “Aa” button" },
+          "title": {
+            "fr": "Le bouton « Aa »",
+            "en": "The “Aa” button"
+          },
           "body": {
             "fr": "Dans une leçon : huit polices, la taille, l'interligne, la largeur des lignes et six couleurs de page, de Papier à Encre en passant par Sépia et Nuit.",
             "en": "Inside a lesson: eight fonts, size, line spacing, line width and six page colors, from Paper to Ink by way of Sepia and Night."
@@ -412,7 +477,10 @@
         },
         {
           "icon": "settings",
-          "title": { "fr": "Des Réglages rangés par thème", "en": "Settings sorted by topic" },
+          "title": {
+            "fr": "Des Réglages rangés par thème",
+            "en": "Settings sorted by topic"
+          },
           "body": {
             "fr": "Chaque domaine a sa page : Lecture, Voix, IA locale, Sauvegarde… Une recherche retrouve n'importe quel réglage.",
             "en": "Each area has its own page: Reading, Voice, Local AI, Backup… A search finds any setting."
@@ -421,7 +489,10 @@
         },
         {
           "icon": "bulb",
-          "title": { "fr": "Une visite guidée", "en": "A guided tour" },
+          "title": {
+            "fr": "Une visite guidée",
+            "en": "A guided tour"
+          },
           "body": {
             "fr": "Pas à pas, dans une vraie leçon : les couleurs des mots, le panneau du mot, ce qu'est un modèle d'IA et pourquoi il compte, la lanterne.",
             "en": "Step by step, inside a real lesson: word colors, the word panel, what an AI model is and why it matters, the lantern."
@@ -430,7 +501,10 @@
         },
         {
           "icon": "sparkle",
-          "title": { "fr": "Les nouveautés, à chaque mise à jour", "en": "What's new, after every update" },
+          "title": {
+            "fr": "Les nouveautés, à chaque mise à jour",
+            "en": "What's new, after every update"
+          },
           "body": {
             "fr": "Cette fenêtre s'ouvre après chaque mise à jour. Elle reste à portée de main dans Réglages › À propos.",
             "en": "This window opens after every update. It stays at hand in Settings › About."
@@ -441,11 +515,17 @@
     {
       "version": "0.3.0",
       "date": "2026-10-04",
-      "title": { "fr": "Découvrir, vos progrès et la prononciation au toucher", "en": "Discover, your progress and pronunciation on tap" },
+      "title": {
+        "fr": "Découvrir, vos progrès et la prononciation au toucher",
+        "en": "Discover, your progress and pronunciation on tap"
+      },
       "items": [
         {
           "icon": "sparkle",
-          "title": { "fr": "Découvrir", "en": "Discover" },
+          "title": {
+            "fr": "Découvrir",
+            "en": "Discover"
+          },
           "body": {
             "fr": "Vidéos, podcasts et articles récents dans votre langue, rangés par niveau de A1 à C1 : environ 195 sources pour les 31 langues, relues chaque jour.",
             "en": "Recent videos, podcasts and articles in your language, sorted by level from A1 to C1: about 195 sources across 31 languages, checked every day."
@@ -454,7 +534,10 @@
         },
         {
           "icon": "chart",
-          "title": { "fr": "Vos progrès, en détail", "en": "Your progress, in detail" },
+          "title": {
+            "fr": "Vos progrès, en détail",
+            "en": "Your progress, in detail"
+          },
           "body": {
             "fr": "Temps d'apprentissage, mots lus, écoute, nouveaux mots connus : par jour, semaine ou mois, avec graphique, calendrier et records.",
             "en": "Learning time, words read, listening, newly known words: by day, week or month, with a chart, a calendar and records."
@@ -463,7 +546,10 @@
         },
         {
           "icon": "flame",
-          "title": { "fr": "Objectif du jour et série", "en": "Daily goal and streak" },
+          "title": {
+            "fr": "Objectif du jour et série",
+            "en": "Daily goal and streak"
+          },
           "body": {
             "fr": "Quelques minutes dans une leçon chaque jour allument la flamme. La série se compte langue par langue.",
             "en": "A few minutes in a lesson each day light the flame. The streak is counted language by language."
@@ -471,7 +557,10 @@
         },
         {
           "icon": "speaker",
-          "title": { "fr": "Le mot touché se fait entendre", "en": "Tapped words speak up" },
+          "title": {
+            "fr": "Le mot touché se fait entendre",
+            "en": "Tapped words speak up"
+          },
           "body": {
             "fr": "Leçon en pause, le mot ou le passage touché est prononcé, par la voix naturelle si elle est installée.",
             "en": "While the lesson is paused, the word or passage you tap is spoken, with the natural voice if it's installed."
@@ -483,11 +572,17 @@
     {
       "version": "0.2.1",
       "date": "2026-10-03",
-      "title": { "fr": "Le lien universel et 31 dictionnaires", "en": "The universal link and 31 dictionaries" },
+      "title": {
+        "fr": "Le lien universel et 31 dictionnaires",
+        "en": "The universal link and 31 dictionaries"
+      },
       "items": [
         {
           "icon": "link",
-          "title": { "fr": "Importer depuis n'importe quel lien", "en": "Import from any link" },
+          "title": {
+            "fr": "Importer depuis n'importe quel lien",
+            "en": "Import from any link"
+          },
           "body": {
             "fr": "Article, vidéo, podcast, flux RSS, Apple Podcasts ou Spotify : Lumen regarde ce qu'il y a derrière l'adresse et en fait une leçon.",
             "en": "Article, video, podcast, RSS feed, Apple Podcasts or Spotify: Lumen looks behind the address and turns it into a lesson."
@@ -495,7 +590,10 @@
         },
         {
           "icon": "globe",
-          "title": { "fr": "Un dictionnaire pour chaque langue", "en": "A dictionary for every language" },
+          "title": {
+            "fr": "Un dictionnaire pour chaque langue",
+            "en": "A dictionary for every language"
+          },
           "body": {
             "fr": "Les 31 langues ont leur dictionnaire hors ligne, téléchargé au premier usage.",
             "en": "All 31 languages have their offline dictionary, downloaded the first time you need it."
@@ -504,7 +602,10 @@
         },
         {
           "icon": "bulb",
-          "title": { "fr": "Le petit guide", "en": "The short guide" },
+          "title": {
+            "fr": "Le petit guide",
+            "en": "The short guide"
+          },
           "body": {
             "fr": "Le principe de Lumen et le rôle de chaque modèle d'IA, en quatre images animées.",
             "en": "How Lumen works and what each AI model does, in four animated pictures."
@@ -516,11 +617,17 @@
     {
       "version": "0.2.0",
       "date": "2026-10-03",
-      "title": { "fr": "Lumen en anglais", "en": "Lumen in English" },
+      "title": {
+        "fr": "Lumen en anglais",
+        "en": "Lumen in English"
+      },
       "items": [
         {
           "icon": "globe",
-          "title": { "fr": "Français ou anglais", "en": "French or English" },
+          "title": {
+            "fr": "Français ou anglais",
+            "en": "French or English"
+          },
           "body": {
             "fr": "L'interface, les traductions, le chat et les dictionnaires existent aussi en anglais.",
             "en": "The interface, translations, chat and dictionaries now also exist in English."
@@ -532,11 +639,17 @@
     {
       "version": "0.1.0",
       "date": "2026-10-03",
-      "title": { "fr": "Chat, playlists, voix naturelle, sauvegarde", "en": "Chat, playlists, natural voice, backup" },
+      "title": {
+        "fr": "Chat, playlists, voix naturelle, sauvegarde",
+        "en": "Chat, playlists, natural voice, backup"
+      },
       "items": [
         {
           "icon": "chat",
-          "title": { "fr": "Le chat", "en": "The chat" },
+          "title": {
+            "fr": "Le chat",
+            "en": "The chat"
+          },
           "body": {
             "fr": "Un professeur qui vit sur votre Mac : grammaire, exemples, nuances, sur la leçon que vous lisez.",
             "en": "A teacher living on your Mac: grammar, examples, nuances, about the lesson you're reading."
@@ -545,7 +658,10 @@
         },
         {
           "icon": "playlist",
-          "title": { "fr": "Les playlists", "en": "Playlists" },
+          "title": {
+            "fr": "Les playlists",
+            "en": "Playlists"
+          },
           "body": {
             "fr": "Des leçons dans l'ordre choisi, qui s'enchaînent d'elles-mêmes.",
             "en": "Lessons in the order you choose, playing one after another."
@@ -554,7 +670,10 @@
         },
         {
           "icon": "speaker",
-          "title": { "fr": "La voix naturelle", "en": "The natural voice" },
+          "title": {
+            "fr": "La voix naturelle",
+            "en": "The natural voice"
+          },
           "body": {
             "fr": "Dix voix en 31 langues, calculées sur votre Mac, pour prononcer les mots et lire vos leçons.",
             "en": "Ten voices in 31 languages, computed on your Mac, to pronounce words and read your lessons."
@@ -563,7 +682,10 @@
         },
         {
           "icon": "cloud",
-          "title": { "fr": "La sauvegarde", "en": "Backup" },
+          "title": {
+            "fr": "La sauvegarde",
+            "en": "Backup"
+          },
           "body": {
             "fr": "Votre progression à l'abri dans iCloud Drive, retrouvée en un clic.",
             "en": "Your progress kept safe in iCloud Drive, back in one click."

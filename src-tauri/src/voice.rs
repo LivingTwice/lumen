@@ -18,15 +18,29 @@ use sha2::{Digest, Sha256};
 use crate::models::{self, DownloadEvent, ModelInfo};
 
 const ENGINE_VERSION: &str = "1.13.8";
-/// Archive du moteur pour ce système : macOS (puce Apple) ou Windows (x64,
+/// Archive du moteur pour ce système : macOS (puce Apple), Windows ou Linux (x64,
 /// bibliothèque C++ intégrée : rien à installer à côté).
-const ENGINE_FLAVOR: &str = if cfg!(windows) { "win-x64-shared-MT-Release" } else { "osx-arm64-shared" };
+const ENGINE_FLAVOR: &str = if cfg!(windows) {
+    "win-x64-shared-MT-Release"
+} else if cfg!(all(target_os = "linux", target_arch = "x86_64")) {
+    "linux-x64-shared"
+} else {
+    "osx-arm64-shared"
+};
 /// Taille de cette archive, pour la progression.
-pub const ENGINE_SIZE: u64 = if cfg!(windows) { 24_805_859 } else { 20_314_448 };
+pub const ENGINE_SIZE: u64 = if cfg!(windows) {
+    24_805_859
+} else if cfg!(all(target_os = "linux", target_arch = "x86_64")) {
+    28_156_791
+} else {
+    20_314_448
+};
 /// Ce qu'on garde de l'archive : l'outil de synthèse (en premier), puis les
 /// bibliothèques qu'il charge (sous Windows, à côté de lui).
 const ENGINE_FILES: &[&str] = if cfg!(windows) {
     &["bin/sherpa-onnx-offline-tts.exe", "bin/onnxruntime.dll", "bin/onnxruntime_providers_shared.dll"]
+} else if cfg!(target_os = "linux") {
+    &["bin/sherpa-onnx-offline-tts", "lib/libonnxruntime.so"]
 } else {
     &["bin/sherpa-onnx-offline-tts", "lib/libonnxruntime.dylib"]
 };
@@ -76,7 +90,11 @@ pub async fn ensure_engine(data_dir: &Path, cancel: Arc<AtomicBool>, mut on_prog
     if engine_ready(data_dir) {
         return Ok(());
     }
-    if !cfg!(any(all(target_os = "macos", target_arch = "aarch64"), all(windows, target_arch = "x86_64"))) {
+    if !cfg!(any(
+        all(target_os = "macos", target_arch = "aarch64"),
+        all(windows, target_arch = "x86_64"),
+        all(target_os = "linux", target_arch = "x86_64"),
+    )) {
         return Err(anyhow!(crate::i18n::t(
             "La voix naturelle n'est pas encore disponible sur cet ordinateur.",
             "The natural voice isn't available on this computer yet."
@@ -94,10 +112,11 @@ pub async fn ensure_engine(data_dir: &Path, cancel: Arc<AtomicBool>, mut on_prog
     };
     models::fetch_resumable(&url, &part, 0, ENGINE_SIZE, cancel, &mut forward).await?;
     let wanted: Vec<String> = ENGINE_FILES.iter().map(|f| format!("{name}/{f}")).collect();
-    #[cfg(not(windows))]
+    // macOS : le tar du système ; ailleurs, décompressé ici (le tar de Windows 10 ne
+    // lit pas toujours le bzip2, et NixOS n'a pas de tar système pour l'application)
+    #[cfg(target_os = "macos")]
     let ok = tokio::process::Command::new("tar").arg("-xjf").arg(&part).arg("-C").arg(&tools).args(&wanted).output().await?.status.success();
-    // Windows : décompressé ici (le tar de Windows 10 ne lit pas toujours le bzip2)
-    #[cfg(windows)]
+    #[cfg(not(target_os = "macos"))]
     let ok = {
         let (archive, dest) = (part.clone(), tools.clone());
         tokio::task::spawn_blocking(move || models::unpack_tar_bz2(&archive, &dest, Some(&wanted))).await?.is_ok()
@@ -446,14 +465,14 @@ pub(crate) fn level_volume(all: &mut [i16]) {
 
 /// Enregistre un son assemblé dans `media/<horodatage>.<tag>.m4a`, compressé en
 /// AAC (environ 0,5 Mo par minute au lieu de 5 Mo en WAV) ; en WAV si la compression
-/// échoue (`afconvert` sur Mac, l'encodeur de Windows sur PC).
+/// échoue (`afconvert` sur Mac, l'encodeur de Windows sur PC, `ffmpeg` sous Linux).
 /// `work` : dossier de travail, où passe le WAV intermédiaire.
 pub(crate) async fn save_m4a(work: &Path, media: &Path, tag: &str, rate: u32, samples: &[i16]) -> Result<PathBuf> {
     let wav_path = work.join(format!("{tag}.wav"));
     tokio::fs::write(&wav_path, write_wav(rate, samples)).await?;
     let stem = crate::media::new_stem();
     let m4a = media.join(format!("{stem}.{tag}.m4a"));
-    #[cfg(not(windows))]
+    #[cfg(target_os = "macos")]
     let converted = tokio::process::Command::new("afconvert")
         .args(["-f", "m4af", "-d", "aac", "-b", "64000"])
         .arg(&wav_path)
@@ -467,6 +486,17 @@ pub(crate) async fn save_m4a(work: &Path, media: &Path, tag: &str, rate: u32, sa
         let (out, pcm) = (m4a.clone(), samples.to_vec());
         tokio::task::spawn_blocking(move || crate::win::aac_m4a(rate, &pcm, &out)).await.map(|r| r.is_ok()).unwrap_or(false)
     };
+    // Linux : ffmpeg s'il est installé (le paquet nix le met au chaud)
+    #[cfg(target_os = "linux")]
+    let converted = tokio::process::Command::new("ffmpeg")
+        .args(["-y", "-nostdin", "-loglevel", "error", "-i"])
+        .arg(&wav_path)
+        .args(["-c:a", "aac", "-b:a", "96000"])
+        .arg(&m4a)
+        .output()
+        .await
+        .map(|o| o.status.success())
+        .unwrap_or(false);
     if converted && m4a.exists() {
         let _ = tokio::fs::remove_file(&wav_path).await;
         return Ok(m4a);

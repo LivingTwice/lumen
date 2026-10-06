@@ -24,6 +24,8 @@ mod text;
 mod tools;
 mod user;
 mod voice;
+#[cfg(target_os = "linux")]
+mod mediaserv;
 #[cfg(windows)]
 mod vulkan;
 #[cfg(windows)]
@@ -48,9 +50,17 @@ pub fn run() {
             i18n::set(&db::setting(&conn, "ui_lang").unwrap_or_default());
             // Windows : la carte graphique pour l'IA, sauf si l'apprenant a choisi le processeur
             ai::set_gpu(db::setting(&conn, "ai_gpu").as_deref() != Some("0"));
-            // allègement des médias : fichiers d'un travail interrompu, originaux mis de côté
-            compress::sweep(&media::media_dir(&data_dir), |p| db::media_used(&conn, p, None));
-            let resource_dir = app.path().resource_dir()?.join("dicts");
+// allègement des médias : fichiers d'un travail interrompu, originaux mis de côté
+compress::sweep(&media::media_dir(&data_dir), |p| db::media_used(&conn, p, None));
+// Dictionnaires livrés : le dossier de ressources du paquet. Sous Linux sans
+// paquet (nix, `cargo build`), il n'existe pas à l'endroit attendu : la variable
+// LUMEN_RESOURCES le donne, sinon Lumen démarre sans les dictionnaires livrés
+// (les autres se téléchargent comme d'habitude).
+let resource_dir = std::env::var_os("LUMEN_RESOURCES")
+    .map(std::path::PathBuf::from)
+    .or_else(|| app.path().resource_dir().ok())
+    .unwrap_or_else(std::path::PathBuf::new)
+    .join("dicts");
             let dicts = dict::Dicts::new(resource_dir, dict::dict_dir(&data_dir));
             let discover = discover::Store::open(&data_dir);
             app.manage(state::AppState {

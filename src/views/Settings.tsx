@@ -13,7 +13,7 @@ import { LANGS, STARTERS, inLang, langInfo, langLower, starterCollection, theLan
 import { useDictStatus } from "../lib/dicts";
 import { LEVELS, levelName, openSource, unitsLabel, useLevel } from "../lib/discover";
 import { useLingq } from "../lib/lingq";
-import { isWindows } from "../lib/platform";
+import { isLinux, isPc, isWindows } from "../lib/platform";
 import { PROFILES } from "../lib/profiles";
 import { formatBytes, useApp, type SettingsTab } from "../lib/store";
 import { naturalVoiceFor, naturalVoices, pronounce } from "../lib/pronounce";
@@ -739,8 +739,8 @@ function ReadingPane() {
               <strong>{t("Panneau du mot", "Word panel")}</strong>
               <span>
                 {t(
-                  `À droite du texte, ou flottant au-dessus du mot touché pour laisser tout l'écran au texte. « Auto » le fait flotter quand la fenêtre est étroite (écran de 13 pouces). Dans une leçon : ${isWindows ? "Ctrl+I" : "⌃⌘I"}.`,
-                  `On the right of the text, or floating above the word you tap to give the text the whole screen. “Auto” floats it when the window is narrow (13-inch screen). In a lesson: ${isWindows ? "Ctrl+I" : "⌃⌘I"}.`,
+                  `À droite du texte, ou flottant au-dessus du mot touché pour laisser tout l'écran au texte. « Auto » le fait flotter quand la fenêtre est étroite (écran de 13 pouces). Dans une leçon : ${isPc ? "Ctrl+I" : "⌃⌘I"}.`,
+                  `On the right of the text, or floating above the word you tap to give the text the whole screen. “Auto” floats it when the window is narrow (13-inch screen). In a lesson: ${isPc ? "Ctrl+I" : "⌃⌘I"}.`,
                 )}
               </span>
             </div>
@@ -859,7 +859,9 @@ function VoicePane() {
                   : t("Aucune voix installée pour cette langue", "No voice installed for this language")}
                 {isWindows
                   ? t(" · d'autres voix dans Paramètres › Heure et langue › Voix", " · more voices in Settings › Time & language › Speech")
-                  : t(" · d'autres voix dans Réglages Système › Accessibilité › Contenu énoncé", " · more voices in System Settings › Accessibility › Spoken Content")}
+                  : isLinux
+                    ? t(" · les voix viennent du système (speech-dispatcher)", " · voices come from the system (speech-dispatcher)")
+                    : t(" · d'autres voix dans Réglages Système › Accessibilité › Contenu énoncé", " · more voices in System Settings › Accessibility › Spoken Content")}
               </span>
             </div>
             <select className="select" value={settings[voiceKey] ?? ""} onChange={(e) => setSetting(voiceKey, e.target.value)} aria-label={t("Voix", "Voice")}>

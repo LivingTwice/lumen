@@ -18,11 +18,11 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import { App } from "./App";
 import { api, initApi, isTauri } from "./lib/api";
-import { isWindows } from "./lib/platform";
+import { isPc } from "./lib/platform";
 import { useApp } from "./lib/store";
 
-// sous Windows : boutons de la fenêtre, barres de défilement fines, polices de repli (styles .win)
-if (isWindows) document.documentElement.classList.add("win");
+// sous Windows et Linux : boutons de la fenêtre, barres de défilement fines, polices de repli (styles .win)
+if (isPc) document.documentElement.classList.add("win");
 
 /**
  * Polices chargées avant le premier affichage : sinon titres et extraits

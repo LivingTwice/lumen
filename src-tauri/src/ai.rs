@@ -144,8 +144,9 @@ pub fn gpu_info(engine: &Engine) -> Result<GpuInfo> {
     backend()?;
     #[cfg(windows)]
     let vulkan = crate::vulkan::present();
+    // Mac : Metal, toujours là ; Linux : l'IA y calcule sur le processeur pour l'instant
     #[cfg(not(windows))]
-    let vulkan = true;
+    let vulkan = cfg!(target_os = "macos");
     let devices = gpus()
         .into_iter()
         .map(|d| GpuDevice {

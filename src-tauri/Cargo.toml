@@ -57,6 +57,12 @@ objc2-av-foundation = { version = "0.3", default-features = false, features = ["
 
 [target.'cfg(not(any(target_os = "macos", windows)))'.dependencies]
 llama-cpp-2 = { version = "0.1.158", default-features = false, features = ["mtmd"] }
+# Linux : décompresser ici les archives des modèles (pas de tar système garanti
+# sur NixOS), comme sous Windows, et réduire les couvertures avec la bibliothèque image
+[target.'cfg(target_os = "linux")'.dependencies]
+tar = "0.4"
+bzip2 = "0.6"
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp", "gif"] }
 
 # Windows : ce que macOS fait avec ses propres outils (afconvert, sips, tar, ioreg)
 [target.'cfg(windows)'.dependencies]

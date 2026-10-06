@@ -24,3 +24,7 @@ __pycache__
 *.sqlite
 *.lumen
 cles.tsv
+
+# nix
+result
+result-bin
