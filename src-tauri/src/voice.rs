@@ -29,6 +29,7 @@ fn speaker(voice: &str) -> u32 {
     }
 }
 
+
 /// Dossier des prononciations en cache (dans `media/`, lisible par l'interface).
 fn cache_dir(data_dir: &Path) -> PathBuf {
     data_dir.join("media").join("voice")
@@ -360,14 +361,14 @@ pub(crate) fn level_volume(all: &mut [i16]) {
 
 /// Enregistre un son assemblé dans `media/<horodatage>.<tag>.m4a`, compressé en
 /// AAC (environ 0,5 Mo par minute au lieu de 5 Mo en WAV) ; en WAV si la compression
-/// échoue (`afconvert` sur Mac, l'encodeur de Windows sur PC).
+/// échoue (`afconvert` sur Mac, l'encodeur de Windows sur PC, `ffmpeg` sous Linux).
 /// `work` : dossier de travail, où passe le WAV intermédiaire.
 pub(crate) async fn save_m4a(work: &Path, media: &Path, tag: &str, rate: u32, samples: &[i16]) -> Result<PathBuf> {
     let wav_path = work.join(format!("{tag}.wav"));
     tokio::fs::write(&wav_path, write_wav(rate, samples)).await?;
     let stem = crate::media::new_stem();
     let m4a = media.join(format!("{stem}.{tag}.m4a"));
-    #[cfg(not(windows))]
+    #[cfg(target_os = "macos")]
     let converted = tokio::process::Command::new("afconvert")
         .args(["-f", "m4af", "-d", "aac", "-b", "64000"])
         .arg(&wav_path)
@@ -381,6 +382,17 @@ pub(crate) async fn save_m4a(work: &Path, media: &Path, tag: &str, rate: u32, sa
         let (out, pcm) = (m4a.clone(), samples.to_vec());
         tokio::task::spawn_blocking(move || crate::win::aac_m4a(rate, &pcm, &out)).await.map(|r| r.is_ok()).unwrap_or(false)
     };
+    // Linux : ffmpeg s'il est installé (le paquet nix le met au chaud)
+    #[cfg(target_os = "linux")]
+    let converted = tokio::process::Command::new("ffmpeg")
+        .args(["-y", "-nostdin", "-loglevel", "error", "-i"])
+        .arg(&wav_path)
+        .args(["-c:a", "aac", "-b:a", "96000"])
+        .arg(&m4a)
+        .output()
+        .await
+        .map(|o| o.status.success())
+        .unwrap_or(false);
     if converted && m4a.exists() {
         let _ = tokio::fs::remove_file(&wav_path).await;
         return Ok(m4a);
