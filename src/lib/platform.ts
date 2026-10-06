@@ -61,7 +61,7 @@ export const isMobile = isIOS;
 export const isPc = platform === "windows" || platform === "linux";
 
 /** Nom de l'appareil dans une phrase : « iPhone », « iPad », « Mac », « PC ». */
-export const deviceWord = platform === "iphone" ? "iPhone" : platform === "ipad" ? "iPad" : isWindows ? "PC" : isLinux ? t("ordinateur", "computer") : "Mac";
+export const deviceWord = platform === "iphone" ? "iPhone" : platform === "ipad" ? "iPad" : isWindows ? "PC" : isLinux ? "computer" : "Mac";
 
 /**
  * Formats d'image que le moteur de cette fenêtre lit, en plus du H.264 (« vp9 »,
@@ -119,7 +119,7 @@ const MAC_EN = /\b(this|This|your|Your|the|The|a|new|another|every|each|on|small
 // « ce Mac » → « cet ordinateur » (l'élision ne joue que devant une voyelle)
 const ORDINATEUR = (_m: string, mot: string): string => (mot === "ce" ? "cet" : mot === "Ce" ? "Cet" : mot) + " ordinateur";
 
-type Replacement = string | ((substring: string, ...args: unknown[]) => string);
+type Replacement = string | ((_match: string, ..._groups: string[]) => string);
 
 const SWAPS_WINDOWS: [RegExp, Replacement][] = [
   [MAC_FR, "$1 PC"],
