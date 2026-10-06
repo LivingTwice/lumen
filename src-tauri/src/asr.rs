@@ -70,6 +70,8 @@ pub fn transcribe(
 ) -> Result<String> {
     let name = language_name(lang).ok_or_else(|| anyhow!(crate::i18n::t("langue non prise en charge par Qwen3-ASR", "language not supported by Qwen3-ASR")))?;
     let be = backend()?;
+    let prof = std::env::var("LUMEN_ASR_PROFILE").is_ok(); // ESSAI
+    let t_all = std::time::Instant::now();
     // sur la carte graphique, ou sur le processeur (Windows : pas de carte, pas la place, réglage)
     let (model, gpu) = engine
         .exclusive(|| crate::ai::load_model(be, model_path))
@@ -87,6 +89,7 @@ pub fn transcribe(
     let mctx = engine
         .exclusive(|| MtmdContext::init_from_file(mmproj, &model, &params))
         .map_err(|e| anyhow!(crate::tr!("partie audio du modèle illisible : {e}", "unreadable audio part of the model: {e}")))?;
+    if prof { eprintln!("PROFIL chargement {:.2} s", t_all.elapsed().as_secs_f64()); }
     let pieces = split_on_silence(pcm, CHUNK_SECS);
     let mut texts: Vec<String> = Vec::new();
     for (a, b) in pieces {
@@ -114,6 +117,8 @@ fn transcribe_piece(model: &LlamaModel, mctx: &MtmdContext, audio: &[f32], name:
     } else {
         audio
     };
+    let prof = std::env::var("LUMEN_ASR_PROFILE").is_ok(); // ESSAI
+    let t0 = std::time::Instant::now();
     let bitmap = MtmdBitmap::from_audio_data(audio).map_err(|e| anyhow!(crate::tr!("son illisible : {e}", "unreadable sound: {e}")))?;
     // format de Qwen3-ASR ; la langue imposée donne une sortie en texte seul
     let prompt = format!(
@@ -134,9 +139,12 @@ fn transcribe_piece(model: &LlamaModel, mctx: &MtmdContext, audio: &[f32], name:
         .with_n_threads(threads)
         .with_n_threads_batch(threads);
     let mut ctx = model.new_context(be, ctx_params).map_err(|e| anyhow!("contexte : {e}"))?;
+    let t_ctx = t0.elapsed().as_secs_f64();
     let mut n_past = chunks
         .eval_chunks(mctx, &ctx, 0, 0, n_ctx.min(4096) as i32, true)
         .map_err(|e| anyhow!("écoute du son : {e}"))?;
+    let t_eval = t0.elapsed().as_secs_f64();
+    let mut n_gen = 0;
 
     let vocab = model.vocab();
     let mut sampler = LlamaSampler::greedy();
@@ -166,7 +174,9 @@ fn transcribe_piece(model: &LlamaModel, mctx: &MtmdContext, audio: &[f32], name:
         n_past += 1;
         ctx.decode(&mut batch).map_err(|e| anyhow!("décodage : {e}"))?;
         idx = batch.n_tokens() - 1;
+        n_gen += 1;
     }
+    if prof { eprintln!("PROFIL morceau {:.1} s : contexte {:.3} s, écoute {:.3} s ({} jetons), écriture {:.3} s ({} jetons)", secs, t_ctx, t_eval - t_ctx, chunks.total_tokens(), t0.elapsed().as_secs_f64() - t_eval, n_gen); }
     let text = String::from_utf8_lossy(&bytes).to_string();
     // au cas où le modèle répéterait l'en-tête de langue
     let text = text.rsplit("<asr_text>").next().unwrap_or("").replace("<|im_end|>", "");

@@ -60,6 +60,7 @@ export function stageText(stage: string): string {
     download: t("Téléchargement du son", "Downloading the sound"),
     file: t("Téléchargement du fichier", "Downloading the file"),
     video: t("Finalisation de la vidéo", "Finishing the video"),
+    lighten: t("Allègement de la vidéo", "Making the video lighter"),
     decode: t("Lecture du son", "Reading the sound"),
     model: t("Préparation du modèle", "Preparing the model"),
     transcribe: "Transcription",

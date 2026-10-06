@@ -794,13 +794,19 @@ enum Kind {
 /// Fichiers cités par les leçons. Une vidéo qui porte aussi le son compte
 /// comme audio : sans elle, la leçon n'aurait plus de son.
 fn media_refs(c: &Connection) -> Result<Vec<(PathBuf, Kind)>> {
-    let mut st = c.prepare("SELECT media_path, video_path, cover_path FROM lessons")?;
-    let rows = st.query_map([], |r| Ok((r.get::<_, Option<String>>(0)?, r.get::<_, Option<String>>(1)?, r.get::<_, Option<String>>(2)?)))?;
+    let mut st = c.prepare("SELECT media_path, video_path, cover_path, source FROM lessons")?;
+    let rows = st.query_map([], |r| {
+        Ok((r.get::<_, Option<String>>(0)?, r.get::<_, Option<String>>(1)?, r.get::<_, Option<String>>(2)?, r.get::<_, String>(3)?))
+    })?;
     let mut out = Vec::new();
     for row in rows {
-        let (audio, video, cover) = row?;
+        let (audio, video, cover, source) = row?;
         if let Some(v) = video.filter(|v| Some(v) != audio.as_ref()) {
-            out.push((PathBuf::from(v), Kind::Video));
+            // une vidéo importée d'un fichier (séparée de son son à l'allègement) ne se
+            // retélécharge pas : elle part avec le son, comme avant d'être séparée
+            let b = source.as_bytes();
+            let from_file = source.starts_with('/') || (b.len() > 2 && b[0].is_ascii_alphabetic() && b[1] == b':' && (b[2] == b'\\' || b[2] == b'/'));
+            out.push((PathBuf::from(v), if from_file { Kind::Audio } else { Kind::Video }));
         }
         if let Some(a) = audio {
             out.push((PathBuf::from(a), Kind::Audio));
@@ -1514,6 +1520,31 @@ mod tests {
         drop(c);
         let _ = fs::remove_file(out);
         s
+    }
+
+    #[test]
+    fn local_video_travels_with_its_sound() {
+        let data = temp("localvideo");
+        let c = db::open(&db::path(&data)).unwrap();
+        let mk = |source: &str, n: u32| {
+            db::lesson_create(&c, &db::NewLesson {
+                lang: "it".into(), title: format!("v{n}"), collection: String::new(), kind: "video".into(),
+                source: source.into(), text: "Il faro è alto.".into(),
+                media_path: Some(format!("/m/{n}.light.m4a")), timings: None, video_path: Some(format!("/m/{n}.light.mp4")),
+            })
+            .unwrap();
+        };
+        // vidéo du Mac ou du PC séparée de son son, vidéo de YouTube
+        mk("/Users/lea/Films/cours.mov", 1);
+        mk("C:\\Users\\lea\\cours.mp4", 2);
+        mk("https://www.youtube.com/watch?v=x", 3);
+        let refs = media_refs(&c).unwrap();
+        let kind = |name: &str| refs.iter().find(|(p, _)| p.ends_with(name)).map(|r| r.1);
+        assert_eq!(kind("1.light.mp4"), Some(Kind::Audio));
+        assert_eq!(kind("2.light.mp4"), Some(Kind::Audio));
+        assert_eq!(kind("3.light.mp4"), Some(Kind::Video));
+        drop(c);
+        let _ = fs::remove_dir_all(data);
     }
 
     #[test]

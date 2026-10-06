@@ -372,6 +372,7 @@ fn load(model: &str, gpu: bool) -> Result<(WhisperContext, whisper_rs::WhisperSt
     if gpu {
         cparams.gpu_device(gpu_device());
     }
+    if std::env::var("LUMEN_W_FA").is_ok() { cparams.flash_attn(true); } else // ESSAI
     if let Some(model_preset) = dtw_preset(model) {
         // l'alignement DTW exige l'attention classique
         cparams.flash_attn(false);
@@ -414,7 +415,13 @@ fn run() -> Result<()> {
     let eot = ctx.token_eot();
 
     let threads = threads();
-    let mut params = FullParams::new(SamplingStrategy::BeamSearch { beam_size: 3, patience: -1.0 });
+    // ESSAI (provisoire)
+    let strategy = match std::env::var("LUMEN_W_BEAM").ok().and_then(|v| v.parse::<i32>().ok()) {
+        Some(0) => SamplingStrategy::Greedy { best_of: 1 },
+        Some(b) => SamplingStrategy::BeamSearch { beam_size: b, patience: -1.0 },
+        None => SamplingStrategy::BeamSearch { beam_size: 3, patience: -1.0 },
+    };
+    let mut params = FullParams::new(strategy);
     params.set_n_threads(threads);
     params.set_language(Some(lang.as_str()));
     params.set_translate(false);
@@ -430,6 +437,9 @@ fn run() -> Result<()> {
 
     emit(serde_json::json!({"type":"stage","stage":"transcribe","duration":duration}));
     state.full(params, &audio).map_err(|e| anyhow!("transcription échouée : {e:?}"))?;
+    if std::env::var("LUMEN_W_TIMINGS").is_ok() {
+        ctx.print_timings();
+    }
 
     // mots reconstitués à partir des fragments (un mot commence par une espace) ;
     // les octets sont assemblés avant décodage, pour le cyrillique notamment

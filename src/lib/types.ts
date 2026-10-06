@@ -307,6 +307,41 @@ export type DownloadEvent =
 
 export type ImportEvent = { type: "stage"; stage: string } | { type: "progress"; value: number };
 
+/** Place occupée sur ce Mac (octets), et ce que l'allègement peut encore gagner (`media_usage`). */
+export interface MediaUsage {
+  videos: number;
+  sounds: number;
+  models: number;
+  dicts: number;
+  other: number;
+  video_count: number;
+  sound_count: number;
+  /** fichiers qui peuvent encore être allégés, leur poids, leur poids estimé après */
+  candidates: number;
+  candidate_bytes: number;
+  candidate_after: number;
+  /** l'allègement existe sur ce système (Mac) */
+  supported: boolean;
+}
+
+/** Allègement des leçons déjà importées : fichier en cours. */
+export interface LightenProgress {
+  done: number;
+  total: number;
+  title: string;
+  /** avancement du fichier en cours (0 à 100) */
+  value: number;
+  /** octets gagnés jusqu'ici */
+  saved: number;
+}
+
+export interface LightenReport {
+  done: number;
+  failed: number;
+  saved: number;
+  cancelled: boolean;
+}
+
 /** Son ou vidéo trouvé derrière un lien (miroir de `link::MediaItem`). */
 export interface LinkMedia {
   /** fichier direct, ou adresse lue par yt-dlp (« ytsearch1: » pour un morceau) */

@@ -12,6 +12,7 @@ use tauri::{Emitter, State};
 
 use crate::ai::{self, Priority};
 use crate::backup;
+use crate::compress;
 use crate::db::{self, LessonPatch, NewLesson, PlaylistPatch, TermQuery, TermUpdate};
 use crate::dict::DictResult;
 use crate::discover;
@@ -928,38 +929,6 @@ async fn transcribe_media(
     .map_err(err)
 }
 
-async fn transcribe_into_lesson(
-    state: &AppState,
-    lang: &str,
-    stored: PathBuf,
-    title: String,
-    kind: &str,
-    source: String,
-    video_path: Option<String>,
-    on_event: &Channel<ImportEvent>,
-) -> R<i64> {
-    let (text, timings) = transcribe_media(state, &stored, lang, None, on_event).await?;
-    if text.trim().is_empty() {
-        let _ = std::fs::remove_file(&stored);
-        return Err(t("Aucune parole n'a été reconnue dans ce fichier.", "No speech was recognized in this file.").into());
-    }
-    let lesson = NewLesson {
-        lang: lang.to_string(),
-        title,
-        collection: String::new(),
-        kind: kind.to_string(),
-        source,
-        text,
-        media_path: Some(stored.display().to_string()),
-        timings: Some(timings.clone()),
-        video_path,
-    };
-    let conn = state.db.lock();
-    let id = db::lesson_create(&conn, &lesson).map_err(err)?;
-    db::lesson_set_timings(&conn, id, &timings, db::TIMING_PRECISE).map_err(err)?;
-    Ok(id)
-}
-
 #[tauri::command]
 pub async fn import_media(
     state: State<'_, AppState>,
@@ -976,16 +945,97 @@ pub async fn import_media(
     });
     let ext = src.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
     let is_video = ["mp4", "mov", "m4v", "mkv", "webm"].contains(&ext.as_str());
-    let kind = if is_video { "video" } else { "audio" };
-    let video = if is_video { Some(stored.display().to_string()) } else { None };
-    let res = transcribe_into_lesson(&state, &lang, stored.clone(), title, kind, path, video, &on_event).await;
-    if res.is_err() {
-        let _ = std::fs::remove_file(&stored);
+    let level = compress::Level::of(&state.db.lock());
+    // une vidéo : image et son séparés et allégés pendant la transcription
+    let cancel = Arc::new(AtomicBool::new(false));
+    let split_task = is_video.then(|| {
+        let (from, stop) = (stored.clone(), cancel.clone());
+        tokio::spawn(async move { compress::split(&from, level, &stop, |_| {}).await })
+    });
+    let transcript = transcribe_media(&state, &stored, &lang, None, &on_event).await;
+    let mut media_path = stored.clone();
+    let mut video = is_video.then(|| stored.clone());
+    if let Some(task) = split_task {
+        if transcript.is_ok() {
+            let _ = on_event.send(ImportEvent::Stage { stage: "lighten".into() });
+        } else {
+            cancel.store(true, Ordering::Relaxed);
+        }
+        if let Ok(Ok(Some(l))) = task.await {
+            match (&transcript, l.audio, l.video) {
+                (Ok(_), Some(a), Some(v)) => {
+                    let _ = std::fs::remove_file(&stored);
+                    media_path = a;
+                    video = Some(v);
+                }
+                (_, a, v) => {
+                    for p in [a, v].into_iter().flatten() {
+                        let _ = std::fs::remove_file(p);
+                    }
+                }
+            }
+        }
     }
-    res
+    let remove = |media_path: &PathBuf, video: &Option<PathBuf>| {
+        let _ = std::fs::remove_file(media_path);
+        if let Some(v) = video {
+            let _ = std::fs::remove_file(v);
+        }
+    };
+    let (text, timings) = match transcript {
+        Ok(x) => x,
+        Err(e) => {
+            remove(&media_path, &video);
+            return Err(e);
+        }
+    };
+    if text.trim().is_empty() {
+        remove(&media_path, &video);
+        return Err(t("Aucune parole n'a été reconnue dans ce fichier.", "No speech was recognized in this file.").into());
+    }
+    if !is_video {
+        media_path = compress::audio_or_keep(media_path, level).await;
+    }
+    let lesson = NewLesson {
+        lang: lang.to_string(),
+        title,
+        collection: String::new(),
+        kind: if is_video { "video" } else { "audio" }.to_string(),
+        source: path,
+        text,
+        media_path: Some(media_path.display().to_string()),
+        timings: Some(timings.clone()),
+        video_path: video.map(|v| v.display().to_string()),
+    };
+    let conn = state.db.lock();
+    let id = db::lesson_create(&conn, &lesson).map_err(err)?;
+    db::lesson_set_timings(&conn, id, &timings, db::TIMING_PRECISE).map_err(err)?;
+    Ok(id)
 }
 
 // ---------- import d'un lien : article, vidéo, podcast, Spotify ----------
+
+/// Formats d'image que la fenêtre lit, et réglage d'allègement (Réglages › Stockage).
+fn video_prefs(state: &AppState) -> (Vec<String>, compress::Level) {
+    (state.codecs.lock().clone(), compress::Level::of(&state.db.lock()))
+}
+
+/// Télécharge l'image d'une vidéo dans le format le plus léger que la fenêtre
+/// lit, puis l'allège si elle est restée en H.264 (`compress`).
+#[allow(clippy::too_many_arguments)]
+async fn fetch_video(
+    data_dir: &std::path::Path,
+    ytdlp: &std::path::Path,
+    url: &str,
+    stem: &str,
+    browser: Option<&str>,
+    codecs: &[String],
+    level: compress::Level,
+    on_progress: &mut (dyn FnMut(f64) + Send),
+) -> anyhow::Result<PathBuf> {
+    let p = media::yt_video(data_dir, ytdlp, url, stem, browser, codecs, level.max_side(), on_progress).await?;
+    Ok(compress::video_or_keep(p, level).await)
+}
 
 /// Regarde ce qu'il y a derrière un lien : voir `link::probe`.
 #[tauri::command]
@@ -1021,14 +1071,20 @@ pub async fn import_link(
     };
     let stem = media::new_stem();
     let mut title = item.title.trim().to_string();
+    let (codecs, level) = video_prefs(&state);
     let mut video: Option<String> = None;
     let mut video_task = None;
-    let audio = if item.direct {
+    let mut split_task = None;
+    let split_stop = Arc::new(AtomicBool::new(false));
+    let mut audio = if item.direct {
         send(if item.video { "file" } else { "download" });
         let p = link::download(&data_dir, &item.url, &stem, item.video, &mut prog).await.map_err(err)?;
-        // une vidéo téléchargée telle quelle porte aussi le son
+        // une vidéo téléchargée telle quelle porte aussi le son : image et son
+        // séparés et allégés pendant la transcription
         if item.video {
             video = Some(p.display().to_string());
+            let (from, stop) = (p.clone(), split_stop.clone());
+            split_task = Some(tokio::spawn(async move { compress::split(&from, level, &stop, |_| {}).await }));
         }
         p
     } else {
@@ -1041,12 +1097,12 @@ pub async fn import_link(
         if title.is_empty() {
             title = found;
         }
-        // l'image se télécharge pendant la transcription
+        // l'image se télécharge (et s'allège) pendant la transcription
         if item.video {
             let (dd, yt, u, st, br) = (data_dir.clone(), ytdlp.clone(), item.url.clone(), stem.clone(), browser.clone());
             video_task = Some(tokio::spawn(async move {
                 let mut quiet = |_p: f64| {};
-                media::yt_video(&dd, &yt, &u, &st, br.as_deref(), &mut quiet).await
+                fetch_video(&dd, &yt, &u, &st, br.as_deref(), &codecs, level, &mut quiet).await
             }));
         }
         a
@@ -1071,6 +1127,30 @@ pub async fn import_link(
         if let Ok(Ok(p)) = task.await {
             video = Some(p.display().to_string());
         }
+    }
+    if let Some(task) = split_task {
+        if transcript.is_ok() {
+            send("lighten");
+        } else {
+            split_stop.store(true, Ordering::Relaxed);
+        }
+        if let Ok(Ok(Some(l))) = task.await {
+            match (&transcript, l.audio, l.video) {
+                (Ok(_), Some(a), Some(v)) => {
+                    let _ = std::fs::remove_file(&audio);
+                    audio = a;
+                    video = Some(v.display().to_string());
+                }
+                (_, a, v) => {
+                    for p in [a, v].into_iter().flatten() {
+                        let _ = std::fs::remove_file(p);
+                    }
+                }
+            }
+        }
+    } else if transcript.is_ok() {
+        // le son seul (YouTube, podcast) s'allège après la transcription, faite sur l'original
+        audio = compress::audio_or_keep(audio, level).await;
     }
     let cover = match cover_task {
         Some(task) => task.await.ok().flatten(),
@@ -1143,12 +1223,15 @@ pub async fn lesson_resync(state: State<'_, AppState>, id: i64, on_event: Channe
 }
 
 /// Télécharge l'image d'une vidéo déjà transcrite (leçons importées sans vidéo).
+/// `replace` : l'image présente ne se lit pas sur cet ordinateur (venue d'un
+/// autre par la sauvegarde, dans un format que ce moteur ignore) ; elle est remplacée.
 #[tauri::command]
-pub async fn lesson_fetch_video(state: State<'_, AppState>, id: i64, on_event: Channel<ImportEvent>) -> R<String> {
+pub async fn lesson_fetch_video(state: State<'_, AppState>, id: i64, replace: Option<bool>, on_event: Channel<ImportEvent>) -> R<String> {
     let (source, current) = db::lesson_source(&state.db.lock(), id).map_err(err)?;
-    if let Some(v) = current {
-        if std::path::Path::new(&v).exists() && !v.ends_with(".m4a") {
-            return Ok(v);
+    let replace = replace.unwrap_or(false);
+    if let Some(v) = &current {
+        if !replace && std::path::Path::new(v).exists() && !v.ends_with(".m4a") {
+            return Ok(v.clone());
         }
     }
     if !source.starts_with("http") {
@@ -1165,10 +1248,126 @@ pub async fn lesson_fetch_video(state: State<'_, AppState>, id: i64, on_event: C
     let mut prog = |p: f64| {
         let _ = on_event.send(ImportEvent::Progress { value: p });
     };
-    let path = media::yt_video(&data_dir, &ytdlp, &source, &media::new_stem(), browser.as_deref(), &mut prog).await.map_err(err)?;
+    let (codecs, level) = video_prefs(&state);
+    let path = fetch_video(&data_dir, &ytdlp, &source, &media::new_stem(), browser.as_deref(), &codecs, level, &mut prog).await.map_err(err)?;
     let p = path.display().to_string();
+    let sound = db::lesson_media(&state.db.lock(), id).map_err(err)?.2;
     db::lesson_set_video(&state.db.lock(), id, &p).map_err(err)?;
+    // l'ancienne image, illisible ici, laisse la place (jamais le son de la leçon)
+    if let Some(old) = current.filter(|o| replace && *o != p && Some(o) != sound.as_ref()) {
+        let _ = std::fs::remove_file(old);
+    }
     Ok(p)
+}
+
+// ---------- stockage : vidéos et sons allégés ----------
+
+/// Formats d'image que le moteur de la fenêtre lit (« vp9 », « av1 »), annoncés
+/// au démarrage : les vidéos en ligne arrivent dans le plus léger d'entre eux.
+#[tauri::command]
+pub async fn media_codecs(state: State<'_, AppState>, codecs: Vec<String>) -> R<()> {
+    *state.codecs.lock() = codecs;
+    Ok(())
+}
+
+/// Place occupée sur ce Mac (octets), et ce que l'allègement peut encore gagner.
+#[derive(Serialize)]
+pub struct MediaUsage {
+    pub videos: u64,
+    pub sounds: u64,
+    pub models: u64,
+    pub dicts: u64,
+    pub other: u64,
+    pub video_count: u32,
+    pub sound_count: u32,
+    /// fichiers qui peuvent encore être allégés, leur poids et leur poids estimé après
+    pub candidates: u32,
+    pub candidate_bytes: u64,
+    pub candidate_after: u64,
+    /// l'allègement existe sur ce système (Mac)
+    pub supported: bool,
+}
+
+fn dir_size(p: &std::path::Path) -> u64 {
+    let Ok(rd) = std::fs::read_dir(p) else { return 0 };
+    rd.flatten()
+        .map(|e| match e.file_type() {
+            Ok(t) if t.is_dir() => dir_size(&e.path()),
+            Ok(_) => e.metadata().map(|m| m.len()).unwrap_or(0),
+            Err(_) => 0,
+        })
+        .sum()
+}
+
+#[tauri::command]
+pub async fn media_usage(state: State<'_, AppState>) -> R<MediaUsage> {
+    let files = compress::lesson_files(&state.db.lock()).map_err(err)?;
+    let level = compress::Level::of(&state.db.lock());
+    let data_dir = state.data_dir.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut u = MediaUsage {
+            videos: 0,
+            sounds: 0,
+            models: dir_size(&data_dir.join("models")),
+            dicts: dir_size(&data_dir.join("dicts")),
+            other: 0,
+            video_count: 0,
+            sound_count: 0,
+            candidates: 0,
+            candidate_bytes: 0,
+            candidate_after: 0,
+            supported: cfg!(target_os = "macos"),
+        };
+        for compress::LessonFile { path, role, .. } in &files {
+            let p = std::path::Path::new(path);
+            let Ok(meta) = std::fs::metadata(p) else { continue };
+            if *role == compress::Role::Sound {
+                u.sounds += meta.len();
+                u.sound_count += 1;
+            } else {
+                u.videos += meta.len();
+                u.video_count += 1;
+            }
+            if let Some(c) = compress::candidate(p, level, *role) {
+                u.candidates += 1;
+                u.candidate_bytes += c.bytes;
+                u.candidate_after += c.estimate;
+            }
+        }
+        u.other = dir_size(&data_dir).saturating_sub(u.videos + u.sounds + u.models + u.dicts);
+        u
+    })
+    .await
+    .map_err(err)
+}
+
+/// Allège les vidéos et les sons des leçons déjà importées, l'un après l'autre
+/// (voir `compress::lighten_lessons`). Annulable avec `model_cancel("lighten")` :
+/// ce qui est fait reste fait.
+#[tauri::command]
+pub async fn media_lighten(state: State<'_, AppState>, on_event: Channel<compress::Progress>) -> R<compress::Report> {
+    let key = "lighten".to_string();
+    let cancel = Arc::new(AtomicBool::new(false));
+    {
+        let mut dl = state.downloads.lock();
+        if dl.contains_key(&key) {
+            return Err(t("L'allègement est déjà en cours.", "Lightening is already under way.").into());
+        }
+        dl.insert(key.clone(), cancel.clone());
+    }
+    let level = compress::Level::of(&state.db.lock());
+    let send = |p: compress::Progress| {
+        let _ = on_event.send(p);
+    };
+    let refetch = compress::Refetch {
+        data_dir: state.data_dir.clone(),
+        codecs: state.codecs.lock().clone(),
+        browser: db::setting(&state.db.lock(), "youtube_browser").filter(|b| !b.is_empty()),
+    };
+    let res =
+        compress::lighten_lessons(&state.db, &media::media_dir(&state.data_dir), level, Some(&refetch), &cancel, &send).await.map_err(err);
+    state.downloads.lock().remove(&key);
+    res
 }
 
 // ---------- IA en ligne ----------
@@ -1494,11 +1693,13 @@ pub async fn import_song(state: State<'_, AppState>, lang: String, song: SongIte
     send("download");
     let stem = media::new_stem();
     let (audio, _) = media::yt_audio(&data_dir, &ytdlp, &url, &stem, browser.as_deref(), &mut prog).await.map_err(err)?;
+    // le son d'une chanson reste tel quel (la musique avant tout) ; l'image du clip s'allège
+    let (codecs, level) = video_prefs(&state);
     let video_task = song.video.then(|| {
         let (dd, yt, u, st, br) = (data_dir.clone(), ytdlp.clone(), url.clone(), stem.clone(), browser.clone());
         tokio::spawn(async move {
             let mut quiet = |_p: f64| {};
-            media::yt_video(&dd, &yt, &u, &st, br.as_deref(), &mut quiet).await
+            fetch_video(&dd, &yt, &u, &st, br.as_deref(), &codecs, level, &mut quiet).await
         })
     });
     let cover_task = (!song.image.is_empty() && !song.video).then(|| {

@@ -23,6 +23,7 @@ import { panelMode, panelOptions, readerLook, readFont, SIZE_MAX, SIZE_MIN } fro
 import { FontPicker, LayoutPicker, PaperPicker, lineHeightOptions, widthOptions } from "./reader/Display";
 import type { GpuInfo, LangCode, ModelRow } from "../lib/types";
 import { BackupSection } from "./BackupSection";
+import { StorageSection } from "./StorageSection";
 import { LingqSection } from "./LingqSection";
 import { EnginePicker, OnlineSection } from "./OnlineSection";
 import { useOnline } from "../lib/online";
@@ -169,6 +170,16 @@ const groups = (): { title: string | null; tabs: Tab[] }[] => [
           "A copy of your progress in your iCloud Drive, Dropbox, Google Drive or OneDrive: words, phrases, lessons, playlists, conversations and settings. If this Mac is wiped or replaced, you get it back in one click. It goes through no Lumen server: only your account receives it.",
         ),
         keys: "sauvegarde icloud drive dropbox google drive onedrive box proton pcloud nextcloud nuage cloud dossier cle usb disque emplacement restaurer historique audio videos backup folder usb disk location restore history",
+      },
+      {
+        id: "storage",
+        icon: "disk",
+        label: t("Stockage", "Storage"),
+        lead: t(
+          "Ce que Lumen garde sur ce Mac, et des vidéos et des sons importés bien plus légers, à qualité presque identique.",
+          "What Lumen keeps on this Mac, and imported videos and sounds that take far less space, at nearly identical quality.",
+        ),
+        keys: "stockage espace disque place occupee go mo videos sons audio compression compresser alleger allegement leger lourd hevc h265 aac mono qualite originale compacte 720p 1080p modeles dictionnaires storage disk space used compress lighten lighter heavy quality original compact models dictionaries",
       },
       {
         id: "lingq",
@@ -427,6 +438,8 @@ function Pane({ tab }: { tab: SettingsTab }) {
       return <VideosPane />;
     case "backup":
       return <BackupSection />;
+    case "storage":
+      return <StorageSection />;
     case "lingq":
       return <LingqSection />;
     case "about":

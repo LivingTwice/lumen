@@ -8,11 +8,12 @@ import { Shortcuts } from "./components/Shortcuts";
 import { Sidebar } from "./components/Sidebar";
 import { WindowControls } from "./components/WindowControls";
 import { Orb, Toasts } from "./components/ui";
-import { isTauri } from "./lib/api";
+import { api, isTauri } from "./lib/api";
 import { MEDIA_EXT, TEXT_EXT, extOf } from "./lib/importers";
 import { startBackupEvents } from "./lib/backup";
 import { setUiLang, t, type UiLang } from "./lib/i18n";
 import { useAppMenu, useWindowsKeys } from "./lib/menu";
+import { playableCodecs } from "./lib/platform";
 import { useApp } from "./lib/store";
 import { startUpdateChecks } from "./lib/updater";
 import { ImportSheet } from "./views/ImportSheet";
@@ -107,6 +108,10 @@ export function App() {
 
   useEffect(() => {
     if (isTauri && navigator.userAgent.includes("Mac")) document.documentElement.classList.add("vibrant");
+    // formats d'image que cette fenêtre lit : les vidéos en ligne arrivent dans le plus léger
+    api()
+      .mediaCodecs(playableCodecs())
+      .catch(() => {});
     init()
       .then(() => {
         startUpdateChecks();

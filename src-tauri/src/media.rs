@@ -703,22 +703,69 @@ pub async fn yt_audio(
     Ok((PathBuf::from(file), title))
 }
 
-/// Télécharge l'image de la vidéo (sans le son), en H.264 jusqu'en 1080p :
-/// lisible partout sur Mac, synchronisée avec la piste audio.
+/// Choix de l'image à télécharger (`-f` puis `-S` de yt-dlp) : la plus légère
+/// de celles que le moteur de la fenêtre lit (`codecs` : « av1 », « vp9 » ; le
+/// H.264 toujours), à la meilleure définition jusqu'à `max_side` (côté court :
+/// une vidéo en hauteur compte par sa largeur), 30 images/s de préférence, sans
+/// HDR. Mesuré sur des vidéos d'apprenants : en 1080p, le VP9 de YouTube pèse
+/// 53 à 68 % du H.264 et l'AV1 43 à 70 %, sans rien perdre (même original).
+pub fn video_format(codecs: &[String], max_side: u32) -> (String, String) {
+    let mut accepted = vec!["avc1"];
+    if codecs.iter().any(|c| c == "vp9") {
+        accepted.push("vp0?9");
+    }
+    if codecs.iter().any(|c| c == "av1") {
+        accepted.push("av01");
+    }
+    let re = accepted.join("|");
+    let format = format!("bv*[vcodec~='^({re})'][dynamic_range=SDR]/bv*[vcodec~='^({re})']/bv*[vcodec^=avc1]/bv*[ext=mp4]/b[ext=mp4]/bv*/b");
+    // à définition égale, le fichier le plus petit ; en https plutôt qu'en HLS (plus lent)
+    let sort = format!("res:{max_side},fps:30,proto,+size,+br");
+    (format, sort)
+}
+
+/// L'image que `yt_video` choisirait, sans rien télécharger : son codec et son
+/// poids annoncé (0 s'il est inconnu).
+pub async fn yt_video_choice(
+    data_dir: &Path,
+    ytdlp: &Path,
+    url: &str,
+    browser: Option<&str>,
+    codecs: &[String],
+    max_side: u32,
+) -> Result<(String, u64)> {
+    let (format, sort) = video_format(codecs, max_side);
+    let args: Vec<String> = vec!["-J".into(), "-f".into(), format, "-S".into(), sort, url.into()];
+    let mut quiet = |_p: f64| {};
+    let out = run_with_fallback(data_dir, ytdlp, &args, browser, &mut quiet).await?;
+    let json = out.iter().find(|l| l.starts_with('{')).ok_or_else(|| anyhow!(crate::i18n::t("vidéo illisible", "unreadable video")))?;
+    let v: serde_json::Value = serde_json::from_str(json)?;
+    let codec = v["vcodec"].as_str().unwrap_or("").to_string();
+    let size = v["filesize"].as_u64().or_else(|| v["filesize_approx"].as_u64()).unwrap_or(0);
+    Ok((codec, size))
+}
+
+/// Télécharge l'image de la vidéo (sans le son), synchronisée avec la piste
+/// audio : voir `video_format` (`codecs`, `max_side`).
 pub async fn yt_video(
     data_dir: &Path,
     ytdlp: &Path,
     url: &str,
     stem: &str,
     browser: Option<&str>,
+    codecs: &[String],
+    max_side: u32,
     on_progress: &mut (dyn FnMut(f64) + Send),
 ) -> Result<PathBuf> {
     let dir = media_dir(data_dir);
     std::fs::create_dir_all(&dir)?;
     let template = dir.join(format!("{stem}.video.%(ext)s"));
+    let (format, sort) = video_format(codecs, max_side);
     let args: Vec<String> = vec![
         "-f".into(),
-        "bv*[vcodec^=avc1][height<=1080][ext=mp4]/bv*[vcodec^=avc1][height<=1080]/bv*[ext=mp4][height<=1080]/b[ext=mp4]".into(),
+        format,
+        "-S".into(),
+        sort,
         "--no-simulate".into(),
         "--print".into(),
         "after_move:FILE:%(filepath)s".into(),

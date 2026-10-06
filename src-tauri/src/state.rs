@@ -25,4 +25,8 @@ pub struct AppState {
     pub discover: crate::discover::Store,
     /// niveau estimé par langue, avec l'empreinte des mots connus qui l'a donné
     pub levels: Mutex<HashMap<String, (String, crate::level::Estimate)>>,
+    /// formats d'image que le moteur de la fenêtre sait lire (« vp9 », « av1 »),
+    /// annoncés par l'interface au démarrage : les vidéos en ligne arrivent dans
+    /// le plus léger d'entre eux (`media::video_format`)
+    pub codecs: Mutex<Vec<String>>,
 }

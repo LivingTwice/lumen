@@ -77,7 +77,11 @@ export function VideoStage({ lesson, tokens, terms, cursor, playing, onHost, onW
   const [ratio, setRatio] = useState(16 / 9);
   const host = useRef<HTMLDivElement | null>(null);
 
-  const hasVideo = !!lesson.video_path;
+  // image présente mais illisible ici (venue d'un autre ordinateur par la sauvegarde, dans
+  // un format que ce moteur ne lit pas) : on propose de la télécharger à nouveau
+  const [broken, setBroken] = useState(false);
+  useEffect(() => setBroken(false), [lesson.video_path]);
+  const hasVideo = !!lesson.video_path && !broken;
   const canFetch = !hasVideo && /^https?:\/\//.test(lesson.source);
 
   const setHost = useCallback(
@@ -97,12 +101,19 @@ export function VideoStage({ lesson, tokens, terms, cursor, playing, onHost, onW
       if (v && v.videoWidth && v.videoHeight) setRatio(v.videoWidth / v.videoHeight);
     };
     read();
+    // image illisible (format inconnu de ce moteur, fichier absent)
+    const fail = (e: Event) => {
+      const v = e.target as HTMLVideoElement;
+      if (v.tagName === "VIDEO" && v.error && (v.error.code === MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED || v.error.code === MediaError.MEDIA_ERR_DECODE)) setBroken(true);
+    };
     // la vidéo est insérée plus tard par le lecteur : on écoute en phase de capture
     el.addEventListener("loadedmetadata", read, true);
     el.addEventListener("resize", read, true);
+    el.addEventListener("error", fail, true);
     return () => {
       el.removeEventListener("loadedmetadata", read, true);
       el.removeEventListener("resize", read, true);
+      el.removeEventListener("error", fail, true);
     };
   }, []);
 
@@ -250,9 +261,13 @@ export function VideoStage({ lesson, tokens, terms, cursor, playing, onHost, onW
   const fetchVideo = async () => {
     setFetching(0);
     try {
-      const path = await api().lessonFetchVideo(lesson.id, (e) => {
-        if (e.type === "progress") setFetching(e.value);
-      });
+      const path = await api().lessonFetchVideo(
+        lesson.id,
+        (e) => {
+          if (e.type === "progress") setFetching(e.value);
+        },
+        broken,
+      );
       onVideoReady(path);
       toast(t("La vidéo est prête", "The video is ready"), "light");
     } catch (e) {
@@ -272,9 +287,13 @@ export function VideoStage({ lesson, tokens, terms, cursor, playing, onHost, onW
             {canFetch ? (
               fetching === null ? (
                 <>
-                  <strong>{t("L'image de cette vidéo n'a pas encore été téléchargée", "The picture of this video hasn't been downloaded yet")}</strong>
+                  <strong>
+                    {broken
+                      ? t("Cette vidéo ne se lit pas sur ce Mac", "This video doesn't play on this Mac")
+                      : t("L'image de cette vidéo n'a pas encore été téléchargée", "The picture of this video hasn't been downloaded yet")}
+                  </strong>
                   <button className="btn sm video-get" onClick={(e) => (e.stopPropagation(), fetchVideo())}>
-                    <Icon name="download" size={14} /> {t("Télécharger la vidéo", "Download the video")}
+                    <Icon name="download" size={14} /> {broken ? t("La télécharger à nouveau", "Download it again") : t("Télécharger la vidéo", "Download the video")}
                   </button>
                 </>
               ) : (
@@ -285,6 +304,8 @@ export function VideoStage({ lesson, tokens, terms, cursor, playing, onHost, onW
                   </div>
                 </>
               )
+            ) : broken ? (
+              <strong>{t("Cette vidéo ne se lit pas sur ce Mac", "This video doesn't play on this Mac")}</strong>
             ) : (
               <strong>{t("Leçon audio", "Audio lesson")}</strong>
             )}

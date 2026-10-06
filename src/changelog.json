@@ -1,6 +1,60 @@
 {
-  "_lisezmoi": "Nouveautés montrées après chaque mise à jour (components/News.tsx) et notes de publication. Ajouter ce qui change sous la version \"next\" au fil du travail ; « Publier une version » lui donne son numéro et sa date. Icônes : noms de components/Icon.tsx. Actions : \"tour\" (visite guidée), \"guide\", \"settings:<page>\" (profile, general, langs, reading, voice, discover, podcasts, ai, videos, backup, lingq, about), \"import:<onglet>\" (text, link, file, media, podcast), \"view:<vue>\" (library, discover, playlists, chat, vocab, progress).",
+  "_lisezmoi": "Nouveautés montrées après chaque mise à jour (components/News.tsx) et notes de publication. Ajouter ce qui change sous la version \"next\" au fil du travail ; « Publier une version » lui donne son numéro et sa date. Icônes : noms de components/Icon.tsx. Actions : \"tour\" (visite guidée), \"guide\", \"settings:<page>\" (profile, general, langs, reading, voice, discover, podcasts, ai, videos, backup, storage, lingq, about), \"import:<onglet>\" (text, link, file, media, podcast), \"view:<vue>\" (library, discover, playlists, chat, vocab, progress).",
   "releases": [
+    {
+      "version": "1.0.0",
+      "date": "2026-10-06",
+      "title": { "fr": "Plus léger que jamais", "en": "Lighter than ever" },
+      "items": [
+        {
+          "icon": "disk",
+          "title": { "fr": "De 40 à 75 % de place en moins, sans attendre", "en": "40 to 75% less space, without waiting" },
+          "body": {
+            "fr": "Vos vidéos et vos sons prennent de 40 à environ 75 % de place en moins. 40 % sans perte de qualité visible, avec le réglage « Allégée » choisi d'office ; jusqu'à environ 75 % en « Compacte » (vidéos en 720p). Rien de plus à attendre : la puce vidéo du Mac réencode l'image pendant que Lumen transcrit, et votre leçon est prête aussi vite qu'avant.",
+            "en": "Your videos and sounds take 40 to about 75% less space. 40% with no visible loss of quality, with the “Lighter” setting chosen for you; up to about 75% with “Compact” (videos in 720p). Nothing more to wait for: the Mac's video chip re-encodes the picture while Lumen transcribes, and your lesson is ready as fast as before."
+          },
+          "action": "settings:storage",
+          "only": "mac"
+        },
+        {
+          "icon": "wave",
+          "title": { "fr": "Pas une milliseconde de décalage", "en": "Not a millisecond out of sync" },
+          "body": {
+            "fr": "Le son allégé ne bouge pas d'une milliseconde : la lanterne reste calée au mot près, comme avant. Il passe en AAC, en mono quand il n'y a qu'une voix : les MP3 de LingQ prennent souvent moitié moins de place.",
+            "en": "The lighter sound doesn't move by a single millisecond: the lantern stays in sync word by word, as before. It becomes AAC, in mono when there's a single voice: LingQ MP3s often take half the space."
+          },
+          "only": "mac"
+        },
+        {
+          "icon": "sparkle",
+          "title": { "fr": "Vos leçons déjà importées aussi", "en": "Your lessons already imported too" },
+          "body": {
+            "fr": "Réglages › Stockage montre ce qui occupe la place (modèles d'IA, vidéos, sons, dictionnaires) et allège d'un clic les leçons déjà importées, pendant que vous continuez à lire. Les leçons et la lanterne ne changent pas.",
+            "en": "Settings › Storage shows what takes up space (AI models, videos, sounds, dictionaries) and lightens the lessons already imported in one click, while you keep reading. The lessons and the lantern don't change."
+          },
+          "action": "settings:storage",
+          "only": "mac"
+        },
+        {
+          "icon": "video",
+          "title": { "fr": "Le format le plus léger, sans rien perdre", "en": "The lightest format, losing nothing" },
+          "body": {
+            "fr": "Les vidéos en ligne arrivent dans le format le plus léger que Lumen sait lire : du VP9 ou de l'AV1 quand YouTube en propose, souvent deux fois moins lourds que le H.264, à qualité égale.",
+            "en": "Online videos arrive in the lightest format Lumen can play: VP9 or AV1 when YouTube offers them, often half the weight of H.264, at equal quality."
+          }
+        },
+        {
+          "icon": "disk",
+          "title": { "fr": "Réglages › Stockage", "en": "Settings › Storage" },
+          "body": {
+            "fr": "Ce qui occupe la place sur ce PC (modèles d'IA, vidéos, sons, dictionnaires), et des vidéos en ligne en 720p si votre disque est à l'étroit.",
+            "en": "What takes up space on this PC (AI models, videos, sounds, dictionaries), and online videos in 720p if your disk is short on space."
+          },
+          "action": "settings:storage",
+          "only": "windows"
+        }
+      ]
+    },
     {
       "version": "0.8.2",
       "date": "2026-10-06",

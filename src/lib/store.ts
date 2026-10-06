@@ -8,7 +8,7 @@ import { STARTERS, starterCollection } from "./langs";
 export type View = "library" | "discover" | "playlists" | "reader" | "chat" | "vocab" | "progress" | "settings";
 
 /** Catégories des Réglages, chacune sur sa propre page. */
-export type SettingsTab = "profile" | "general" | "langs" | "reading" | "voice" | "discover" | "podcasts" | "ai" | "videos" | "backup" | "lingq" | "about";
+export type SettingsTab = "profile" | "general" | "langs" | "reading" | "voice" | "discover" | "podcasts" | "ai" | "videos" | "backup" | "storage" | "lingq" | "about";
 
 /** Onglets de la feuille d'import. */
 export type ImportTab = "text" | "link" | "file" | "media" | "podcast";
@@ -71,6 +71,9 @@ export const DEFAULTS: Record<string, string> = {
   backup_dir: "",
   backup_audio: "1",
   backup_video: "0",
+  // vidéos et sons importés (src-tauri/src/compress.rs) : "original" (rien n'est réencodé),
+  // "balanced" (HEVC et AAC, presque sans perte visible), "compact" (720p, sons plus légers)
+  media_quality: "balanced",
   // Découvrir : lecture quotidienne des sources ("0" : seulement sur demande)
   discover_auto: "1",
   // progrès : minutes de temps actif dans les leçons pour que la journée compte dans la série

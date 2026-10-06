@@ -4,6 +4,7 @@ mod ai;
 mod asr;
 mod backup;
 mod commands;
+mod compress;
 mod db;
 mod dict;
 mod discover;
@@ -47,6 +48,8 @@ pub fn run() {
             i18n::set(&db::setting(&conn, "ui_lang").unwrap_or_default());
             // Windows : la carte graphique pour l'IA, sauf si l'apprenant a choisi le processeur
             ai::set_gpu(db::setting(&conn, "ai_gpu").as_deref() != Some("0"));
+            // allègement des médias : fichiers d'un travail interrompu, originaux mis de côté
+            compress::sweep(&media::media_dir(&data_dir), |p| db::media_used(&conn, p, None));
             let resource_dir = app.path().resource_dir()?.join("dicts");
             let dicts = dict::Dicts::new(resource_dir, dict::dict_dir(&data_dir));
             let discover = discover::Store::open(&data_dir);
@@ -61,6 +64,7 @@ pub fn run() {
                 backup: backup::Tracker::default(),
                 discover,
                 levels: Mutex::new(HashMap::new()),
+                codecs: Mutex::new(Vec::new()),
             });
             // barre des menus (construite par l'interface, lib/menu.ts) : l'élément choisi lui
             // revient par son identifiant ; les actions JavaScript des éléments de sous-menus
@@ -119,6 +123,9 @@ pub fn run() {
             commands::link_probe,
             commands::import_link,
             commands::lesson_fetch_video,
+            commands::media_codecs,
+            commands::media_usage,
+            commands::media_lighten,
             commands::lesson_resync,
             commands::lingq_scan,
             commands::lingq_import,

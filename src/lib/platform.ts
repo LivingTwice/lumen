@@ -26,6 +26,22 @@ function detect(): boolean {
 /** L'app tourne sous Windows (sinon : sur Mac, ou dans un navigateur). */
 export const isWindows = detect();
 
+/**
+ * Formats d'image que le moteur de cette fenêtre lit, en plus du H.264 (« vp9 »,
+ * « av1 ») : les vidéos en ligne arrivent dans le plus léger (`media::video_format`).
+ * WebKit (Mac) lit le VP9 sur les macOS récents, l'AV1 seulement avec une puce M3 ou
+ * plus récente ; WebView2 (Windows) lit les deux.
+ */
+export function playableCodecs(): string[] {
+  if (typeof document === "undefined") return [];
+  const v = document.createElement("video");
+  const sure = (type: string) => v.canPlayType(type) === "probably";
+  const out: string[] = [];
+  if (sure('video/webm; codecs="vp9"')) out.push("vp9");
+  if (sure('video/mp4; codecs="av01.0.08M.08"')) out.push("av1");
+  return out;
+}
+
 /** Touche des raccourcis, telle qu'on l'écrit : ⌘ sur Mac, Ctrl sous Windows. */
 export const modKey = isWindows ? "Ctrl" : "⌘";
 

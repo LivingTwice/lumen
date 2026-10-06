@@ -433,6 +433,35 @@ pub fn lesson_delete(c: &Connection, id: i64) -> Result<Vec<String>> {
     Ok(out)
 }
 
+/// Son, image et adresse d'origine de chaque leçon qui a un son ou une image (pour les alléger).
+#[allow(clippy::type_complexity)]
+pub fn media_files(c: &Connection) -> Result<Vec<(i64, String, Option<String>, Option<String>, String)>> {
+    let mut st = c.prepare(
+        "SELECT id, title, media_path, video_path, source FROM lessons WHERE media_path IS NOT NULL OR video_path IS NOT NULL ORDER BY id",
+    )?;
+    let rows = st.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)))?;
+    Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+}
+
+/// Remplace un fichier par sa version allégée dans toutes les leçons qui le
+/// citent : le son (`audio`), l'image (`video`), ou les deux quand une vidéo
+/// qui portait son son a été séparée.
+pub fn media_replace(c: &Connection, old: &str, audio: Option<&str>, video: Option<&str>) -> Result<()> {
+    if let Some(a) = audio {
+        c.execute("UPDATE lessons SET media_path=?1 WHERE media_path=?2", params![a, old])?;
+    }
+    if let Some(v) = video {
+        c.execute("UPDATE lessons SET video_path=?1 WHERE video_path=?2", params![v, old])?;
+    }
+    Ok(())
+}
+
+/// Le fichier est-il le son ou l'image d'une leçon ? `lesson` : d'une leçon précise.
+pub fn media_used(c: &Connection, path: &str, lesson: Option<i64>) -> bool {
+    let sql = "SELECT 1 FROM lessons WHERE (media_path=?1 OR video_path=?1) AND (?2 IS NULL OR id=?2) LIMIT 1";
+    c.query_row(sql, params![path, lesson], |_| Ok(())).optional().ok().flatten().is_some()
+}
+
 pub fn lesson_set_video(c: &Connection, id: i64, path: &str) -> Result<()> {
     c.execute("UPDATE lessons SET video_path=?1 WHERE id=?2", params![path, id])?;
     Ok(())

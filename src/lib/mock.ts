@@ -71,6 +71,10 @@ const today = () => ymd(new Date());
 const addDays = (d: Date, n: number) => new Date(d.getFullYear(), d.getMonth(), d.getDate() + n);
 const parseDay = (s: string) => new Date(Number(s.slice(0, 4)), Number(s.slice(5, 7)) - 1, Number(s.slice(8, 10)));
 const emptyDay = (day: string): DayStat => ({ day, words_read: 0, known_added: 0, lingqs: 0, listen_secs: 0, learn_secs: 0, goal_met: false });
+/** allègement simulé : déjà fait, arrêt demandé */
+let mockLightened = false;
+let mockLightenStop = false;
+
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 let lingqCancelled = false;
@@ -984,6 +988,45 @@ export function createMockApi(): Api {
     },
     async lessonFetchVideo() {
       throw t("Le téléchargement de vidéos fonctionne dans l'application Mac.", "Downloading videos works in the Mac app.");
+    },
+    async mediaCodecs() {},
+    async mediaUsage() {
+      // une bibliothèque crédible : quelques vidéos YouTube en H.264, des MP3 de LingQ
+      const MB = 1_000_000;
+      const left = mockLightened ? 0 : 1;
+      return {
+        videos: (mockLightened ? 690 : 1162) * MB,
+        sounds: (mockLightened ? 270 : 530) * MB,
+        models: 5600 * MB,
+        dicts: 275 * MB,
+        other: 41 * MB,
+        video_count: 6,
+        sound_count: 240,
+        candidates: left * 241,
+        candidate_bytes: left * 1640 * MB,
+        candidate_after: left * 905 * MB,
+        supported: true,
+      };
+    },
+    async mediaLighten(onEvent) {
+      mockLightenStop = false;
+      const titles = db.lessons.length
+        ? db.lessons.slice(0, 6).map((l) => l.title)
+        : [t("Une promenade à Rome", "A walk in Rome"), t("Au marché", "At the market"), t("Les nouvelles du jour", "Today's news")];
+      let saved = 0;
+      for (let i = 0; i < titles.length; i++) {
+        for (let v = 0; v <= 100; v += 20) {
+          if (mockLightenStop) return { done: i, failed: 0, saved, cancelled: true };
+          onEvent({ done: i, total: titles.length, title: titles[i], value: v, saved });
+          await sleep(120);
+        }
+        saved += 120_000_000;
+      }
+      mockLightened = true;
+      return { done: titles.length, failed: 0, saved, cancelled: false };
+    },
+    async mediaLightenCancel() {
+      mockLightenStop = true;
     },
     async lessonResync(id, onEvent) {
       const l = db.lessons.find((x) => x.id === id);

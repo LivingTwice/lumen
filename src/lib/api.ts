@@ -1,4 +1,4 @@
-import type { AppInfo, BackupInfo, BackupPlace, BackupRestored, BackupStatus, ChatEvent, ChatOptions, ChatPatch, ChatReply, ChatSummary, ChatThread, DictResult, DictStatus, DiscoverFeed, DiscoverReport, DownloadEvent, GeminiModels, GoalReached, GpuInfo, ImportEvent, LangCode, LessonSummary, LevelEstimate, LinkInfo, LinkMedia, LingqEvent, LingqLang, LingqPlan, LingqReport, Lyrics, MediaStream, ModelRow, NewLesson, OnlineCheck, OpenedLesson, Playlist, PlaylistPatch, PodcastRequest, SearchPage, SearchPlatform, SongItem, Stats, Term, TermQuery, TextStats, WordAnswer, VoicedLesson } from "./types";
+import type { AppInfo, BackupInfo, BackupPlace, BackupRestored, BackupStatus, ChatEvent, ChatOptions, ChatPatch, ChatReply, ChatSummary, ChatThread, DictResult, DictStatus, DiscoverFeed, DiscoverReport, DownloadEvent, GeminiModels, GoalReached, GpuInfo, ImportEvent, LangCode, LessonSummary, LevelEstimate, LightenProgress, LightenReport, LinkInfo, LinkMedia, LingqEvent, LingqLang, LingqPlan, LingqReport, Lyrics, MediaStream, MediaUsage, ModelRow, NewLesson, OnlineCheck, OpenedLesson, Playlist, PlaylistPatch, PodcastRequest, SearchPage, SearchPlatform, SongItem, Stats, Term, TermQuery, TextStats, WordAnswer, VoicedLesson } from "./types";
 
 export const isTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
@@ -84,7 +84,15 @@ export interface Api {
   linkProbe(url: string, onEvent: (e: ImportEvent) => void): Promise<LinkInfo>;
   /** importe un son ou une vidéo trouvé par linkProbe ; `text` : texte de la page, gardé si le son le suit */
   importLink(lang: LangCode, item: LinkMedia, text: string | null, onEvent: (e: ImportEvent) => void): Promise<number>;
-  lessonFetchVideo(id: number, onEvent: (e: ImportEvent) => void): Promise<string>;
+  /** télécharge l'image d'une vidéo ; `replace` : celle qui est là ne se lit pas sur cet ordinateur */
+  lessonFetchVideo(id: number, onEvent: (e: ImportEvent) => void, replace?: boolean): Promise<string>;
+  /** formats d'image que la fenêtre lit (« vp9 », « av1 ») : les vidéos en ligne arrivent dans le plus léger */
+  mediaCodecs(codecs: string[]): Promise<void>;
+  /** place occupée par les leçons, les modèles et les dictionnaires ; ce qui peut encore s'alléger */
+  mediaUsage(): Promise<MediaUsage>;
+  /** allège les vidéos et les sons déjà importés, l'un après l'autre */
+  mediaLighten(onEvent: (e: LightenProgress) => void): Promise<LightenReport>;
+  mediaLightenCancel(): Promise<void>;
   /** Réécoute l'audio et recale la lanterne sur le texte existant. Renvoie les horodatages. */
   lessonResync(id: number, onEvent: (e: ImportEvent) => void): Promise<string>;
   lingqScan(key: string): Promise<LingqLang[]>;
@@ -199,7 +207,11 @@ async function createTauriApi(): Promise<Api> {
       invoke("import_media", { lang, path, title, onEvent: ch<ImportEvent>(onEvent) }),
     linkProbe: (url, onEvent) => invoke("link_probe", { url, onEvent: ch<ImportEvent>(onEvent) }),
     importLink: (lang, item, text, onEvent) => invoke("import_link", { lang, item, text, onEvent: ch<ImportEvent>(onEvent) }),
-    lessonFetchVideo: (id, onEvent) => invoke("lesson_fetch_video", { id, onEvent: ch<ImportEvent>(onEvent) }),
+    lessonFetchVideo: (id, onEvent, replace) => invoke("lesson_fetch_video", { id, replace: replace ?? false, onEvent: ch<ImportEvent>(onEvent) }),
+    mediaCodecs: (codecs) => invoke("media_codecs", { codecs }),
+    mediaUsage: () => invoke("media_usage"),
+    mediaLighten: (onEvent) => invoke("media_lighten", { onEvent: ch<LightenProgress>(onEvent) }),
+    mediaLightenCancel: () => invoke("model_cancel", { id: "lighten" }),
     lessonResync: (id, onEvent) => invoke("lesson_resync", { id, onEvent: ch<ImportEvent>(onEvent) }),
     lingqScan: (key) => invoke("lingq_scan", { key }),
     lingqImport: (key, plan, onEvent) => invoke("lingq_import", { key, plan, onEvent: ch<LingqEvent>(onEvent) }),

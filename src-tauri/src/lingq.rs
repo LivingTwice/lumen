@@ -600,7 +600,12 @@ async fn import_lesson(
     if with_audio {
         if let Some(url) = audio_url.as_deref() {
             match c.download_audio(url, data_dir).await {
-                Ok(p) => media_path = Some(p.display().to_string()),
+                Ok(p) => {
+                    // souvent une voix en mono enregistrée en stéréo : moitié moins lourde en AAC mono
+                    let level = crate::compress::Level::of(&db.lock());
+                    let p = crate::compress::audio_or_keep(p, level).await;
+                    media_path = Some(p.display().to_string())
+                }
                 Err(_) => audio_ok = false,
             }
         }
