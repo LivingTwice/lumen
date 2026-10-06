@@ -2,22 +2,26 @@ import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { count, isEn, t } from "../lib/i18n";
 import { LANGS } from "../lib/langs";
-import { formatBytes, useApp } from "../lib/store";
+import { useSearch } from "../lib/search";
+import { formatBytes, useApp, type View } from "../lib/store";
 import type { LangCode } from "../lib/types";
 import { Icon } from "./Icon";
 
 /* La visite guidée : après l'accueil, dans la première leçon. Un voile du soir couvre
    l'application, une lumière éclaire ce dont on parle (la page, un mot à toucher, le
    panneau du mot, « Terminer la page »…), une carte l'explique à côté. Deux scènes, au
-   milieu, montrent ce qu'est un modèle d'IA et pourquoi il compte. */
+   milieu, montrent ce qu'est un modèle d'IA et pourquoi il compte. Le dernier chapitre
+   quitte la leçon pour montrer Découvrir et Progrès tels qu'ils sont, puis y revient. */
 
 const EASE = [0.16, 1, 0.3, 1] as const;
 
 type Side = "left" | "right" | "top" | "bottom";
 
 interface Step {
-  id: "page" | "display" | "word" | "panel" | "model" | "why" | "chat" | "status" | "finish" | "player" | "import" | "discover" | "progress" | "end";
+  id: "page" | "display" | "word" | "panel" | "model" | "why" | "chat" | "status" | "finish" | "player" | "discover" | "search" | "import" | "progress" | "end";
   chapter: number;
+  /** vue où se passe l'étape (la leçon si rien n'est dit) : la visite s'y rend */
+  view?: View;
   /** élément éclairé ("word" : un mot nouveau de la page) ; sans cible, une scène au milieu */
   target?: string;
   side?: Side[];
@@ -29,6 +33,8 @@ interface Step {
   pass?: boolean;
   /** l'amener à l'écran (bas du panneau du mot) */
   scroll?: boolean;
+  /** le panneau montre le mot de l'étape « word » (passé sans le toucher, ou leçon rouverte en revenant en arrière) */
+  word?: boolean;
   scene?: "model" | "why" | "end";
 }
 
@@ -36,18 +42,30 @@ const STEPS: Step[] = [
   { id: "page", chapter: 0, target: '[data-tour="page"]', side: ["right", "left", "bottom", "top"], pad: 16, radius: 18 },
   { id: "display", chapter: 0, target: '[data-tour="display"]', side: ["bottom", "left"], pad: 6, radius: 12 },
   { id: "word", chapter: 0, target: "word", side: ["bottom", "top", "right", "left"], pad: 7, radius: 10, wait: true },
-  { id: "panel", chapter: 0, target: '[data-tour="panel"]', side: ["left"], pad: -8, radius: 18 },
+  { id: "panel", chapter: 0, target: '[data-tour="panel"]', side: ["left"], pad: -8, radius: 18, word: true },
   { id: "model", chapter: 1, scene: "model" },
   { id: "why", chapter: 1, scene: "why" },
   { id: "chat", chapter: 1, target: '[data-tour="chat-tab"]', side: ["bottom", "left"], pad: 6, radius: 12 },
-  { id: "status", chapter: 2, target: '[data-tour="status"]', side: ["left"], pad: 8, radius: 14, pass: true, scroll: true },
+  { id: "status", chapter: 2, target: '[data-tour="status"]', side: ["left"], pad: 8, radius: 14, pass: true, scroll: true, word: true },
   { id: "finish", chapter: 2, target: '[data-tour="finish"]', side: ["top", "left", "right"], pad: 8, radius: 16 },
   { id: "player", chapter: 2, target: '[data-tour="player"]', side: ["top"], pad: 8, radius: 18, pass: true },
-  { id: "import", chapter: 3, target: '[data-tour="import"]', side: ["right"], pad: 6, radius: 14 },
-  { id: "discover", chapter: 3, target: '[data-tour="nav-discover"]', side: ["right"], pad: 4, radius: 12 },
-  { id: "progress", chapter: 3, target: '[data-tour="nav-progress"]', side: ["right"], pad: 4, radius: 12 },
+  { id: "discover", chapter: 3, view: "discover", target: '[data-tour="discover"]', side: ["bottom", "top"], pad: 10, radius: 18 },
+  { id: "search", chapter: 3, view: "discover", target: '[data-tour="search"]', side: ["bottom", "top"], pad: 10, radius: 22 },
+  { id: "import", chapter: 3, view: "discover", target: '[data-tour="import"]', side: ["right"], pad: 6, radius: 14 },
+  { id: "progress", chapter: 3, view: "progress", target: '[data-tour="streak"]', side: ["bottom", "right", "left"], pad: 8, radius: 24 },
   { id: "end", chapter: 3, scene: "end" },
 ];
+
+const viewOf = (s: Step): View => s.view ?? "reader";
+
+/** Montre la vue de l'étape : la leçon de la visite (toujours ouverte dans le store), Découvrir ou Progrès. */
+function show(view: View) {
+  const app = useApp.getState();
+  if (app.view === view) return;
+  // une recherche restée ouverte cacherait ce que la visite montre dans Découvrir
+  if (view === "discover" && useSearch.getState().query) useSearch.getState().clear();
+  app.go(view);
+}
 
 const chapters = () => [t("La page", "The page"), t("L'IA locale", "Local AI"), t("Apprendre", "Learning"), t("Ensuite", "What's next")];
 
@@ -126,6 +144,8 @@ function TourLayer({ step }: { step: number }) {
   const [ch, setCh] = useState(220);
   const elRef = useRef<HTMLElement | null>(null);
   const wordRef = useRef<string | null>(null);
+  // vue de l'étape d'où l'on vient : en changer replie la lumière le temps que la nouvelle vue s'affiche
+  const fromView = useRef(viewOf(s));
 
   const find = useCallback((): HTMLElement | null => {
     if (!s.target) return null;
@@ -147,17 +167,24 @@ function TourLayer({ step }: { step: number }) {
 
   // suit l'élément éclairé à chaque image : la page se compose, le panneau glisse, la fenêtre change
   useEffect(() => {
-    // une scène au milieu : la lumière se replie, et repartira du centre vers l'élément suivant
-    if (!s.target) setRect(null);
+    // une scène au milieu, ou une autre vue : la lumière se replie, et repartira du centre vers l'élément suivant
+    const moved = fromView.current !== viewOf(s);
+    if (!s.target || moved) setRect(null);
     let raf = 0;
     let seen = performance.now();
     let scrolled = false;
-    // la première leçon peut mettre un moment à s'ouvrir
-    const grace = step === 0 ? 5000 : 1200;
+    let asked = -Infinity;
+    // la première leçon, ou une autre vue, peut mettre un moment à s'ouvrir
+    const grace = step === 0 || moved ? 5000 : 1200;
     const tick = () => {
+      const now = performance.now();
+      // le panneau doit montrer le mot de la visite : le lecteur le sélectionne s'il n'a rien de sélectionné
+      if (s.word && wordRef.current !== null && now - asked > 600 && !document.querySelector('[data-tour="status"]')) {
+        asked = now;
+        window.dispatchEvent(new CustomEvent("lumen:tour-word", { detail: Number(wordRef.current) }));
+      }
       const el = find();
       elRef.current = el;
-      const now = performance.now();
       if (el) {
         if (s.scroll && !scrolled) {
           scrolled = true;
@@ -200,13 +227,21 @@ function TourLayer({ step }: { step: number }) {
     (n: number) => {
       // la lecture à voix haute lancée pendant la visite s'arrête à l'étape suivante
       if (s.id === "player") window.dispatchEvent(new Event("lumen:pause"));
-      if (n >= STEPS.length) endTour();
-      else if (n >= 0) setStep(n);
+      if (n >= STEPS.length) {
+        show("reader");
+        endTour();
+      } else if (n >= 0) {
+        fromView.current = viewOf(s);
+        show(viewOf(STEPS[n]));
+        setStep(n);
+      }
     },
     [s, endTour, setStep],
   );
+  // la visite finit toujours dans la leçon où elle a commencé
   const quit = useCallback(() => {
     window.dispatchEvent(new Event("lumen:pause"));
+    show("reader");
     endTour();
   }, [endTour]);
 
@@ -377,6 +412,7 @@ function Progress({ step }: { step: number }) {
 function StepText({ step, found }: { step: Step; found: boolean }) {
   const { m, ready, dl } = useLlm();
   const download = useApp((s) => s.download);
+  const minutes = count(Number(useApp((s) => s.settings.daily_goal)) || 10, "minute", "minutes", "minute", "minutes");
   const name = m?.name ?? "Qwen3.5";
 
   const modelState: ReactNode = ready ? (
@@ -438,8 +474,8 @@ function StepText({ step, found }: { step: Step; found: boolean }) {
       body = (
         <p>
           {t(
-            "« Aa » règle la police, la taille, l'interligne et la couleur de la page, de Papier à Nuit. Le texte tient dans l'écran : on tourne la page avec les flèches ou deux doigts sur le trackpad.",
-            "“Aa” sets the font, size, line spacing and page color, from Paper to Night. The text fits on the screen: turn the page with the arrows or two fingers on the trackpad.",
+            "« Aa » règle la police, la taille, l'interligne et la couleur de la page, de Papier à Nuit, et place le panneau du mot à droite ou en carte au-dessus du mot touché. Le texte tient dans l'écran : on tourne la page avec les flèches ou deux doigts sur le trackpad.",
+            "“Aa” sets the font, size, line spacing and page color, from Paper to Night, and puts the word panel on the right or on a card above the word you tap. The text fits on the screen: turn the page with the arrows or two fingers on the trackpad.",
           )}
         </p>
       );
@@ -463,8 +499,8 @@ function StepText({ step, found }: { step: Step; found: boolean }) {
         <>
           <p>
             {t(
-              "Le dictionnaire hors ligne donne la forme du mot et tous ses sens. Puis l'IA lit la phrase entière et choisit le sens juste, ici, maintenant.",
-              "The offline dictionary gives the word's form and all its meanings. Then the AI reads the whole sentence and picks the right meaning, here and now.",
+              "Le dictionnaire hors ligne donne la forme du mot et tous ses sens. Puis l'IA lit la phrase entière et choisit le sens juste, ici, maintenant. Pour une expression, glissez sur plusieurs mots.",
+              "The offline dictionary gives the word's form and all its meanings. Then the AI reads the whole sentence and picks the right meaning, here and now. For a phrase, drag across several words.",
             )}
           </p>
           {!ready && (
@@ -496,8 +532,8 @@ function StepText({ step, found }: { step: Step; found: boolean }) {
       body = (
         <p>
           {t(
-            "Un mot a souvent plusieurs sens. Le dictionnaire les donne tous ; le modèle lit la phrase et choisit le bon. Plus il est grand (Léger, Équilibré, Maximum), plus il saisit les nuances, mais plus il pèse. Vous pouvez en changer à tout moment dans Réglages › IA locale.",
-            "A word often has several meanings. The dictionary gives them all; the model reads the sentence and picks the right one. The bigger it is (Light, Balanced, Maximum), the more nuance it catches, but the more it weighs. You can switch at any time in Settings › Local AI.",
+            "Un mot a souvent plusieurs sens. Le dictionnaire les donne tous ; le modèle lit la phrase et choisit le bon. Plus il est grand (Léger, Équilibré, Maximum), plus il saisit les nuances, mais plus il pèse. Réglages › IA permet d'en changer à tout moment, ou de confier ce travail à une IA en ligne, avec votre propre clé.",
+            "A word often has several meanings. The dictionary gives them all; the model reads the sentence and picks the right one. The bigger it is (Light, Balanced, Maximum), the more nuance it catches, but the more it weighs. In Settings › AI you can switch at any time, or hand this work to an online AI, with your own key.",
           )}
         </p>
       );
@@ -507,8 +543,8 @@ function StepText({ step, found }: { step: Step; found: boolean }) {
       body = (
         <p>
           {t(
-            "Le même modèle répond à vos questions dans l'onglet Chat : grammaire, exemples, nuances, sur la leçon que vous lisez. Raccourci : la touche C.",
-            "The same model answers your questions in the Chat tab: grammar, examples, nuances, about the lesson you're reading. Shortcut: the C key.",
+            "Le même modèle répond à vos questions dans l'onglet Chat : grammaire, exemples, nuances, sur la leçon que vous lisez. Écrivez-lui dans la langue que vous apprenez : il vous répond de même et corrige vos fautes. Raccourci : la touche C.",
+            "The same model answers your questions in the Chat tab: grammar, examples, nuances, about the lesson you're reading. Write to it in the language you're learning: it answers in kind and corrects your mistakes. Shortcut: the C key.",
           )}
         </p>
       );
@@ -540,8 +576,30 @@ function StepText({ step, found }: { step: Step; found: boolean }) {
       body = (
         <p>
           {t(
-            "Touchez ▶ : la page se lit à voix haute et un halo glisse sur chaque mot prononcé. Avec un podcast ou une vidéo, c'est leur propre voix que la lanterne suit.",
-            "Tap ▶: the page is read aloud and a halo glides over each spoken word. With a podcast or a video, the lantern follows their own voice.",
+            "Touchez ▶ : la page se lit à voix haute et un halo glisse sur chaque mot prononcé. « Créer l'audio » la fait dire par une voix naturelle ; avec un podcast ou une vidéo, la lanterne suit leur propre voix. Le bouton à droite des vitesses garde la page où vous lisez pendant que la lecture continue.",
+            "Tap ▶: the page is read aloud and a halo glides over each spoken word. “Create audio” has a natural voice read it; with a podcast or a video, the lantern follows their own voice. The button to the right of the speeds keeps the page where you're reading while playback goes on.",
+          )}
+        </p>
+      );
+      break;
+    case "discover":
+      title = t("Des leçons venues d'ailleurs", "Lessons from out there");
+      body = (
+        <p>
+          {t(
+            "Chaque jour, Découvrir rassemble des vidéos, des podcasts, des chansons et des articles récents dans la langue que vous apprenez, rangés de A1 à C1. Votre niveau est estimé d'après vos mots connus ; changez-le d'un geste.",
+            "Every day, Discover gathers recent videos, podcasts, songs and articles in the language you're learning, sorted from A1 to C1. Your level is estimated from your known words; change it in one tap.",
+          )}
+        </p>
+      );
+      break;
+    case "search":
+      title = t("Cherchez, ou collez un lien", "Search, or paste a link");
+      body = (
+        <p>
+          {t(
+            "Une vidéo YouTube, une chanson avec ses paroles, un podcast, un article : cherchez, regardez l'aperçu, puis « En faire une leçon ». Elle se prépare pendant que vous continuez d'explorer.",
+            "A YouTube video, a song with its lyrics, a podcast, an article: search, watch the preview, then “Make it a lesson”. It gets ready while you keep exploring.",
           )}
         </p>
       );
@@ -551,19 +609,8 @@ function StepText({ step, found }: { step: Step; found: boolean }) {
       body = (
         <p>
           {t(
-            "Un livre, un article, un PDF, un podcast, une vidéo YouTube : Lumen en fait une leçon. Collez un lien, ou glissez un fichier n'importe où dans la fenêtre.",
-            "A book, an article, a PDF, a podcast, a YouTube video: Lumen turns it into a lesson. Paste a link, or drop a file anywhere in the window.",
-          )}
-        </p>
-      );
-      break;
-    case "discover":
-      title = t("Des leçons à votre niveau", "Lessons at your level");
-      body = (
-        <p>
-          {t(
-            "Découvrir propose chaque jour des vidéos, des podcasts, des chansons et des articles récents, rangés de A1 à C1. Vous pouvez aussi y chercher ce qui vous plaît.",
-            "Discover suggests recent videos, podcasts, songs and articles every day, sorted from A1 to C1. You can also search there for whatever you like.",
+            "Un livre, un PDF, un texte collé, un fichier audio ou vidéo : Lumen en fait une leçon. Glissez un fichier n'importe où dans la fenêtre. Avec une clé Gemini, Lumen vous écrit même un podcast à votre niveau.",
+            "A book, a PDF, pasted text, an audio or video file: Lumen turns it into a lesson. Drop a file anywhere in the window. With a Gemini key, Lumen even writes you a podcast at your level.",
           )}
         </p>
       );
@@ -573,8 +620,8 @@ function StepText({ step, found }: { step: Step; found: boolean }) {
       body = (
         <p>
           {t(
-            "Dix minutes dans une leçon suffisent à tenir l'objectif du jour et à allumer la flamme. Vos mots connus, votre temps et vos records vous attendent ici.",
-            "Ten minutes in a lesson are enough to reach the daily goal and light the flame. Your known words, your time and your records are waiting here.",
+            `${minutes} dans une leçon suffisent à tenir l'objectif du jour et à allumer la flamme ; choisissez-le ici. Plus bas : vos mots lus, votre temps d'écoute, vos mots connus et vos records.`,
+            `${minutes} in a lesson are enough to reach the daily goal and light the flame; set it here. Further down: words read, listening time, known words and records.`,
           )}
         </p>
       );
@@ -584,8 +631,8 @@ function StepText({ step, found }: { step: Step; found: boolean }) {
       body = (
         <p>
           {t(
-            "Touchez les mots inconnus, écoutez, terminez la page. La visite se rejoue dans Réglages › À propos ; « Comment marche Lumen ? », sous le panneau du mot, rouvre le petit guide.",
-            "Tap the unknown words, listen, finish the page. You can replay the tour in Settings › About; “How does Lumen work?”, under the word panel, reopens the short guide.",
+            "Touchez les mots inconnus, écoutez, terminez la page. ⌘/ montre tous les raccourcis clavier. La visite se rejoue dans Réglages › À propos ; « Comment marche Lumen ? », sous le panneau du mot, rouvre le petit guide.",
+            "Tap the unknown words, listen, finish the page. ⌘/ shows every keyboard shortcut. You can replay the tour in Settings › About; “How does Lumen work?”, under the word panel, reopens the short guide.",
           )}
         </p>
       );

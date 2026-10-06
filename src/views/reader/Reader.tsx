@@ -1036,6 +1036,16 @@ export function Reader() {
     return () => window.removeEventListener("lumen:pause", pause);
   }, []);
 
+  // la visite guidée remontre son mot dans le panneau (passé sans le toucher, ou leçon rouverte en revenant en arrière)
+  useEffect(() => {
+    const show = (e: Event) => {
+      const i = (e as CustomEvent<number>).detail;
+      if (!rangeRef.current && tokens[i]?.w) select(i, i, false);
+    };
+    window.addEventListener("lumen:tour-word", show);
+    return () => window.removeEventListener("lumen:tour-word", show);
+  }, [tokens, select]);
+
   if (!lessonId) {
     return (
       <div className="empty" style={{ flex: 1, justifyContent: "center" }}>

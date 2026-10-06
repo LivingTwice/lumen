@@ -385,7 +385,7 @@ export function SearchBar({ lang }: { lang: LangCode }) {
   const ideas = searchIdeas(lang);
   const link = URL_LIKE.test(text.trim());
   return (
-    <div className={`disc-search ${focus ? "focus" : ""} ${query ? "active" : ""}`}>
+    <div className={`disc-search ${focus ? "focus" : ""} ${query ? "active" : ""}`} data-tour="search">
       <form
         className="disc-search-field"
         onSubmit={(e) => {

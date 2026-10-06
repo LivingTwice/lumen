@@ -135,7 +135,7 @@ function StreakHero({ st, onGoal }: { st: Stats | null; onGoal(): Promise<void> 
   };
 
   return (
-    <motion.section className={`streak-hero ${state}`} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5, ease: EASE }}>
+    <motion.section className={`streak-hero ${state}`} data-tour="streak" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5, ease: EASE }}>
       <div className="streak-main">
         <Flame state={state} />
         <div className="streak-text">

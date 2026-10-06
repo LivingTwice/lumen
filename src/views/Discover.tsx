@@ -450,7 +450,7 @@ export function Discover({ lang }: { lang: LangCode }) {
             )}
           </div>
 
-          <div className="disc-controls">
+          <div className="disc-controls" data-tour="discover">
             <div className="disc-level">
               <span className="label">{t("Votre niveau", "Your level")}</span>
               <Segmented

@@ -161,7 +161,6 @@ export function Sidebar() {
               disabled={disabled}
               style={disabled ? { opacity: 0.45, cursor: "default" } : undefined}
               aria-current={active ? "page" : undefined}
-              data-tour={`nav-${n.view}`}
             >
               {active && <motion.span layoutId="nav-pill" className="nav-pill" transition={{ type: "spring", stiffness: 500, damping: 40 }} />}
               <Icon name={n.icon} />

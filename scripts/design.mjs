@@ -1,5 +1,5 @@
 // Rend les visuels de design/ et les installe dans l'app :
-//   design/icon.mjs → icon.svg, icon-small.svg → design/icon-1024.png → src-tauri/icons/ (toutes les tailles)
+//   design/icon.mjs (illustration icon-source.png) → icon.svg, icon-small.svg → design/icon-1024.png → src-tauri/icons/ (toutes les tailles)
 //   design/dmg-background.html → src-tauri/dmg/background.png (2x, 144 dpi : net sur un écran Retina)
 //   design/nsis-sidebar.html, nsis-header.html → src-tauri/nsis/*.bmp (images de l'installateur Windows)
 // Rendu par un Chromium sans fenêtre : celui de Playwright s'il est installé, sinon Google Chrome.

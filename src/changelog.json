@@ -2,6 +2,30 @@
   "_lisezmoi": "Nouveautés montrées après chaque mise à jour (components/News.tsx) et notes de publication. Ajouter ce qui change sous la version \"next\" au fil du travail ; « Publier une version » lui donne son numéro et sa date. Icônes : noms de components/Icon.tsx. Actions : \"tour\" (visite guidée), \"guide\", \"settings:<page>\" (profile, general, langs, reading, voice, discover, podcasts, ai, videos, backup, lingq, about), \"import:<onglet>\" (text, link, file, media, podcast), \"view:<vue>\" (library, discover, playlists, chat, vocab, progress).",
   "releases": [
     {
+      "version": "0.8.1",
+      "date": "2026-10-06",
+      "title": { "fr": "Une visite qui vous emmène partout", "en": "A tour that takes you everywhere" },
+      "items": [
+        {
+          "icon": "bulb",
+          "title": { "fr": "La visite guidée sort de la leçon", "en": "The guided tour steps out of the lesson" },
+          "body": {
+            "fr": "La fin de la visite ne reste plus dans la leçon : elle vous emmène dans Découvrir (votre niveau, la recherche et l'aperçu), montre Importer et les podcasts écrits pour vous, puis Progrès et l'objectif du jour, avant de revenir à votre leçon. Elle présente aussi les ajouts récents : le panneau du mot en carte, les expressions, l'IA en ligne, la voix naturelle et la page qui reste où vous lisez.",
+            "en": "The end of the tour no longer stays in the lesson: it takes you to Discover (your level, search and preview), shows Import and the podcasts written for you, then Progress and the daily goal, before coming back to your lesson. It also presents recent additions: the word panel as a card, phrases, the online AI, the natural voice and the page that stays where you're reading."
+          },
+          "action": "tour"
+        },
+        {
+          "icon": "sun",
+          "title": { "fr": "Une nouvelle icône", "en": "A new icon" },
+          "body": {
+            "fr": "Lumen change de visage : un astre doré se lève au-dessus d'un livre ouvert, la lumière qui éclaire vos lectures.",
+            "en": "Lumen has a new face: a golden sun rising above an open book, the light over everything you read."
+          }
+        }
+      ]
+    },
+    {
       "version": "0.8.0",
       "date": "2026-10-05",
       "title": { "fr": "Plus de place pour lire", "en": "More room to read" },

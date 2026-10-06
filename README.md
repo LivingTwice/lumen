@@ -5,6 +5,11 @@ A desktop app for Mac (Apple silicon) and Windows 10/11, in the spirit of LingQ.
 
 **[Download Lumen](https://github.com/LivingTwice/lumen/releases/latest)**: a DMG for Mac, an installer for Windows. Updates then install by themselves.
 
+<p align="center">
+  <img src="docs/screenshots/reader.webp" alt="An Italian lesson in Lumen: words highlighted by status, the word “neanche” selected, and on the right its meaning in this sentence, the dictionary entry and its learning status; the audio player at the bottom">
+</p>
+<p align="center"><sub>Reading an Italian lesson. New words are tinted blue, words you're learning amber, phrases underlined. Tap a word: the dictionary and its meaning <i>in this sentence</i> appear on the right. The audio below follows the text word by word.</sub></p>
+
 ## What Lumen does
 
 - **Read**: words are colored by what you already know (new, learning, known). Tap a word: the offline dictionary gives its base form and meanings, and the AI gives its exact meaning in that sentence. Phrases, “Finish page”, pages that fit the screen, your choice of fonts and page colors.
@@ -16,6 +21,41 @@ A desktop app for Mac (Apple silicon) and Windows 10/11, in the spirit of LingQ.
 - **Progress**: study time, words read, streaks, a daily goal, a calendar.
 - **Backup** to iCloud Drive, Dropbox, Google Drive, OneDrive or a disk, with no server and no account.
 - **31 languages to study**, each with an offline dictionary. The interface is in English and French.
+
+## A look around
+
+<table>
+  <tr>
+    <td width="50%" valign="top">
+      <img src="docs/screenshots/library.webp" alt="The library: a “Continue reading” card above lesson cards, each with its word count, share of new words and progress">
+      <br><b>Library</b>: your lessons by collection, with the share of new words in each and how far you've read. “Continue” takes you back to the exact word.
+    </td>
+    <td width="50%" valign="top">
+      <img src="docs/screenshots/discover.webp" alt="Discover: a search for “storia” on YouTube, with tabs for songs, podcasts, articles and Dailymotion, length filters and video results">
+      <br><b>Discover and search</b>: videos, podcasts, songs and articles in the language you're learning, at your level. Or search YouTube, songs, podcasts and articles in one place.
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top">
+      <img src="docs/screenshots/preview.webp" alt="Preview of an Italian YouTube video about the history of gelato, playing inside Lumen, with a “Make it a lesson” button">
+      <br><b>Preview</b>: watch, listen or read before importing. One click makes it a lesson: Lumen transcribes it on your computer and syncs every word with the voice.
+    </td>
+    <td width="50%" valign="top">
+      <img src="docs/screenshots/playlists.webp" alt="Playlists: three playlists with generated cover art, lesson counts, durations and progress">
+      <br><b>Playlists</b>: lessons in the order you choose, played one after the other, with your place kept in each.
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top">
+      <img src="docs/screenshots/vocabulary.webp" alt="Vocabulary: words and phrases being learned, with their meaning, the sentence they were met in and their status from 1 to known">
+      <br><b>Vocabulary</b>: every word and phrase you've met, with its meaning, the sentence you met it in and its status. Exports to Anki.
+    </td>
+    <td width="50%" valign="top">
+      <img src="docs/screenshots/progress.webp" alt="Progress: a four-day streak, the daily goal ring, and this month's learning time, words read, listening time and new known words">
+      <br><b>Progress</b>: your streak and daily goal, study time, words read, listening time and new known words, day after day.
+    </td>
+  </tr>
+</table>
 
 ## Your data stays with you
 
