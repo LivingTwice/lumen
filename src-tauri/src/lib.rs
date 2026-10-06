@@ -37,6 +37,17 @@ use parking_lot::Mutex;
 use tauri::{Emitter, Manager};
 
 pub fn run() {
+    // Linux : le rendu DMABUF de WebKitGTK viole la règle du point d'acquisition
+    // du composeur sous Wayland, et la fenêtre ne répond plus (vu avec Mesa sur
+    // un iGPU AMD ; le même bogue se voit ailleurs : NVIDIA, X11…). Sans lui,
+    // WebKit compose autrement et tout répond. Posée seulement si l'apprenant
+    // n'a pas choisi lui-même : WEBKIT_DISABLE_DMABUF_RENDERER=0 permet
+    // d'essayer le rendu DMABUF. Le jour où le bogue est réglé dans WebKitGTK,
+    // retirer ce passage.
+    #[cfg(target_os = "linux")]
+    if std::env::var_os("WEBKIT_DISABLE_DMABUF_RENDERER").is_none() {
+        std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
+    }
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
