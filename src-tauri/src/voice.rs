@@ -146,10 +146,82 @@ pub fn cached_path(data_dir: &Path, m: &ModelInfo, lang: &str, text: &str, voice
     cache_dir(data_dir).join(format!("{}.wav", &hex::encode(h.finalize())[..20]))
 }
 
+/// Linux : le moteur téléchargé attend l'éditeur de liens du système
+/// (/lib64/ld-linux…), qui n'existe pas sous NixOS. On le lance avec celui de
+/// Lumen et les bibliothèques déjà chargées par l'app (la libc, libstdc++…) :
+/// le moteur trouve ainsi tout ce qu'il lui faut, sur toute distribution.
+/// (Retourne None si l'ELF de Lumen ne se laisse pas lire : lancement direct.)
+#[cfg(target_os = "linux")]
+fn engine_command(data_dir: &Path) -> Option<tokio::process::Command> {
+    // notre propre éditeur de liens : PT_INTERP de /proc/self/exe
+    let exe = std::fs::read(std::fs::read_link("/proc/self/exe").ok()?).ok()?;
+    if exe.first()? != &0x7f || exe.get(1)? != &b'E' {
+        return None;
+    }
+    let u16at = |i: usize| -> Option<u16> {
+        let b = exe.get(i..i + 2)?;
+        Some(u16::from_le_bytes([b[0], b[1]]))
+    };
+    let u64at = |i: usize| -> Option<u64> {
+        let b = exe.get(i..i + 8)?;
+        Some(u64::from_le_bytes(b.try_into().ok()?))
+    };
+    let phoff = u64at(0x20)? as usize;
+    let phsize = u16at(0x36)? as usize;
+    let phnum = u16at(0x38)? as usize;
+    let mut interp: Option<&[u8]> = None;
+    for i in 0..phnum {
+        let p = phoff + i * phsize;
+        // PT_INTERP (3) : le chemin de l'éditeur, en chaîne à zéro
+        if u32::from_le_bytes([*exe.get(p)?, *exe.get(p + 1)?, *exe.get(p + 2)?, *exe.get(p + 3)?]) == 3 {
+            let off = u64at(p + 8)? as usize;
+            let end = exe[off..].iter().position(|b| *b == 0)? + off;
+            interp = Some(&exe[off..end]);
+        }
+    }
+    let interp = std::str::from_utf8(interp?).ok()?;
+    // les bibliothèques du moteur : la libc et ses sœurs viennent du dossier de
+    // l'éditeur de liens lui-même (une seule libc, celle qui l'accompagne —
+    // /proc/self/maps peut contenir une seconde libc chargée en privé par une
+    // bibliothèque de l'app, qui mélangée à l'autre écrase la pile du moteur) ;
+    // libstdc++ et libgcc_s, de la première chargée par l'app.
+    let mut dirs: Vec<String> = vec![
+        engine_dir(data_dir).join("lib").display().to_string(),
+        Path::new(interp).parent().map(|d| d.display().to_string())?,
+    ];
+    let mut have_cxx = false;
+    let mut have_gcc = false;
+    for line in std::fs::read_to_string("/proc/self/maps").ok()?.lines() {
+        let Some((_, path)) = line.rsplit_once(' ') else { continue };
+        let Some(name) = Path::new(path).file_name().and_then(|n| n.to_str()) else { continue };
+        let Some(dir) = Path::new(path).parent().map(|d| d.display().to_string()) else { continue };
+        if !have_cxx && name.starts_with("libstdc++.so") {
+            have_cxx = true;
+            if !dirs.contains(&dir) {
+                dirs.push(dir);
+            }
+        } else if !have_gcc && name.starts_with("libgcc_s.so") {
+            have_gcc = true;
+            if !dirs.contains(&dir) {
+                dirs.push(dir);
+            }
+        }
+        if have_cxx && have_gcc {
+            break;
+        }
+    }
+    let mut cmd = crate::proc::tokio_command(interp);
+    cmd.arg("--library-path").arg(dirs.join(":")).arg(engine_bin(data_dir));
+    Some(cmd)
+}
+
 /// Lance le moteur une fois : `text` prononcé dans `out` (WAV PCM 16 bits mono).
 async fn run_engine(data_dir: &Path, m: &ModelInfo, lang: &str, text: &str, voice: &str, threads: u32, out: &Path) -> Result<()> {
     let model = models::path_of(data_dir, m);
     let f = |name: &str| model.join(name);
+    #[cfg(target_os = "linux")]
+    let mut cmd = engine_command(data_dir).unwrap_or_else(|| crate::proc::tokio_command(engine_bin(data_dir)));
+    #[cfg(not(target_os = "linux"))]
     let mut cmd = crate::proc::tokio_command(engine_bin(data_dir));
     cmd.arg(format!("--supertonic-duration-predictor={}", f("duration_predictor.int8.onnx").display()))
         .arg(format!("--supertonic-text-encoder={}", f("text_encoder.int8.onnx").display()))
@@ -166,10 +238,19 @@ async fn run_engine(data_dir: &Path, m: &ModelInfo, lang: &str, text: &str, voic
         .arg(format!("--output-filename={}", out.display()))
         .arg(text)
         .kill_on_drop(true);
+    // LUMEN_DEBUG_VOICE=1 : l'appel exact sur la console, pour le rejouer à la main
+    // et comparer
+    if std::env::var_os("LUMEN_DEBUG_VOICE").is_some() {
+        eprintln!("lumen voix : {:?}", cmd.as_std());
+    }
     let res = tokio::time::timeout(Duration::from_secs(120), cmd.output())
         .await
-        .map_err(|_| anyhow!(crate::i18n::t("la voix a mis trop de temps à répondre", "the voice took too long to answer")))??;
+        .map_err(|_| anyhow!(crate::i18n::t("la voix a mis trop de temps à répondre", "the voice took too long to answer")))?
+        .map_err(|e| anyhow!(crate::tr!("le moteur de voix n'a pas pu être lancé : {}", "the voice engine couldn't be started: {}", e)))?;
     if !res.status.success() || !out.exists() {
+        // la raison sur la console : ce moteur vit hors de l'app, ses erreurs ne se voient pas autrement
+        let why: String = String::from_utf8_lossy(&res.stderr).trim().chars().take(300).collect();
+        eprintln!("lumen : moteur de voix échoué : {why}");
         let _ = tokio::fs::remove_file(out).await;
         return Err(anyhow!(crate::i18n::t("La voix n'a pas pu prononcer ce texte.", "The voice couldn't pronounce this text.")));
     }

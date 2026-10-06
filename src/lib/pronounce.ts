@@ -4,6 +4,7 @@
 // est gardée en cache côté natif, et préparée dès qu'un mot est touché.
 
 import { api, isTauri } from "./api";
+import { isLinux } from "./platform";
 import { t } from "./i18n";
 import { useApp } from "./store";
 import { sayWord } from "./tts";
@@ -71,6 +72,9 @@ export function stopPronunciation() {
   if (typeof speechSynthesis !== "undefined") speechSynthesis.cancel();
 }
 
+/** Linux : une panne de lecture de la voix naturelle ne s'annonce qu'une fois par séance. */
+let voice_failure = false;
+
 /**
  * Prononce un mot ou une expression. `touched` : au toucher d'un mot (et non
  * au clic sur le haut-parleur) ; la voix naturelle abandonne alors sa
@@ -93,13 +97,36 @@ export async function pronounce(text: string, lang: LangCode, voiceURI?: string,
       if (my !== turn) return;
       if (typeof speechSynthesis !== "undefined") speechSynthesis.cancel();
       player?.pause();
-      player = new Audio(api().mediaUrl(path));
+      // Linux (WebKitGTK) : l'élément audio refuse le fichier servi par le
+      // protocole des ressources (il y attend des réponses aux requêtes de
+      // plage, que ce protocole ne donne pas) ; les octets, eux, se lisent
+      // bien : le son passe par un blob
+      let url = api().mediaUrl(path);
+      if (isLinux) {
+        const res = await fetch(url);
+        url = URL.createObjectURL(await res.blob());
+      }
+      player = new Audio(url);
+      if (isLinux) player.addEventListener("ended", () => URL.revokeObjectURL(url), { once: true });
       await player.play();
+      voice_failure = false;
       return;
-    } catch {
-      // en cas d'échec, la voix du système prend le relais
+    } catch (e) {
+      // en cas d'échec, la voix du système prend le relais. Sous Linux, les
+      // piles audio varient (speech-dispatcher, PipeWire…) : la raison s'y
+      // montre une fois par séance, avec la classe de l'erreur — c'est elle
+      // qui dit ce qui a coincé (NotSupportedError, NotAllowedError…)
       if (my !== turn) return;
+      if (isLinux && !voice_failure) {
+        voice_failure = true;
+        const why = e instanceof Error ? e.name : String(e).slice(0, 40);
+        useApp.getState().toast(
+          t(`La voix naturelle n'a pas pu être lue (${why}) : la voix du système prend le relais.`, `The natural voice couldn't be played (${why}): the system voice takes over.`),
+          "error",
+        );
+      }
     }
   }
   sayWord(text, lang, voiceURI);
 }
+
