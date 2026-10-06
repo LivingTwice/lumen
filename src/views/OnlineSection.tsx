@@ -98,7 +98,7 @@ function OnlineKey({ provider: p }: { provider: OnlineProvider }) {
   const dirty = key.trim() !== savedKey.trim() || (custom && url.trim() !== savedUrl.trim());
   const can = custom ? !!url.trim() : !!key.trim();
 
-  const check = async (wanted = model) => {
+  const check = async (wanted = model, previous?: string) => {
     if (busy || !can) return;
     setBusy(true);
     setError(null);
@@ -112,7 +112,12 @@ function OnlineKey({ provider: p }: { provider: OnlineProvider }) {
       setTyped(r.model);
       setDone(r);
     } catch (e) {
-      setError(errorText(e));
+      // le modèle choisi ne répond pas (file d'attente, modèle retiré) : on garde celui d'avant
+      if (previous) {
+        void setSetting(modelKey, previous);
+        setTyped(previous);
+        setError(`${errorText(e)} ${t(`Lumen garde ${previous}.`, `Lumen keeps ${previous}.`)}`);
+      } else setError(errorText(e));
     } finally {
       setBusy(false);
     }
@@ -122,7 +127,7 @@ function OnlineKey({ provider: p }: { provider: OnlineProvider }) {
   const choose = (m: string) => {
     if (!m || m === model) return;
     void setSetting(modelKey, m);
-    void check(m);
+    void check(m, model || undefined);
   };
 
   const options = model && !models.includes(model) ? [model, ...models] : models;
@@ -227,7 +232,11 @@ function OnlineKey({ provider: p }: { provider: OnlineProvider }) {
       <span className="import-hint">
         {p.keyUrl ? (
           <>
-            {saved ? t("Votre compte, son crédit et vos clés :", "Your account, its credit and your keys:") : t("Pas encore de clé ? Créez-la sur", "No key yet? Create one at")}{" "}
+            {saved
+              ? p.id === "nvidia"
+                ? t("Votre compte et vos clés :", "Your account and your keys:")
+                : t("Votre compte, son crédit et vos clés :", "Your account, its credit and your keys:")
+              : t("Pas encore de clé ? Créez-la sur", "No key yet? Create one at")}{" "}
             <a
               className="link"
               href={p.keyUrl}
@@ -347,8 +356,8 @@ export function OnlineSection() {
               <strong>{t("Et mon abonnement ChatGPT, Claude ou Gemini ?", "What about my ChatGPT, Claude or Gemini subscription?")}</strong>
               <span>
                 {t(
-                  "Un abonnement ne sert que dans les applications de son éditeur : Anthropic et Google interdisent d'utiliser Claude Pro ou Google AI Pro ailleurs, et suspendent les comptes qui le font. Il faut donc une clé, payée à l'usage, ou la clé gratuite de Gemini.",
-                  "A subscription only works in its maker's own apps: Anthropic and Google forbid using Claude Pro or Google AI Pro anywhere else, and suspend accounts that do. So you need a key, paid as you go, or Gemini's free key.",
+                  "Un abonnement ne sert que dans les applications de son éditeur : Anthropic et Google interdisent d'utiliser Claude Pro ou Google AI Pro ailleurs, et suspendent les comptes qui le font. Il faut donc une clé, payée à l'usage, ou une clé gratuite : Gemini ou NVIDIA.",
+                  "A subscription only works in its maker's own apps: Anthropic and Google forbid using Claude Pro or Google AI Pro anywhere else, and suspend accounts that do. So you need a key, paid as you go, or a free key: Gemini or NVIDIA.",
                 )}
               </span>
             </div>

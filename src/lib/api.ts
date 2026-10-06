@@ -24,6 +24,8 @@ export interface LessonPatch {
 
 export interface Api {
   appInfo(): Promise<AppInfo>;
+  /** Relance Lumen (après une mise à jour), au premier plan. */
+  appRelaunch(): Promise<void>;
   settingsGet(): Promise<Record<string, string>>;
   settingsSet(key: string, value: string): Promise<void>;
   lessonsList(lang: LangCode): Promise<LessonSummary[]>;
@@ -145,6 +147,7 @@ async function createTauriApi(): Promise<Api> {
   };
   return {
     appInfo: () => invoke("app_info"),
+    appRelaunch: () => invoke("app_relaunch"),
     settingsGet: () => invoke("settings_get"),
     settingsSet: (key, value) => invoke("settings_set", { key, value }),
     lessonsList: (lang) => invoke("lessons_list", { lang }),

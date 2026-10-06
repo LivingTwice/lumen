@@ -1,7 +1,7 @@
 // Mises à jour automatiques : Lumen consulte la dernière version publiée,
 // la télécharge (paquet signé) puis redémarre sur la nouvelle version.
 import { create } from "zustand";
-import { isTauri } from "./api";
+import { api, isTauri } from "./api";
 
 type Phase = "idle" | "checking" | "available" | "downloading" | "ready" | "uptodate" | "error";
 
@@ -71,8 +71,8 @@ export const useUpdate = create<UpdateState>((set, get) => ({
   },
 
   async restart() {
-    const { relaunch } = await import("@tauri-apps/plugin-process");
-    await relaunch();
+    // par Lumen plutôt que par le greffon : sur Mac, la nouvelle version s'ouvre au premier plan
+    await api().appRelaunch();
   },
 
   dismiss() {

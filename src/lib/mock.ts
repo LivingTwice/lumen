@@ -378,7 +378,7 @@ export function createMockApi(): Api {
     const s = db.settings;
     if (s.online_on !== "1" || s[role === "words" ? "online_words" : "online_chat"] === "0") return false;
     const id = s.online_provider || "deepseek";
-    const names: Record<string, string> = { deepseek: "DeepSeek", gemini: "Gemini", mistral: "Mistral", openai: "OpenAI", anthropic: "Claude", openrouter: "OpenRouter" };
+    const names: Record<string, string> = { deepseek: "DeepSeek", gemini: "Gemini", nvidia: "NVIDIA", mistral: "Mistral", openai: "OpenAI", anthropic: "Claude", openrouter: "OpenRouter" };
     if (id === "custom") {
       if (!s.online_url?.trim()) throw t("Indiquez l'adresse de votre serveur dans Réglages › IA.", "Enter your server's address in Settings › AI.");
       return true;
@@ -495,6 +495,9 @@ export function createMockApi(): Api {
         transcriber: false,
         dict_langs: LANGS.map((l) => l.code).filter((c) => c !== t("fr", "en")),
       };
+    },
+    async appRelaunch() {
+      window.location.reload();
     },
     async settingsGet() {
       return { ...db.settings };
@@ -1232,17 +1235,34 @@ export function createMockApi(): Api {
         const models = ["llama3.2", "qwen3:8b", "gemma3:12b"];
         return { models, model: model && models.includes(model) ? model : models[0], ms: 1350 };
       }
-      const name: Record<string, string> = { deepseek: "DeepSeek", gemini: "Gemini", mistral: "Mistral", openai: "OpenAI", anthropic: "Claude", openrouter: "OpenRouter" };
+      const name: Record<string, string> = { deepseek: "DeepSeek", gemini: "Gemini", nvidia: "NVIDIA", mistral: "Mistral", openai: "OpenAI", anthropic: "Claude", openrouter: "OpenRouter" };
       if (key.trim().length < 12) throw t(`${name[provider] ?? provider} refuse cette clé. Vérifiez-la, puis collez-la à nouveau (Réglages › IA).`, `${name[provider] ?? provider} refuses this key. Check it, then paste it again (Settings › AI).`);
       const lists: Record<string, string[]> = {
         deepseek: ["deepseek-flash", "deepseek-v4-pro"],
         gemini: ["gemini-3.8-flash", "gemini-3.8-flash-lite", "gemini-3.8-pro"],
+        nvidia: ["deepseek-ai/deepseek-v4.1-flash", "moonshotai/kimi-k3", "nvidia/nemotron-3-super-120b-a12b", "nvidia/nemotron-3.5-lightning-30b-a3b", "openai/gpt-oss-20b", "z-ai/glm-5.3"],
         mistral: ["mistral-large-latest", "mistral-medium-latest", "mistral-small-latest"],
         openai: ["gpt-5.4", "gpt-5.4-mini", "gpt-5.4-nano"],
         anthropic: ["claude-haiku-4-5", "claude-sonnet-4-6", "claude-opus-4-8"],
         openrouter: ["anthropic/claude-haiku-4.5", "deepseek/deepseek-chat", "google/gemini-2.5-flash", "meta-llama/llama-4-maverick"],
       };
-      const picks: Record<string, string> = { deepseek: "deepseek-flash", gemini: "gemini-3.8-flash", mistral: "mistral-small-latest", openai: "gpt-5.4-mini", anthropic: "claude-haiku-4-5", openrouter: "deepseek/deepseek-chat" };
+      const picks: Record<string, string> = {
+        deepseek: "deepseek-flash",
+        gemini: "gemini-3.8-flash",
+        nvidia: "nvidia/nemotron-3-super-120b-a12b",
+        mistral: "mistral-small-latest",
+        openai: "gpt-5.4-mini",
+        anthropic: "claude-haiku-4-5",
+        openrouter: "deepseek/deepseek-chat",
+      };
+      // NVIDIA : les modèles les plus demandés font attendre en file (comme `online::queue_error`)
+      if (provider === "nvidia" && model && model !== picks.nvidia && model !== "nvidia/nemotron-3.5-lightning-30b-a3b") {
+        await sleep(1200);
+        throw t(
+          `${model} est très demandé chez NVIDIA en ce moment : la file d'attente gratuite dépasse 20 secondes. Choisissez un modèle plus disponible dans Réglages › IA.`,
+          `${model} is in high demand at NVIDIA right now: the free queue is longer than 20 seconds. Choose a more available model in Settings › AI.`,
+        );
+      }
       const models = lists[provider] ?? [];
       return { models, model: model && models.includes(model) ? model : picks[provider] ?? models[0], ms: 640 };
     },

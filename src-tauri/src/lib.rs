@@ -76,6 +76,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::app_info,
+            commands::app_relaunch,
             commands::settings_get,
             commands::settings_set,
             commands::lessons_list,
@@ -151,6 +152,8 @@ pub fn run() {
                 if let Some(st) = app.try_state::<state::AppState>() {
                     backup::on_exit(&st);
                 }
+                // « Redémarrer » après une mise à jour : la nouvelle version, au premier plan
+                proc::relaunch_on_exit();
             }
         });
 }

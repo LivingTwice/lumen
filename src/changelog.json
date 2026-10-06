@@ -2,6 +2,40 @@
   "_lisezmoi": "Nouveautés montrées après chaque mise à jour (components/News.tsx) et notes de publication. Ajouter ce qui change sous la version \"next\" au fil du travail ; « Publier une version » lui donne son numéro et sa date. Icônes : noms de components/Icon.tsx. Actions : \"tour\" (visite guidée), \"guide\", \"settings:<page>\" (profile, general, langs, reading, voice, discover, podcasts, ai, videos, backup, lingq, about), \"import:<onglet>\" (text, link, file, media, podcast), \"view:<vue>\" (library, discover, playlists, chat, vocab, progress).",
   "releases": [
     {
+      "version": "0.8.2",
+      "date": "2026-10-06",
+      "title": { "fr": "Une IA en ligne gratuite", "en": "A free online AI" },
+      "items": [
+        {
+          "icon": "cloud",
+          "title": { "fr": "NVIDIA, gratuit, dans l'IA en ligne", "en": "NVIDIA, free, in the online AI" },
+          "body": {
+            "fr": "Dans Réglages › IA, NVIDIA rejoint les fournisseurs : une clé gratuite, sans carte bancaire, ouvre des modèles comme Nemotron 3 Super, qui traduit un mot en moins d'une demi-seconde, ou DeepSeek, Kimi et GLM. Lumen ne vous propose que les modèles vraiment ouverts à votre clé, et choisit d'office celui qui répond tout de suite. Si un modèle très demandé fait attendre, la traduction passe au modèle de ce Mac et Lumen vous le dit.",
+            "en": "In Settings › AI, NVIDIA joins the providers: a free key, no credit card, opens models like Nemotron 3 Super, which translates a word in under half a second, or DeepSeek, Kimi and GLM. Lumen only offers the models actually open to your key, and picks the one that answers right away. If a popular model keeps you waiting, translation switches to this Mac's model and Lumen tells you."
+          },
+          "action": "settings:ai"
+        },
+        {
+          "icon": "library",
+          "title": { "fr": "Une grande bibliothèque, plus légère", "en": "A big library, lighter" },
+          "body": {
+            "fr": "La bibliothèque montre d'abord vos 24 leçons les plus récentes ; les plus anciennes attendent derrière « Voir plus », par 24 à la fois. Même avec des centaines de leçons importées de LingQ, elle s'ouvre vite et reste claire. La recherche, elle, trouve toujours toutes vos leçons.",
+            "en": "The library first shows your 24 most recent lessons; older ones wait behind “Show more”, 24 at a time. Even with hundreds of lessons imported from LingQ, it opens quickly and stays clear. Search still finds all your lessons."
+          },
+          "action": "view:library"
+        },
+        {
+          "icon": "up",
+          "title": { "fr": "Au premier plan après une mise à jour", "en": "In front after an update" },
+          "body": {
+            "fr": "Dès la prochaine mise à jour, Lumen se rouvre devant vos autres fenêtres quand vous cliquez sur « Redémarrer », au lieu de s'ouvrir derrière elles.",
+            "en": "From the next update on, Lumen reopens in front of your other windows when you click “Restart”, instead of opening behind them."
+          },
+          "only": "mac"
+        }
+      ]
+    },
+    {
       "version": "0.8.1",
       "date": "2026-10-06",
       "title": { "fr": "Une visite qui vous emmène partout", "en": "A tour that takes you everywhere" },

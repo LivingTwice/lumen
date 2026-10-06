@@ -69,6 +69,12 @@ pub async fn app_info(state: State<'_, AppState>) -> R<AppInfo> {
     })
 }
 
+/// Relance Lumen après une mise à jour, au premier plan (voir `proc::relaunch`).
+#[tauri::command]
+pub fn app_relaunch(app: tauri::AppHandle) {
+    crate::proc::relaunch(&app);
+}
+
 #[tauri::command]
 pub async fn settings_get(state: State<'_, AppState>) -> R<HashMap<String, String>> {
     db::settings_all(&state.db.lock()).map_err(err)

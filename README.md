@@ -62,7 +62,7 @@ A desktop app for Mac (Apple silicon) and Windows 10/11, in the spirit of LingQ.
 Translation, chat, transcription, voice and dictionaries run **on your computer**. Lumen has no account, no server and no analytics. Only what you ask for goes online:
 
 - the content you search for or import (YouTube, podcasts, lyrics from LRCLIB, Wikipedia…);
-- if you turn them on, with your own key: the **online AI** (DeepSeek, Gemini, Mistral, OpenAI, Claude, OpenRouter or your own server), which receives the word you tap and its sentence, or your chat questions; **custom podcasts** (Gemini), which receive the topic and the words to bring back. Your profile is never sent;
+- if you turn them on, with your own key: the **online AI** (DeepSeek, Gemini, NVIDIA, Mistral, OpenAI, Claude, OpenRouter or your own server), which receives the word you tap and its sentence, or your chat questions; **custom podcasts** (Gemini), which receive the topic and the words to bring back. Your profile is never sent;
 - your backup, to the cloud you choose.
 
 The code is public precisely so that anyone can check this.

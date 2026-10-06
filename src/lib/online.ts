@@ -5,7 +5,7 @@
 import { t } from "./i18n";
 import { useApp } from "./store";
 
-export type OnlineId = "deepseek" | "gemini" | "mistral" | "openai" | "anthropic" | "openrouter" | "custom";
+export type OnlineId = "deepseek" | "gemini" | "nvidia" | "mistral" | "openai" | "anthropic" | "openrouter" | "custom";
 
 export interface OnlineProvider {
   id: OnlineId;
@@ -46,6 +46,18 @@ export const onlineProviders = (): OnlineProvider[] => [
     ),
     keyUrl: "https://aistudio.google.com/apikey",
     keySetting: "gemini_key",
+  },
+  {
+    id: "nvidia",
+    name: "NVIDIA",
+    mark: "N",
+    note: t("Gratuit, modèles ouverts", "Free, open models"),
+    about: t(
+      "Gratuit avec un compte développeur NVIDIA, sans carte bancaire : des modèles ouverts (Nemotron, DeepSeek, Kimi, GLM…) servis par NVIDIA. Environ 40 demandes par minute, assez pour lire. Les modèles les plus demandés font parfois attendre longtemps : Lumen conseille un modèle qui répond tout de suite.",
+      "Free with an NVIDIA developer account, no credit card: open models (Nemotron, DeepSeek, Kimi, GLM…) served by NVIDIA. About 40 requests a minute, plenty for reading. The most popular models sometimes keep you waiting a long time: Lumen suggests a model that answers right away.",
+    ),
+    keyUrl: "https://build.nvidia.com/settings/api-keys",
+    keySetting: "online_key_nvidia",
   },
   {
     id: "mistral",

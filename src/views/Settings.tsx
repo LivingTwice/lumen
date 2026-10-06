@@ -143,7 +143,7 @@ const groups = (): { title: string | null; tabs: Tab[] }[] => [
           "Sur ce Mac, les modèles sont téléchargés une seule fois puis fonctionnent hors ligne. Si vous le souhaitez, une IA en ligne peut prendre le relais pour la traduction et le chat, avec votre clé.",
           "On this Mac, the models are downloaded once, then work offline. If you wish, an online AI can take over translation and the chat, with your key.",
         ),
-        keys: "ia locale modele modeles qwen whisper asr transcription traduction chat profil leger equilibre maximum telecharger en ligne api cle fournisseur deepseek gemini mistral openai chatgpt claude anthropic openrouter ollama lm studio serveur abonnement carte graphique gpu vulkan processeur nvidia geforce amd radeon intel local ai model models translation profile light balanced download online key provider server subscription graphics card processor",
+        keys: "ia locale modele modeles qwen whisper asr transcription traduction chat profil leger equilibre maximum telecharger en ligne api cle fournisseur deepseek gemini nvidia nemotron gratuit mistral openai chatgpt claude anthropic openrouter ollama lm studio serveur abonnement carte graphique gpu vulkan processeur nvidia geforce amd radeon intel local ai model models translation profile light balanced download online key provider free server subscription graphics card processor",
       },
       {
         id: "videos",

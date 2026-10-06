@@ -37,19 +37,22 @@ export function progressOf(l: LessonSummary): number {
 // sans attendre leur tour : seule l'apparition est décalée de l'une à l'autre.
 const SLIDE = { type: "spring", stiffness: 420, damping: 40, mass: 0.8 } as const;
 
+// Une très grande bibliothèque (import LingQ) ne s'affiche pas d'un bloc : les leçons
+// les plus récentes d'abord, les autres par « Voir plus ». 24 : des rangées pleines
+// à une, deux ou trois colonnes (la grille n'en a jamais plus).
+const BATCH = 24;
+
 function LessonCard({
   l,
-  index,
-  intro,
+  rise,
   onDelete,
   onRename,
   onPlaylist,
   ref,
 }: {
   l: LessonSummary;
-  index: number;
-  /** première apparition de la bibliothèque : les cartes se lèvent l'une après l'autre */
-  intro: boolean;
+  /** rang de la carte quand elle se lève avec les autres (première apparition de la bibliothèque, « Voir plus ») */
+  rise?: number;
   onDelete(): void;
   onRename(): void;
   onPlaylist(): void;
@@ -65,11 +68,12 @@ function LessonCard({
       ref={ref}
       layout="position"
       className="lesson-cell"
-      initial={intro ? { opacity: 0, y: 14 } : { opacity: 0, scale: 0.97 }}
+      initial={rise !== undefined ? { opacity: 0, y: 14 } : { opacity: 0, scale: 0.97 }}
       animate={{ opacity: 1, y: 0, scale: 1 }}
       exit={{ opacity: 0, scale: 0.97, transition: { duration: 0.16, ease: "easeOut" } }}
       transition={{
-        default: intro ? { delay: Math.min(index, 12) * 0.035, type: "spring", stiffness: 260, damping: 28 } : { duration: 0.22, ease: [0.2, 0.8, 0.2, 1] },
+        default:
+          rise !== undefined ? { delay: Math.min(rise, 12) * 0.035, type: "spring", stiffness: 260, damping: 28 } : { duration: 0.22, ease: [0.2, 0.8, 0.2, 1] },
         layout: SLIDE,
       }}
     >
@@ -165,6 +169,23 @@ export function Library() {
       .then(setLessons)
       .catch((e) => toast(errorText(e), "error"));
   }, [lang, langSetting, version, toast]);
+
+  // « Voir plus » : nombre de leçons affichées, et d'où se lèvent celles qui viennent d'arriver
+  const [limit, setLimit] = useState(BATCH);
+  const [risen, setRisen] = useState<number | null>(null);
+  useEffect(() => {
+    setLimit(BATCH);
+    setRisen(null);
+  }, [lang, filter, query]);
+  useEffect(() => {
+    if (risen === null) return;
+    const timer = window.setTimeout(() => setRisen(null), 900);
+    return () => window.clearTimeout(timer);
+  }, [risen]);
+  const showMore = () => {
+    setRisen(limit);
+    setLimit((n) => n + BATCH);
+  };
 
   const resume = useMemo(() => lessons?.find((l) => l.opened_at && !l.completed), [lessons]);
 
@@ -322,11 +343,26 @@ export function Library() {
           {/* « popLayout » : une carte qui s'en va quitte aussitôt la grille, les autres prennent sa place en glissant */}
           <div className="lesson-grid">
             <AnimatePresence mode="popLayout">
-              {shown.map((l, i) => (
-                <LessonCard key={l.id} l={l} index={i} intro={intro} onDelete={() => remove(l)} onRename={() => rename(l)} onPlaylist={() => setAdding(l)} />
+              {shown.slice(0, limit).map((l, i) => (
+                <LessonCard
+                  key={l.id}
+                  l={l}
+                  rise={intro ? i : risen !== null && i >= risen ? i - risen : undefined}
+                  onDelete={() => remove(l)}
+                  onRename={() => rename(l)}
+                  onPlaylist={() => setAdding(l)}
+                />
               ))}
             </AnimatePresence>
           </div>
+          {shown.length > limit && (
+            <div className="lib-more">
+              <button className="btn outline lg" onClick={showMore}>
+                <Icon name="chevron" size={17} /> {t("Voir plus", "Show more")}
+              </button>
+              <span className="muted num">{count(shown.length - limit, "autre leçon", "autres leçons", "more lesson", "more lessons")}</span>
+            </div>
+          )}
           {lessons && lessons.length > 0 && shown.length === 0 && <p className="muted" style={{ padding: "40px 0", textAlign: "center" }}>{t("Aucune leçon ne correspond.", "No lesson matches.")}</p>}
         </div>
       </div>
