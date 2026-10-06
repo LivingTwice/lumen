@@ -4,7 +4,7 @@ import { Avatar } from "../components/Avatar";
 import { Icon, type IconName } from "../components/Icon";
 import { Orb, Switch } from "../components/ui";
 import { api, errorText, isTauri } from "../lib/api";
-import { isIOS, isWindows } from "../lib/platform";
+import { isIOS, isLinux, isWindows } from "../lib/platform";
 import {
   dayLabel,
   formatWhen,
@@ -456,10 +456,12 @@ export function BackupSection() {
                   ? t("Choisissez ci-dessous le dossier « Lumen » où votre\u00a0Mac sauvegarde.", "Choose below the “Lumen” folder your\u00a0Mac backs up to.")
                   : isWindows
                   ? t("Choisissez où sauvegarder : OneDrive, un autre nuage ou un dossier.", "Choose where to back up: OneDrive, another cloud or a folder.")
-                  : t(
-                      "iCloud Drive n'est pas activé sur ce Mac (Réglages Système › votre nom › iCloud). Choisissez un autre nuage ou un dossier.",
-                      "iCloud Drive isn't turned on on this Mac (System Settings › your name › iCloud). Choose another cloud or a folder.",
-                    )}
+                  : isLinux
+                    ? t("Choisissez où sauvegarder : un dossier, une clé USB, un disque.", "Choose where to back up: a folder, a USB drive, a disk.")
+                    : t(
+                        "iCloud Drive n'est pas activé sur ce Mac (Réglages Système › votre nom › iCloud). Choisissez un autre nuage ou un dossier.",
+                        "iCloud Drive isn't turned on on this Mac (System Settings › your name › iCloud). Choose another cloud or a folder.",
+                      )}
             </span>
           </div>
           {s.dir && s.last_at !== null && !isIOS && (
