@@ -12,6 +12,10 @@
 , llvmPackages
 , makeWrapper
 , wrapGAppsHook3
+, vulkan-headers
+, vulkan-loader
+, spirv-headers
+, shaderc
 , glib
 , gsettings-desktop-schemas
 , gtk3
@@ -80,15 +84,21 @@ rustPlatform.buildRustPackage {
   # (localhost:1420) au lieu de l'embarquer
   buildFeatures = [ "tauri/custom-protocol" ];
 
-  # les bibliothèques de Tauri sous Linux (WebKitGTK), les moteurs de construction
+  # les bibliothèques de Tauri sous Linux (WebKitGTK), le compilateur de
+  # shaders de Vulkan, les moteurs de construction
   nativeBuildInputs = [
     pkg-config
     cmake
     llvmPackages.libclang
     makeWrapper
     wrapGAppsHook3
+    shaderc
   ];
   buildInputs = [
+    # Vulkan : la bibliothèque est liée à l'app (les ICD du pilote viennent du
+    vulkan-headers
+    vulkan-loader
+    spirv-headers
     glib
     gsettings-desktop-schemas
     gtk3
@@ -113,8 +123,11 @@ rustPlatform.buildRustPackage {
   env.BINDGEN_EXTRA_CLANG_ARGS = "-I${lib.getDev stdenv.cc.libc}/include";
 
   # lumen-whisper d'abord : le script de construction de Tauri veut le trouver,
-  # portant le triplet du système, dans binaries/
+  # portant le triplet du système, dans binaries/. Les scripts de construction
+  # de llama.cpp et whisper.cpp lancent leur propre CMake : les paquets de
+  # Vulkan ne s'y trouvent que par ce chemin.
   preBuild = ''
+    export CMAKE_PREFIX_PATH="${lib.concatStringsSep ":" [ vulkan-headers vulkan-loader spirv-headers ]}"
     export TAURI_CONFIG='{"build":{"beforeBuildCommand":"","frontendDist":"${frontend}"},"bundle":{"createUpdaterArtifacts":false}}'
     cargo build -p lumen-whisper --release --offline
     mkdir -p binaries

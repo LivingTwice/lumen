@@ -7,6 +7,11 @@
 , nodejs
 , pkg-config
 , cmake
+, rustfmt
+, vulkan-headers
+, vulkan-loader
+, spirv-headers
+, shaderc
 , llvmPackages
 , glib
 , gsettings-desktop-schemas
@@ -31,6 +36,11 @@ llvmPackages.stdenv.mkDerivation {
     nodejs
     pkg-config
     cmake
+    rustfmt
+    shaderc
+    vulkan-headers
+    vulkan-loader
+    spirv-headers
     glib
     gsettings-desktop-schemas
     gtk3
@@ -56,6 +66,9 @@ llvmPackages.stdenv.mkDerivation {
   # dialogues GTK, schémas de réglages, et vidéos qui se lisent dans la fenêtre
   # (le contournement du rendu DMABUF de WebKitGTK vit dans lib.rs)
   shellHook = ''
+    # Vulkan pour llama.cpp et whisper.cpp : leurs scripts de construction
+    # lancent leur propre CMake, qui ne voit pas les paquets du shell autrement
+    export CMAKE_PREFIX_PATH="${lib.concatStringsSep ":" [ vulkan-headers vulkan-loader spirv-headers ]}"
     export XDG_DATA_DIRS="${gsettings-desktop-schemas}/share/gsettings-schemas/${gsettings-desktop-schemas.name}:${gtk3}/share/gsettings-schemas/${gtk3.name}:$XDG_DATA_DIRS"
     export GST_PLUGIN_SYSTEM_PATH_1_0="${lib.makeSearchPath "lib/gstreamer-1.0" [
       gst_all_1.gst-plugins-base

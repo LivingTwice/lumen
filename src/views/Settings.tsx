@@ -1115,7 +1115,7 @@ function AiPane() {
           ))}
         </div>
       </Section>
-      {isWindows && <GpuSection />}
+      {isPc && <GpuSection />}
       <Section title={t("Traduction et chat", "Translation and chat")} note={t("Le sens de chaque mot dans sa phrase, les réécritures et le chat.", "The meaning of each word in its sentence, rewriting and the chat.")}>
         <div className="set-card">{lines("llm")}</div>
       </Section>

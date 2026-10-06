@@ -46,16 +46,47 @@ pub(crate) fn cpu_check() -> Result<()> {
     Ok(())
 }
 
-/// Fils de calcul de llama.cpp (8 au plus). Sous Windows, un par cœur physique :
-/// l'hyperthreading ralentit ce qui se calcule sur le processeur.
+/// Fils de calcul de llama.cpp (8 au plus). Sous Windows et Linux, un par cœur
+/// physique : l'hyperthreading ralentit ce qui se calcule sur le processeur.
 pub(crate) fn threads() -> i32 {
     let n = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4);
     #[cfg(windows)]
     let n = crate::win::physical_cores().unwrap_or(n);
+    #[cfg(target_os = "linux")]
+    let n = physical_cores().unwrap_or(n);
     n.min(8) as i32
 }
 
-/// Windows : calcul sur la carte graphique (réglage `ai_gpu`, oui par défaut).
+/// Linux : cœurs physiques du processeur, lus dans le noyau (chaque cœur
+/// présente ses fils hyperthread dans le même groupe de frères).
+#[cfg(target_os = "linux")]
+fn physical_cores() -> Option<usize> {
+    let mut siblings: Vec<std::collections::HashSet<u32>> = Vec::new();
+    for entry in std::fs::read_dir("/sys/devices/system/cpu").ok()? {
+        let name = entry.ok()?.file_name();
+        let name = name.to_str()?;
+        let Some(cpu) = name.strip_prefix("cpu") else { continue };
+        if !cpu.bytes().all(|b| b.is_ascii_digit()) {
+            continue;
+        }
+        let list = std::fs::read_to_string(format!("/sys/devices/system/cpu/{name}/topology/thread_siblings_list")).ok()?;
+        let group: std::collections::HashSet<u32> = list.split(',').flat_map(|part| {
+            let mut ends = part.split('-');
+            let a = ends.next()?.trim().parse().ok()?;
+            match ends.next() {
+                Some(b) => Some(a..=b.trim().parse().ok()?),
+                None => Some(a..=a),
+            }
+        }).flatten().collect();
+        if !siblings.iter().any(|s| s == &group) {
+            siblings.push(group);
+        }
+    }
+    (!siblings.is_empty()).then_some(siblings.len())
+}
+
+/// Windows et Linux : calcul sur la carte graphique (réglage `ai_gpu`, oui par
+/// défaut), par Vulkan.
 static GPU: AtomicBool = AtomicBool::new(true);
 
 pub(crate) fn set_gpu(on: bool) {
@@ -64,7 +95,10 @@ pub(crate) fn set_gpu(on: bool) {
 
 /// L'IA calcule sur la carte graphique si elle le peut (sur Mac, toujours : Metal).
 pub(crate) fn gpu_wanted() -> bool {
-    !cfg!(windows) || GPU.load(Ordering::Relaxed)
+    if cfg!(target_os = "macos") {
+        return true;
+    }
+    GPU.load(Ordering::Relaxed)
 }
 
 /// Cartes graphiques que llama.cpp peut employer (Vulkan sous Windows, Metal sur
@@ -94,7 +128,7 @@ fn model_params(gpu: bool) -> LlamaModelParams {
 /// (le fichier, plus environ 1 Go pour le contexte et les calculs ; on ne coupe
 /// pas un modèle en deux). Renvoie aussi s'il est sur la carte. Sur Mac, Metal.
 pub(crate) fn load_model(be: &LlamaBackend, path: &Path) -> Result<(LlamaModel, bool), llama_cpp_2::LlamaModelLoadError> {
-    if !cfg!(windows) {
+    if cfg!(target_os = "macos") {
         return LlamaModel::load_from_file(be, path, &model_params(true)).map(|m| (m, true));
     }
     let size = std::fs::metadata(path).map(|m| m.len() as usize).unwrap_or(0);
@@ -144,9 +178,10 @@ pub fn gpu_info(engine: &Engine) -> Result<GpuInfo> {
     backend()?;
     #[cfg(windows)]
     let vulkan = crate::vulkan::present();
-    // Mac : Metal, toujours là ; Linux : l'IA y calcule sur le processeur pour l'instant
+    // Mac : Metal, toujours là. Linux : la bibliothèque de Vulkan est liée à
+    // l'app (si le pilote ne la fournit pas, l'app ne démarre pas).
     #[cfg(not(windows))]
-    let vulkan = cfg!(target_os = "macos");
+    let vulkan = cfg!(any(target_os = "macos", target_os = "linux"));
     let devices = gpus()
         .into_iter()
         .map(|d| GpuDevice {
@@ -371,7 +406,7 @@ impl Engine {
             .with_n_threads_batch(threads);
         let mut ctx = match model.new_context(be, ctx_params) {
             Ok(ctx) => ctx,
-            Err(_) if cfg!(windows) && on_gpu => return Err(NoRoom.into()),
+            Err(_) if on_gpu && !cfg!(target_os = "macos") => return Err(NoRoom.into()),
             Err(e) => return Err(anyhow!("contexte : {e}")),
         };
 
@@ -1408,7 +1443,7 @@ mod live {
         }
         let on_gpu = gpu_info(&engine).unwrap().model_on_gpu;
         println!("modèle chargé en {:?}, sur la carte : {on_gpu:?}", t.elapsed());
-        if cpu || (cfg!(windows) && info.devices.is_empty()) {
+        if cpu || (!cfg!(target_os = "macos") && info.devices.is_empty()) {
             assert_eq!(on_gpu, Some(false));
         }
         let t = std::time::Instant::now();
