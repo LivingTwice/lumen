@@ -29,3 +29,7 @@ cles.tsv
 # iPhone et iPad : framework de sherpa-onnx, téléchargé et copié ici par le crate sherpa-onnx à la compilation
 src-tauri/sherpa-onnx.xcframework
 src-tauri/.sherpa-onnx-xcframework-version
+
+# nix
+result
+result-bin

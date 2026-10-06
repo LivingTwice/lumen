@@ -34,6 +34,8 @@ mod text;
 mod tools;
 mod user;
 mod voice;
+#[cfg(target_os = "linux")]
+mod mediaserv;
 #[cfg(windows)]
 mod vulkan;
 // Whisper dans l'app : iPhone et iPad (essais sur Mac : LUMEN_WHISPER_INAPP=1)
@@ -70,7 +72,15 @@ pub fn run() {
             compress::sweep(&media::media_dir(&data_dir), |p| db::media_used(&conn, p, None));
             // iPhone et iPad : le dossier de l'app change à chaque mise à jour ; les médias suivent
             let _ = db::rebase_media(&conn, &media::media_dir(&data_dir));
-            let resource_dir = app.path().resource_dir()?.join("dicts");
+            // Dictionnaires livrés : le dossier de ressources du paquet. Sous Linux sans
+            // paquet (nix, `cargo build`), il n'existe pas à l'endroit attendu : la variable
+            // LUMEN_RESOURCES le donne, sinon Lumen démarre sans les dictionnaires livrés
+            // (les autres se téléchargent comme d'habitude).
+            let resource_dir = std::env::var_os("LUMEN_RESOURCES")
+                .map(std::path::PathBuf::from)
+                .or_else(|| app.path().resource_dir().ok())
+                .unwrap_or_else(std::path::PathBuf::new)
+                .join("dicts");
             let dicts = dict::Dicts::new(resource_dir, dict::dict_dir(&data_dir));
             let discover = discover::Store::open(&data_dir);
             app.manage(state::AppState {

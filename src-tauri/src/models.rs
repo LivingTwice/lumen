@@ -49,8 +49,20 @@ pub const CATALOG: &[ModelInfo] = &[
         id: "qwen3.5-0.8b",
         kind: "llm",
         name: "Qwen3.5 0.8B",
-        detail: if cfg!(windows) { "Très rapide, pour les PC avec 8 Go de mémoire" } else { "Très rapide, pour les Mac avec 8 Go de mémoire" },
-        detail_en: if cfg!(windows) { "Very fast, for PCs with 8 GB of memory" } else { "Very fast, for Macs with 8 GB of memory" },
+        detail: if cfg!(windows) {
+            "Très rapide, pour les PC avec 8 Go de mémoire"
+        } else if cfg!(target_os = "linux") {
+            "Très rapide, pour les ordinateurs avec 8 Go de mémoire"
+        } else {
+            "Très rapide, pour les Mac avec 8 Go de mémoire"
+        },
+        detail_en: if cfg!(windows) {
+            "Very fast, for PCs with 8 GB of memory"
+        } else if cfg!(target_os = "linux") {
+            "Very fast, for computers with 8 GB of memory"
+        } else {
+            "Very fast, for Macs with 8 GB of memory"
+        },
         size: 533_000_000,
         url: "https://huggingface.co/unsloth/Qwen3.5-0.8B-GGUF/resolve/main/Qwen3.5-0.8B-Q4_K_M.gguf",
         file: "Qwen3.5-0.8B-Q4_K_M.gguf",
@@ -328,11 +340,12 @@ async fn extract_archive(archive: &Path, dir: &Path, final_path: &Path) -> Resul
     let tmp = dir.join(".extraction");
     let _ = tokio::fs::remove_dir_all(&tmp).await;
     tokio::fs::create_dir_all(&tmp).await?;
-    // compressée ou non : tar s'en aperçoit seul
-    #[cfg(not(any(windows, target_os = "ios")))]
+    // macOS : le tar du système ; ailleurs, décompressé ici (le tar de Windows 10 ne
+    // lit pas toujours le bzip2, et NixOS n'a pas de tar système pour l'application)
+    #[cfg(target_os = "macos")]
     let ok = tokio::process::Command::new("tar").arg("-xf").arg(archive).arg("-C").arg(&tmp).output().await?.status.success();
     // Windows : décompressé ici (le tar de Windows 10 ne lit pas toujours le bzip2) ; iPhone et iPad aussi
-    #[cfg(any(windows, target_os = "ios"))]
+    #[cfg(not(target_os = "macos"))]
     let ok = {
         let (from, to) = (archive.to_path_buf(), tmp.clone());
         tokio::task::spawn_blocking(move || unpack_tar(&from, &to, None)).await?.is_ok()
@@ -352,9 +365,9 @@ async fn extract_archive(archive: &Path, dir: &Path, final_path: &Path) -> Resul
 }
 
 /// Décompresse une archive .tar.bz2 ou .tar dans `dest` (`only` : seulement ces
-/// chemins de l'archive). Sous Windows, à la place de `tar` ; les chemins qui
-/// sortiraient de `dest` sont refusés par la bibliothèque.
-#[cfg(any(windows, target_os = "ios", test))]
+/// chemins de l'archive). Sous Windows, Linux et iPhone, à la place de `tar` ; les
+/// chemins qui sortiraient de `dest` sont refusés par la bibliothèque.
+#[cfg(any(windows, target_os = "linux", target_os = "ios", test))]
 pub(crate) fn unpack_tar(archive: &Path, dest: &Path, only: Option<&[String]>) -> Result<()> {
     use std::io::{BufRead, Read};
     std::fs::create_dir_all(dest)?;
@@ -363,6 +376,9 @@ pub(crate) fn unpack_tar(archive: &Path, dest: &Path, only: Option<&[String]>) -
     let bz = reader.fill_buf()?.starts_with(b"BZh");
     let stream: Box<dyn Read> = if bz { Box::new(bzip2::read::BzDecoder::new(reader)) } else { Box::new(reader) };
     let mut tar = tar::Archive::new(stream);
+    // Unix : garder les permissions de l'archive (l'outil de voix doit rester exécutable)
+    #[cfg(unix)]
+    tar.set_preserve_permissions(true);
     let mut found = 0;
     for entry in tar.entries()? {
         let mut entry = entry?;
@@ -417,12 +433,19 @@ mod tests {
             unpack_tar(&a, &all, None).unwrap();
             assert_eq!(std::fs::read_to_string(all.join("moteur/lib/biblio.dll")).unwrap(), "biblio");
             assert!(all.join("moteur/LISEZMOI").exists());
-            // seulement l'outil et sa bibliothèque, comme pour le moteur
+            // seulement l'outil et sa bibliothèque, comme pour le moteur de voix
             let some = dir.join("choix");
             let wanted = vec!["moteur/bin/outil.exe".to_string(), "moteur/lib/biblio.dll".to_string()];
             unpack_tar(&a, &some, Some(&wanted)).unwrap();
             assert!(some.join("moteur/bin/outil.exe").exists());
             assert!(!some.join("moteur/LISEZMOI").exists());
+            // Unix : les permissions de l'archive sont gardées (l'outil de voix reste exécutable)
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let mode = std::fs::metadata(some.join("moteur/bin/outil.exe")).unwrap().permissions().mode();
+                assert_eq!(mode & 0o111, 0o111, "l'outil extrait doit rester exécutable");
+            }
             // rien de ce qu'on cherche : erreur
             assert!(unpack_tar(&a, &dir.join("vide"), Some(&["autre".to_string()])).is_err());
             for d in ["tout", "choix", "vide"] {
