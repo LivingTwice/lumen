@@ -495,6 +495,7 @@ export function createMockApi(): Api {
         version: t(`${pkg.version} (aperçu navigateur)`, `${pkg.version} (browser preview)`),
         data_dir: t("(navigateur)", "(browser)"),
         platform: "web",
+        media_base: "",
         ytdlp: false,
         transcriber: false,
         dict_langs: LANGS.map((l) => l.code).filter((c) => c !== t("fr", "en")),

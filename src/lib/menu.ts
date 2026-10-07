@@ -14,7 +14,7 @@ import { pickFiles, pickSavePath } from "./dialogs";
 import { isEn, t } from "./i18n";
 import { MEDIA_EXT, TEXT_EXT } from "./importers";
 import { langInfo } from "./langs";
-import { isWindows, joinPath } from "./platform";
+import { isPc, joinPath } from "./platform";
 import { LOOK_DEFAULTS, PAPERS, playbackRates, READ_FONTS, SIZE_MAX, SIZE_MIN } from "./reading";
 import { useApp, type View } from "./store";
 import { useUpdate } from "./updater";
@@ -566,16 +566,17 @@ export function useAppMenu() {
 const VIEW_KEYS: View[] = ["library", "discover", "playlists", "chat", "vocab", "progress"];
 
 /**
- * Sous Windows, pas de barre des menus : ses raccourcis passent par Ctrl
- * (Ctrl+N, Ctrl+O, Ctrl+1 à 6…), F11 pour le plein écran, Ctrl+B pour la barre
- * latérale d'une leçon, Ctrl+I pour son panneau du mot (à droite ou flottant). Les chiffres se lisent à leur place sur le clavier
+ * Sous Windows et Linux, pas de barre des menus : ses raccourcis passent par
+ * Ctrl (Ctrl+N, Ctrl+O, Ctrl+1 à 6…), F11 pour le plein écran, Ctrl+B pour la
+ * barre latérale d'une leçon, Ctrl+I pour son panneau du mot (à droite ou
+ * flottant). Les chiffres se lisent à leur place sur le clavier
  * (`code`) : sur un clavier AZERTY, Ctrl+1 se tape sans Maj. Les raccourcis du
  * navigateur (recharger, imprimer, chercher dans la page) n'ont pas leur place
  * dans une app. Appelé une fois, dans App.
  */
-export function useWindowsKeys() {
+export function usePcKeys() {
   useEffect(() => {
-    if (!isWindows) return;
+    if (!isPc) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.defaultPrevented) return;
       if (e.key === "F11") {

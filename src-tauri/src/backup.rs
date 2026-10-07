@@ -560,15 +560,21 @@ fn hardware_uuid() -> Option<String> {
     crate::win::machine_guid()
 }
 
-#[cfg(not(windows))]
+#[cfg(target_os = "macos")]
 fn hardware_uuid() -> Option<String> {
-    if !cfg!(target_os = "macos") {
-        return None;
-    }
     let out = std::process::Command::new("/usr/sbin/ioreg").args(["-rd1", "-c", "IOPlatformExpertDevice"]).output().ok()?;
     let text = String::from_utf8_lossy(&out.stdout);
     let line = text.lines().find(|l| l.contains("\"IOPlatformUUID\""))?;
     line.split('"').nth(3).filter(|s| !s.is_empty()).map(String::from)
+}
+
+// Linux : l'identifiant stable de la machine
+#[cfg(all(unix, not(any(windows, target_os = "macos"))))]
+fn hardware_uuid() -> Option<String> {
+    std::fs::read_to_string("/etc/machine-id").ok().and_then(|s| {
+        let s = s.trim().to_string();
+        (!s.is_empty()).then_some(s)
+    })
 }
 
 /// Identifiant de ce Mac, stable même si les données de Lumen sont effacées
@@ -599,8 +605,23 @@ fn device_name() -> String {
                 }
             }
         }
-        // Windows : le nom de l'appareil (Paramètres › Système › Informations système)
-        std::env::var("COMPUTERNAME").unwrap_or_else(|_| if cfg!(windows) { crate::i18n::t("Ce PC", "This PC") } else { crate::i18n::t("Ce Mac", "This Mac") }.into())
+        // Windows : le nom de l'appareil (Paramètres › Système › Informations système) ;
+        // Linux : le nom de la machine
+        if cfg!(target_os = "linux") {
+            if let Ok(h) = std::fs::read_to_string("/proc/sys/kernel/hostname") {
+                let h = h.trim();
+                if !h.is_empty() {
+                    return h.to_string();
+                }
+            }
+        }
+        if cfg!(windows) {
+            return std::env::var("COMPUTERNAME").unwrap_or_else(|_| crate::i18n::t("Ce PC", "This PC").into());
+        }
+        if cfg!(target_os = "linux") {
+            return crate::i18n::t("Cet ordinateur", "This computer").into();
+        }
+        crate::i18n::t("Ce Mac", "This Mac").into()
     })
     .clone()
 }
@@ -630,7 +651,7 @@ fn folder_key(p: &Path) -> Option<String> {
 fn folder_name(device_name: &str, key: &str) -> String {
     let clean: String = device_name.chars().map(|c| if matches!(c, '/' | ':' | '\\' | '(' | ')') || c.is_control() { ' ' } else { c }).collect();
     let clean: String = clean.split_whitespace().collect::<Vec<_>>().join(" ").chars().take(60).collect();
-    format!("{} ({key})", if !clean.is_empty() { &clean } else if cfg!(windows) { "PC" } else { "Mac" })
+    format!("{} ({key})", if !clean.is_empty() { &clean } else if cfg!(windows) { "PC" } else if cfg!(target_os = "linux") { crate::i18n::t("Ordinateur", "Computer") } else { "Mac" })
 }
 
 /// Dossiers de sauvegarde (un par Mac et par profil).
@@ -1279,7 +1300,7 @@ fn no_place() -> String {
 /// selon l'emplacement : iCloud Drive, un autre nuage, un disque ou un dossier.
 fn io_message(io: &io::Error, place: &Place) -> Option<String> {
     if matches!(io.raw_os_error(), Some(28) | Some(112)) {
-        return Some(if cfg!(windows) { crate::i18n::t("Il n'y a plus assez d'espace disque sur ce PC.", "There isn't enough disk space left on this PC.") } else { crate::i18n::t("Il n'y a plus assez d'espace disque sur ce Mac.", "There isn't enough disk space left on this Mac.") }.into());
+        return Some(if cfg!(windows) { crate::i18n::t("Il n'y a plus assez d'espace disque sur ce PC.", "There isn't enough disk space left on this PC.") } else if cfg!(target_os = "linux") { crate::i18n::t("Il n'y a plus assez d'espace disque sur cet ordinateur.", "There isn't enough disk space left on this computer.") } else { crate::i18n::t("Il n'y a plus assez d'espace disque sur ce Mac.", "There isn't enough disk space left on this Mac.") }.into());
     }
     let cloud = !matches!(place.kind.as_str(), "drive" | "folder");
     let name = &place.name;

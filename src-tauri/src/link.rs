@@ -1533,8 +1533,8 @@ pub async fn fetch_cover(data_dir: &Path, url: &str) -> Option<PathBuf> {
     let raw = dir.join(format!("{stem}.cover-src.{ext}"));
     let out = dir.join(format!("{stem}.cover.jpg"));
     std::fs::write(&raw, &bytes).ok()?;
-    // outil d'images de macOS : réduit et convertit en JPEG
-    #[cfg(not(windows))]
+    // outil d'images de macOS : réduit et convertit en JPEG ; ailleurs, ici
+    #[cfg(target_os = "macos")]
     let shrunk = tokio::process::Command::new("/usr/bin/sips")
         .args(["-Z", "1280", "-s", "format", "jpeg", "-s", "formatOptions", "85"])
         .arg(&raw)
@@ -1543,8 +1543,7 @@ pub async fn fetch_cover(data_dir: &Path, url: &str) -> Option<PathBuf> {
         .output()
         .await
         .is_ok_and(|o| o.status.success());
-    // Windows : la même chose, ici
-    #[cfg(windows)]
+    #[cfg(not(target_os = "macos"))]
     let shrunk = shrink_image(&bytes).is_some_and(|jpg| std::fs::write(&out, jpg).is_ok());
     if shrunk && out.exists() {
         let _ = std::fs::remove_file(&raw);
@@ -1558,7 +1557,7 @@ pub async fn fetch_cover(data_dir: &Path, url: &str) -> Option<PathBuf> {
 
 /// Réduit une image à 1 280 px au plus et la convertit en JPEG (qualité 85),
 /// comme `sips` sur Mac.
-#[cfg(any(windows, test))]
+#[cfg(any(windows, target_os = "linux", test))]
 pub(crate) fn shrink_image(bytes: &[u8]) -> Option<Vec<u8>> {
     let img = image::load_from_memory(bytes).ok()?;
     let img = if img.width() > 1280 || img.height() > 1280 { img.resize(1280, 1280, image::imageops::FilterType::Lanczos3) } else { img };
@@ -1690,9 +1689,9 @@ mod tests {
         println!("« {} » → {} ({} Mo, progression finale {last:.0} %)", ep.title, path.display(), size / 1_000_000);
         assert!(size > 1_000_000 && last > 99.0);
         let cover = fetch_cover(&dir, "https://is1-ssl.mzstatic.com/image/thumb/Podcasts126/v4/5f/4b/51/5f4b5121-b307-4b0c-4ba9-3fba7aba161d/mza_1141892237621262066.jpg/3000x3000bb.jpg").await.unwrap();
-        let info = std::process::Command::new("/usr/bin/sips").args(["-g", "pixelWidth", "-g", "pixelHeight"]).arg(&cover).output().unwrap();
-        println!("couverture {} :\n{}", cover.display(), String::from_utf8_lossy(&info.stdout));
-        assert!(String::from_utf8_lossy(&info.stdout).contains("pixelWidth: 1280"));
+        let (w, _) = image::image_dimensions(&cover).unwrap();
+        println!("couverture {} : {} px de large", cover.display(), w);
+        assert_eq!(w, 1280);
     }
 
     /// Essai réel (ignoré par défaut) : LUMEN_TEST_URL="lien1 lien2" cargo test --lib link_live -- --ignored --nocapture

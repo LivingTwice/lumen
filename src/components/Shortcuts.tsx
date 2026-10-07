@@ -2,7 +2,7 @@ import { motion } from "motion/react";
 import { Fragment } from "react";
 import { t } from "../lib/i18n";
 import { closeShortcuts, useMenu } from "../lib/menu";
-import { isWindows, modKey as M } from "../lib/platform";
+import { isPc, modKey as M } from "../lib/platform";
 import { Sheet } from "./ui";
 
 /** Une ligne : les touches (plusieurs combinaisons possibles) et ce qu'elles font. */
@@ -10,9 +10,9 @@ type Row = { keys: string[][]; label: string };
 
 function groups(): { title: string; rows: Row[] }[] {
   // les touches telles qu'elles sont écrites sur le clavier : celui du Mac ou celui d'un PC
-  const shift = isWindows ? t("Maj", "Shift") : "⇧";
-  const enter = isWindows ? t("Entrée", "Enter") : "↩";
-  const pages = isWindows ? [[t("Pg préc.", "Page Up")], [t("Pg suiv.", "Page Down")]] : [["fn", "↑"], ["fn", "↓"]];
+  const shift = isPc ? t("Maj", "Shift") : "⇧";
+  const enter = isPc ? t("Entrée", "Enter") : "↩";
+  const pages = isPc ? [[t("Pg préc.", "Page Up")], [t("Pg suiv.", "Page Down")]] : [["fn", "↑"], ["fn", "↓"]];
   return [
     {
       title: t("Dans une leçon", "In a lesson"),
@@ -36,13 +36,13 @@ function groups(): { title: string; rows: Row[] }[] {
         { keys: [[M, "N"]], label: t("Nouvelle leçon", "New lesson") },
         { keys: [[M, "O"]], label: t("Ouvrir un fichier", "Open a file") },
         { keys: [[M, "L"]], label: t("Importer un lien", "Import a link") },
-        { keys: [isWindows ? [M, shift, "N"] : [shift, M, "N"]], label: t("Nouvelle conversation", "New conversation") },
+        { keys: [isPc ? [M, shift, "N"] : [shift, M, "N"]], label: t("Nouvelle conversation", "New conversation") },
         { keys: [[M, "F"]], label: t("Rechercher", "Search") },
         { keys: [[M, "R"]], label: t("Reprendre la lecture", "Resume reading") },
         { keys: [[M, "1…6"]], label: t("Bibliothèque, Découvrir… jusqu'à Progrès", "Library, Discover… up to Progress") },
         { keys: [[M, "S"]], label: t("Sauvegarder la progression", "Back up progress") },
         { keys: [[M, ","]], label: t("Réglages", "Settings") },
-        ...(isWindows ? [{ keys: [[M, "/"]], label: t("Raccourcis clavier", "Keyboard shortcuts") }] : []),
+        ...(isPc ? [{ keys: [[M, "/"]], label: t("Raccourcis clavier", "Keyboard shortcuts") }] : []),
       ],
     },
     {
@@ -50,9 +50,9 @@ function groups(): { title: string; rows: Row[] }[] {
       rows: [
         { keys: [[M, "="], [M, "-"]], label: t("Agrandir ou réduire le texte", "Bigger or smaller text") },
         { keys: [[M, "0"]], label: t("Taille d'origine", "Default size") },
-        { keys: [isWindows ? [M, "B"] : ["⌃", "⌘", "S"]], label: t("Barre latérale, dans une leçon", "Sidebar, in a lesson") },
-        { keys: [isWindows ? [M, "I"] : ["⌃", "⌘", "I"]], label: t("Panneau du mot à droite ou flottant", "Word panel docked or floating") },
-        { keys: [isWindows ? ["F11"] : ["⌃", "⌘", "F"]], label: t("Plein écran", "Full screen") },
+        { keys: [isPc ? [M, "B"] : ["⌃", "⌘", "S"]], label: t("Barre latérale, dans une leçon", "Sidebar, in a lesson") },
+        { keys: [isPc ? [M, "I"] : ["⌃", "⌘", "I"]], label: t("Panneau du mot à droite ou flottant", "Word panel docked or floating") },
+        { keys: [isPc ? ["F11"] : ["⌃", "⌘", "F"]], label: t("Plein écran", "Full screen") },
       ],
     },
     {

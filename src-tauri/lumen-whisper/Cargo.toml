@@ -14,8 +14,11 @@ anyhow = "1"
 [target.'cfg(target_os = "macos")'.dependencies]
 whisper-rs = { version = "0.16", features = ["metal"] }
 
-[target.'cfg(not(any(target_os = "macos", windows)))'.dependencies]
-whisper-rs = { version = "0.16" }
+# Linux : la carte graphique par Vulkan, le processeur sans elle
+[target.'cfg(target_os = "linux")'.dependencies]
+whisper-rs = { version = "0.16", features = ["vulkan"] }
+# choisir la carte graphique dédiée plutôt que celle intégrée au processeur
+whisper-rs-sys = "0.15"
 
 [target.'cfg(windows)'.dependencies]
 # la carte graphique par Vulkan, le processeur sans elle (src/vulkan.rs de l'app)

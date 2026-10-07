@@ -55,8 +55,14 @@ objc2-core-media = { version = "0.3", default-features = false, features = ["std
 objc2-audio-toolbox = { version = "0.3", default-features = false, features = ["std", "AudioCodec", "AudioConverter", "AudioFile", "ExtendedAudioFile", "objc2-core-audio-types", "objc2-core-foundation"] }
 objc2-av-foundation = { version = "0.3", default-features = false, features = ["std", "block2", "AVAsset", "AVAssetReader", "AVAssetReaderOutput", "AVAssetTrack", "AVAssetWriter", "AVAssetWriterInput", "AVMediaFormat", "AVVideoSettings", "objc2-core-media", "objc2-core-foundation"] }
 
-[target.'cfg(not(any(target_os = "macos", windows)))'.dependencies]
-llama-cpp-2 = { version = "0.1.158", default-features = false, features = ["mtmd"] }
+# Linux : l'IA locale sur la carte graphique par Vulkan (NVIDIA, AMD, Intel),
+# le processeur sans elle ; décompresser ici les archives des modèles (pas de
+# tar système garanti sur NixOS) et réduire les couvertures avec la bibliothèque image
+[target.'cfg(target_os = "linux")'.dependencies]
+llama-cpp-2 = { version = "0.1.158", default-features = false, features = ["mtmd", "vulkan"] }
+tar = "0.4"
+bzip2 = "0.6"
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp", "gif"] }
 
 # Windows : ce que macOS fait avec ses propres outils (afconvert, sips, tar, ioreg)
 [target.'cfg(windows)'.dependencies]

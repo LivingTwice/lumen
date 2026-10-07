@@ -24,6 +24,8 @@ mod text;
 mod tools;
 mod user;
 mod voice;
+#[cfg(target_os = "linux")]
+mod mediaserv;
 #[cfg(windows)]
 mod vulkan;
 #[cfg(windows)]
@@ -35,6 +37,17 @@ use parking_lot::Mutex;
 use tauri::{Emitter, Manager};
 
 pub fn run() {
+    // Linux : le rendu DMABUF de WebKitGTK viole la règle du point d'acquisition
+    // du composeur sous Wayland, et la fenêtre ne répond plus (vu avec Mesa sur
+    // un iGPU AMD ; le même bogue se voit ailleurs : NVIDIA, X11…). Sans lui,
+    // WebKit compose autrement et tout répond. Posée seulement si l'apprenant
+    // n'a pas choisi lui-même : WEBKIT_DISABLE_DMABUF_RENDERER=0 permet
+    // d'essayer le rendu DMABUF. Le jour où le bogue est réglé dans WebKitGTK,
+    // retirer ce passage.
+    #[cfg(target_os = "linux")]
+    if std::env::var_os("WEBKIT_DISABLE_DMABUF_RENDERER").is_none() {
+        std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
+    }
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
@@ -48,11 +61,25 @@ pub fn run() {
             i18n::set(&db::setting(&conn, "ui_lang").unwrap_or_default());
             // Windows : la carte graphique pour l'IA, sauf si l'apprenant a choisi le processeur
             ai::set_gpu(db::setting(&conn, "ai_gpu").as_deref() != Some("0"));
-            // allègement des médias : fichiers d'un travail interrompu, originaux mis de côté
-            compress::sweep(&media::media_dir(&data_dir), |p| db::media_used(&conn, p, None));
-            let resource_dir = app.path().resource_dir()?.join("dicts");
+// allègement des médias : fichiers d'un travail interrompu, originaux mis de côté
+compress::sweep(&media::media_dir(&data_dir), |p| db::media_used(&conn, p, None));
+// Dictionnaires livrés : le dossier de ressources du paquet. Sous Linux sans
+// paquet (nix, `cargo build`), il n'existe pas à l'endroit attendu : la variable
+// LUMEN_RESOURCES le donne, sinon Lumen démarre sans les dictionnaires livrés
+// (les autres se téléchargent comme d'habitude).
+let resource_dir = std::env::var_os("LUMEN_RESOURCES")
+    .map(std::path::PathBuf::from)
+    .or_else(|| app.path().resource_dir().ok())
+    .unwrap_or_else(std::path::PathBuf::new)
+    .join("dicts");
             let dicts = dict::Dicts::new(resource_dir, dict::dict_dir(&data_dir));
             let discover = discover::Store::open(&data_dir);
+            // Linux : l'audio et la vidéo des leçons passent par le petit serveur
+            // local (l'élément média d'WebKitGTK refuse le protocole des ressources)
+            #[cfg(target_os = "linux")]
+            let media_base = mediaserv::start(data_dir.join("media")).unwrap_or_default();
+            #[cfg(not(target_os = "linux"))]
+            let media_base = String::new();
             app.manage(state::AppState {
                 data_dir,
                 db: Mutex::new(conn),
@@ -65,6 +92,7 @@ pub fn run() {
                 discover,
                 levels: Mutex::new(HashMap::new()),
                 codecs: Mutex::new(Vec::new()),
+                media_base,
             });
             // barre des menus (construite par l'interface, lib/menu.ts) : l'élément choisi lui
             // revient par son identifiant ; les actions JavaScript des éléments de sous-menus

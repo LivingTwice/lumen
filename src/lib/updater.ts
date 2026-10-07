@@ -1,7 +1,8 @@
 // Mises à jour automatiques : Lumen consulte la dernière version publiée,
 // la télécharge (paquet signé) puis redémarre sur la nouvelle version.
-import { create } from "zustand";
 import { api, isTauri } from "./api";
+import { isLinux } from "./platform";
+import { create } from "zustand";
 
 type Phase = "idle" | "checking" | "available" | "downloading" | "ready" | "uptodate" | "error";
 
@@ -31,7 +32,9 @@ export const useUpdate = create<UpdateState>((set, get) => ({
   dismissed: false,
 
   async check(manual = false) {
-    if (!isTauri) {
+    // Linux : les mises à jour suivent le paquet (nix…) ; le greffon ne sait
+    // installer qu'un AppImage
+    if (!isTauri || isLinux) {
       if (manual) set({ phase: "uptodate" });
       return;
     }

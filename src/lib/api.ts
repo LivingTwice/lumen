@@ -148,13 +148,26 @@ export interface Api {
 async function createTauriApi(): Promise<Api> {
   const core = await import("@tauri-apps/api/core");
   const { invoke, Channel, convertFileSrc } = core;
+  // lue une fois : l'adresse du serveur local des médias (Linux), pour
+  // construire les adresses sans attendre
+  const info = await invoke<AppInfo>("app_info");
+  const mediaUrl = (path: string): string => {
+    if (info.media_base) {
+      const root = `${info.data_dir.replace(/\/+$/, "")}/media/`;
+      if (path.startsWith(root)) {
+        const rel = path.slice(root.length).split("/").map(encodeURIComponent).join("/");
+        return `${info.media_base}/${rel}`;
+      }
+    }
+    return convertFileSrc(path);
+  };
   const ch = <T,>(fn: (v: T) => void) => {
     const c = new Channel<T>();
     c.onmessage = fn;
     return c;
   };
   return {
-    appInfo: () => invoke("app_info"),
+    appInfo: () => Promise.resolve(info),
     appRelaunch: () => invoke("app_relaunch"),
     settingsGet: () => invoke("settings_get"),
     settingsSet: (key, value) => invoke("settings_set", { key, value }),
@@ -245,7 +258,7 @@ async function createTauriApi(): Promise<Api> {
     podcastCreate: (lang, request, onEvent) => invoke("podcast_create", { lang, request, onEvent: ch<ImportEvent>(onEvent) }),
     levelEstimate: (lang) => invoke("level_estimate", { lang }),
     textStats: (lang, text) => invoke("text_stats", { lang, text }),
-    mediaUrl: (path) => convertFileSrc(path),
+    mediaUrl,
   };
 }
 

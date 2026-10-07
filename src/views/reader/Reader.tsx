@@ -9,7 +9,7 @@ import { pronounce } from "../../lib/pronounce";
 import { studyTime, useStudyClock } from "../../lib/progress";
 import { formatNumber, useApp } from "../../lib/store";
 import { fitPages, pageOfToken } from "../../lib/pagefit";
-import { isWindows } from "../../lib/platform";
+import { isPc } from "../../lib/platform";
 import { panelMode, readerLook, roomForSidePanel } from "../../lib/reading";
 import { paginate, sentenceBounds, type PageRange } from "../../lib/tokenize";
 import type { LessonSummary, OpenedLesson, Term, Token } from "../../lib/types";
@@ -1360,7 +1360,7 @@ export function Reader() {
                 floating
                   ? t("Fixer le panneau du mot à droite", "Dock the word panel on the right")
                   : t("Panneau du mot flottant, au-dessus du mot touché : tout l'écran pour le texte", "Floating word panel, above the word you tap: the whole screen for the text")
-              } (${isWindows ? "Ctrl+I" : "⌃⌘I"})`}
+              } (${isPc ? "Ctrl+I" : "⌃⌘I"})`}
             >
               <Icon name="panel" size={18} />
             </button>

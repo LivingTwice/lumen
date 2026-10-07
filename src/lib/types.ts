@@ -235,6 +235,8 @@ export interface AppInfo {
   version: string;
   data_dir: string;
   platform: string;
+  /** Linux : adresse de base du serveur local des médias (vide ailleurs) */
+  media_base: string;
   ytdlp: boolean;
   transcriber: boolean;
   dict_langs: string[];
