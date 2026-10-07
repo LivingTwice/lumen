@@ -20,6 +20,7 @@
 , libsoup_3
 , libxkbcommon
 , wayland
+, libpulseaudio
 , gst_all_1
 , yt-dlp
 , ffmpeg
@@ -40,6 +41,7 @@ llvmPackages.stdenv.mkDerivation {
     shaderc
     vulkan-headers
     vulkan-loader
+    libpulseaudio
     spirv-headers
     glib
     gsettings-desktop-schemas
@@ -71,11 +73,14 @@ llvmPackages.stdenv.mkDerivation {
     export CMAKE_PREFIX_PATH="${lib.concatStringsSep ":" [ vulkan-headers vulkan-loader spirv-headers ]}"
     export XDG_DATA_DIRS="${gsettings-desktop-schemas}/share/gsettings-schemas/${gsettings-desktop-schemas.name}:${gtk3}/share/gsettings-schemas/${gtk3.name}:$XDG_DATA_DIRS"
     export GST_PLUGIN_SYSTEM_PATH_1_0="${lib.makeSearchPath "lib/gstreamer-1.0" [
+      (lib.getLib gst_all_1.gstreamer)
       gst_all_1.gst-plugins-base
       gst_all_1.gst-plugins-good
       gst_all_1.gst-plugins-bad
       gst_all_1.gst-plugins-ugly
       gst_all_1.gst-libav
     ]}"
+    # le même chemin par l'ancienne variable : certains codes ne lisent que celle-là
+    export GST_PLUGIN_PATH="$GST_PLUGIN_SYSTEM_PATH_1_0"
   '';
 }

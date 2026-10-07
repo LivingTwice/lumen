@@ -74,6 +74,12 @@ let resource_dir = std::env::var_os("LUMEN_RESOURCES")
     .join("dicts");
             let dicts = dict::Dicts::new(resource_dir, dict::dict_dir(&data_dir));
             let discover = discover::Store::open(&data_dir);
+            // Linux : l'audio et la vidéo des leçons passent par le petit serveur
+            // local (l'élément média d'WebKitGTK refuse le protocole des ressources)
+            #[cfg(target_os = "linux")]
+            let media_base = mediaserv::start(data_dir.join("media")).unwrap_or_default();
+            #[cfg(not(target_os = "linux"))]
+            let media_base = String::new();
             app.manage(state::AppState {
                 data_dir,
                 db: Mutex::new(conn),
@@ -86,6 +92,7 @@ let resource_dir = std::env::var_os("LUMEN_RESOURCES")
                 discover,
                 levels: Mutex::new(HashMap::new()),
                 codecs: Mutex::new(Vec::new()),
+                media_base,
             });
             // barre des menus (construite par l'interface, lib/menu.ts) : l'élément choisi lui
             // revient par son identifiant ; les actions JavaScript des éléments de sous-menus

@@ -14,6 +14,7 @@
 , wrapGAppsHook3
 , vulkan-headers
 , vulkan-loader
+, libpulseaudio
 , spirv-headers
 , shaderc
 , glib
@@ -153,12 +154,22 @@ rustPlatform.buildRustPackage {
     wrapProgram $out/bin/lumen \
       --set LUMEN_RESOURCES $out/share/lumen \
       --prefix GST_PLUGIN_SYSTEM_PATH_1_0 : "${lib.makeSearchPath "lib/gstreamer-1.0" [
+        (lib.getLib gst_all_1.gstreamer)
         gst_all_1.gst-plugins-base
         gst_all_1.gst-plugins-good
         gst_all_1.gst-plugins-bad
         gst_all_1.gst-plugins-ugly
         gst_all_1.gst-libav
       ]}" \
+      --prefix GST_PLUGIN_PATH : "${lib.makeSearchPath "lib/gstreamer-1.0" [
+        (lib.getLib gst_all_1.gstreamer)
+        gst_all_1.gst-plugins-base
+        gst_all_1.gst-plugins-good
+        gst_all_1.gst-plugins-bad
+        gst_all_1.gst-plugins-ugly
+        gst_all_1.gst-libav
+      ]}" \
+      --prefix LD_LIBRARY_PATH : ${libpulseaudio}/lib \
       --prefix PATH : ${lib.makeBinPath [ yt-dlp ffmpeg ]}
   '';
 

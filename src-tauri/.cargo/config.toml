@@ -23,3 +23,10 @@ GGML_F16C = "ON"
 LLAMA_STATIC_CRT = "1"
 CMAKE_MSVC_RUNTIME_LIBRARY = "MultiThreaded"
 CMAKE_POLICY_DEFAULT_CMP0091 = "NEW"
+
+# Itération rapide avec l'interface embarquée (pas de serveur de développement) :
+# la caractéristique custom-protocol de Tauri embarque dist/ dans l'app, sinon
+# elle chercherait un serveur sur localhost:1420. Voir setup-dev-cycle.sh.
+[alias]
+lumen = "run -p lumen --features tauri/custom-protocol"
+lumen-fast = "run --release -p lumen --features tauri/custom-protocol"
