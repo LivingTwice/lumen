@@ -29,4 +29,7 @@ pub struct AppState {
     /// annoncés par l'interface au démarrage : les vidéos en ligne arrivent dans
     /// le plus léger d'entre eux (`media::video_format`)
     pub codecs: Mutex<Vec<String>>,
+    /// Linux : adresse de base du serveur local des médias (vide ailleurs),
+    /// qui répond aux requêtes de plage que l'élément vidéo d'WebKitGTK exige
+    pub media_base: String,
 }
