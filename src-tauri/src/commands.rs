@@ -52,6 +52,8 @@ pub struct AppInfo {
     version: String,
     data_dir: String,
     platform: String,
+    /// Linux : adresse de base du serveur local des médias (vide ailleurs)
+    pub media_base: String,
     ytdlp: bool,
     transcriber: bool,
     dict_langs: Vec<String>,
@@ -64,6 +66,7 @@ pub async fn app_info(state: State<'_, AppState>) -> R<AppInfo> {
         version: env!("CARGO_PKG_VERSION").to_string(),
         data_dir: state.data_dir.display().to_string(),
         platform: std::env::consts::OS.to_string(),
+        media_base: state.media_base.clone(),
         ytdlp: crate::tools::status(&state.data_dir).0,
         transcriber: media::sidecar_path().is_ok(),
         dict_langs: langs,
