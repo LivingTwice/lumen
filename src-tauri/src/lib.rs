@@ -88,6 +88,7 @@ pub fn run() {
             commands::lesson_create,
             commands::lesson_update,
             commands::lesson_delete,
+            commands::lessons_delete,
             commands::lesson_set_cover,
             commands::playlists_list,
             commands::playlist_create,

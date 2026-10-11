@@ -56,6 +56,14 @@ const samePages = (a: PageRange[], b: PageRange[]) => a.length === b.length && a
  * plus de place au-dessus des lettres qu'en dessous.
  */
 const fontMarks = new Map<string, { ascent: number; capMid: number; half: number }>();
+
+/** Indices des mots parmi les jetons : un mot se retrouve par son rang quand le texte est reponctué. */
+function wordIndexes(toks: Token[]): number[] {
+  const out: number[] = [];
+  toks.forEach((x, i) => x.w && out.push(i));
+  return out;
+}
+
 function readingMarks(el: HTMLElement) {
   const cs = getComputedStyle(el);
   const key = `${cs.fontSize}|${cs.fontFamily}|${cs.fontWeight}`;
@@ -194,6 +202,27 @@ export function Reader() {
 
   const lesson = data?.lesson;
   const tokens = useMemo(() => data?.tokens ?? [], [data]);
+  // texte reponctué (« Ponctuer le texte ») : de nouveaux jetons pour les mêmes mots ;
+  // le mot à l'écran et les mots déjà lus se retrouvent par leur rang
+  const retext = (id: number) => {
+    void api()
+      .lessonOpen(id)
+      .then((d) => {
+        const before = wordIndexes(tokens);
+        const after = wordIndexes(d.tokens);
+        const read = new Uint8Array(d.tokens.length);
+        before.forEach((i, r) => {
+          if (readToks.current[i] && after[r] !== undefined) read[after[r]] = 1;
+        });
+        keepTok.current = after[Math.max(0, before.findIndex((i) => i >= keepTok.current))] ?? 0;
+        readToks.current = read;
+        setRange(null);
+        setCursor(-1);
+        setData(d);
+        setTerms(d.terms);
+      })
+      .catch((e) => toast(errorText(e), "error"));
+  };
   // pages d'environ 230 mots : mode défilement, et page enregistrée (avancement de la bibliothèque)
   const basePages = useMemo(() => paginate(tokens), [tokens]);
   // mode pages : pages composées à la taille de l'écran
@@ -1489,7 +1518,7 @@ export function Reader() {
           onCursor={setCursor}
           videoHost={videoHost}
           onState={onPlayback}
-          onResynced={(t) => setData((d) => (d ? { ...d, lesson: { ...d.lesson, timings: t, timing_v: 2 } } : d))}
+          onResynced={(r) => (r.text ? retext(lesson.id) : setData((d) => (d ? { ...d, lesson: { ...d.lesson, timings: r.timings, timing_v: 2 } } : d)))}
           onVoiced={(v) => setData((d) => (d ? { ...d, lesson: { ...d.lesson, ...v, position: 0 } } : d))}
           autoplay={autoplay}
           onFinished={onFinished}

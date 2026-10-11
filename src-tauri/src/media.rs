@@ -40,6 +40,12 @@ pub fn sidecar_path() -> Result<PathBuf> {
     Err(anyhow!(crate::i18n::t("le composant de transcription est absent de l'application", "the transcription component is missing from the app")))
 }
 
+/// Durée d'un son ou d'une vidéo, lue dans le fichier ; à défaut (Windows : MP3,
+/// WebM), la fin du dernier mot minuté, un peu courte mais juste à la minute.
+pub fn duration_of(path: &Path, last_word_end: Option<f64>) -> Option<f64> {
+    crate::compress::duration(path).or(last_word_end).filter(|d| d.is_finite() && *d > 0.0).map(|d| (d * 10.0).round() / 10.0)
+}
+
 /// Copie le fichier dans la bibliothèque de Lumen et renvoie son nouveau chemin.
 pub fn store_media(data_dir: &Path, src: &Path) -> Result<PathBuf> {
     let dir = media_dir(data_dir);
@@ -161,7 +167,7 @@ pub async fn lesson_transcript(
     })
     .await;
     let words = match heard {
-        Ok(w) => w,
+        Ok(w) => collapse_word_loops(w, lang),
         Err(e) => {
             if let Some(p) = &pcm {
                 let _ = std::fs::remove_file(p);
@@ -193,6 +199,8 @@ pub async fn lesson_transcript(
         let _ = std::fs::remove_file(&pcm);
         match written {
             Ok(t) if !t.trim().is_empty() => {
+                // Qwen3-ASR oublie parfois de ponctuer la parole spontanée : Whisper comble
+                let t = borrow_punctuation(&collapse_loops(&t, lang), lang, &words);
                 let (t_timings, found) = align_timings(&t, lang, &words);
                 // garde-fou : un texte qui ne ressemble pas à ce qu'a entendu Whisper est écarté
                 if found >= 0.5 {
@@ -236,12 +244,7 @@ pub fn airy(text: &str, lang: &str, timings: &str) -> (String, String) {
     if n < 2 {
         return (text.trim().to_string(), timings.to_string());
     }
-    // position UTF-16 → position en octets
-    let mut byte_at: Vec<usize> = Vec::with_capacity(text.len() + 1);
-    for (i, c) in text.char_indices() {
-        byte_at.extend(std::iter::repeat_n(i, c.len_utf16()));
-    }
-    byte_at.push(text.len());
+    let byte_at = byte_positions(text);
     let byte = |p: usize| byte_at[p.min(byte_at.len() - 1)];
     let when: HashMap<usize, (f64, f64)> = times.iter().map(|t| (t[0] as usize, (t[2], t[3]))).collect();
     let wt: Vec<Option<(f64, f64)>> = words.iter().map(|w| when.get(&w.s).copied()).collect();
@@ -361,23 +364,253 @@ impl Utf16Text {
     }
 }
 
+/// Position en octets de chaque unité UTF-16 du texte (et de sa fin).
+fn byte_positions(text: &str) -> Vec<usize> {
+    let mut byte_at: Vec<usize> = Vec::with_capacity(text.len() + 1);
+    for (i, c) in text.char_indices() {
+        byte_at.extend(std::iter::repeat_n(i, c.len_utf16()));
+    }
+    byte_at.push(text.len());
+    byte_at
+}
+
+// ---------- boucles ----------
+
+/// Répétitions en boucle d'une transcription (« oh oh oh… » des centaines de
+/// fois sur une musique de fin) : une suite de 1 à 8 mots redite au moins 5 fois
+/// de suite (8 pour un seul mot). Renvoie les intervalles [début, fin) à
+/// retirer : tout sauf la première occurrence.
+fn loops(keys: &[String]) -> Vec<(usize, usize)> {
+    let n = keys.len();
+    let mut out = Vec::new();
+    let mut i = 0;
+    'scan: while i < n {
+        for k in 1..=8 {
+            let need = if k == 1 { 8 } else { 5 };
+            if i + k * need > n {
+                continue;
+            }
+            let mut r = 1;
+            while i + (r + 1) * k <= n && keys[i + r * k..i + (r + 1) * k] == keys[i..i + k] {
+                r += 1;
+            }
+            if r >= need {
+                out.push((i + k, i + r * k));
+                i += r * k;
+                continue 'scan;
+            }
+        }
+        i += 1;
+    }
+    out
+}
+
+/// Le texte sans ses boucles (voir `loops`) : de la fin de la première
+/// occurrence à la fin de la dernière, tout disparaît.
+pub fn collapse_loops(text: &str, lang: &str) -> String {
+    let toks: Vec<text::Token> = text::tokenize(text, lang).into_iter().filter(|t| t.w).collect();
+    let cut = loops(&toks.iter().map(|t| t.k.clone()).collect::<Vec<_>>());
+    if cut.is_empty() {
+        return text.to_string();
+    }
+    let byte_at = byte_positions(text);
+    let byte = |p: usize| byte_at[p.min(byte_at.len() - 1)];
+    let mut out = String::with_capacity(text.len());
+    let mut from = 0;
+    for (a, b) in cut {
+        out.push_str(&text[from..byte(toks[a - 1].e)]);
+        from = byte(toks[b - 1].e);
+    }
+    out.push_str(&text[from..]);
+    out
+}
+
+/// Les mots entendus par Whisper, sans leurs boucles.
+pub fn collapse_word_loops(words: Vec<WWord>, lang: &str) -> Vec<WWord> {
+    let keys: Vec<String> = words.iter().map(|w| text::word_keys(w.w.trim(), lang).join(" ")).collect();
+    let cut = loops(&keys);
+    if cut.is_empty() {
+        return words;
+    }
+    words.into_iter().enumerate().filter(|(i, _)| !cut.iter().any(|&(a, b)| (a..b).contains(i))).map(|(_, w)| w).collect()
+}
+
+// ---------- ponctuation oubliée ----------
+
+/// Au-delà, une suite de mots sans fin de phrase est une ponctuation oubliée :
+/// Qwen3-ASR écrit parfois la parole spontanée sans un point pendant des
+/// minutes (509 mots d'affilée sur une conversation d'Easy Italian), là où
+/// Whisper ponctue (38 mots au plus pour la même vidéo).
+pub const RUN_ON_WORDS: usize = 40;
+
+/// Ponctuation que Whisper prête à la transcription.
+const PUNCT: &[char] = &['.', ',', ';', ':', '!', '?', '…', '。', '，', '、', '！', '？', '।', '؟', '،'];
+
+/// Ponctuation de fin de phrase (sans le retour à la ligne de `text::ends_sentence`).
+fn closes_sentence(g: &str) -> bool {
+    g.contains(['.', '!', '?', '…', ';', '。', '！', '？', '।', '؟'])
+}
+
+/// Saut de paragraphe : la mise en page aérée en met au milieu des phrases trop longues.
+fn paragraph_break(g: &str) -> bool {
+    g.matches('\n').count() >= 2
+}
+
+/// Ce qui sépare deux mots termine-t-il une suite ? Une fin de phrase, ou un
+/// simple retour à la ligne (vers d'une chanson, titre) ; un saut de paragraphe, non.
+fn ends_run(g: &str) -> bool {
+    closes_sentence(g) || g.matches('\n').count() == 1
+}
+
+/// Plus longue suite de mots sans fin de phrase (miroir de `longestRun` dans tokenize.ts).
+pub fn longest_run(text: &str, lang: &str) -> usize {
+    let (mut best, mut run, mut gap) = (0, 0, String::new());
+    for t in text::tokenize(text, lang) {
+        if t.w {
+            if run > 0 && ends_run(&gap) {
+                best = best.max(run);
+                run = 0;
+            }
+            run += 1;
+            gap.clear();
+        } else {
+            gap.push_str(&t.t);
+        }
+    }
+    best.max(run)
+}
+
+/// Ponctuation qui termine un mot de Whisper (« facile. » → « . »).
+fn trailing_punct(w: &str) -> &str {
+    let w = w.trim_end();
+    &w[w.trim_end_matches(PUNCT).len()..]
+}
+
+/// Le mot avec sa majuscule, si sa clé reste la même (le vocabulaire n'en voit
+/// rien) ; en turc, « i » se garde de devenir un « I » sans point.
+fn capitalized(w: &str, lang: &str) -> String {
+    let mut cs = w.chars();
+    let Some(c) = cs.next() else { return String::new() };
+    if !c.is_lowercase() || (lang == "tr" && c == 'i') {
+        return w.to_string();
+    }
+    let up: String = c.to_uppercase().chain(cs).collect();
+    if text::normalize_for(&up, lang) == text::normalize_for(w, lang) {
+        up
+    } else {
+        w.to_string()
+    }
+}
+
+/// Reprend la ponctuation de Whisper dans les longs passages qu'une
+/// transcription a laissés sans fin de phrase : aux mêmes mots (alignement de
+/// `align_keys`), ses points, virgules et points d'interrogation, et la
+/// majuscule de la phrase qui suit. Les mots et leurs clés ne changent pas ;
+/// ailleurs, le texte reste tel quel. Dans ces passages, un saut de paragraphe
+/// (mise en page aérée d'une phrase sans fin) redevient une espace.
+pub fn borrow_punctuation(text: &str, lang: &str, words: &[WWord]) -> String {
+    let toks: Vec<text::Token> = text::tokenize(text, lang).into_iter().filter(|t| t.w).collect();
+    let n = toks.len();
+    if n < 2 {
+        return text.to_string();
+    }
+    let byte_at = byte_positions(text);
+    let byte = |p: usize| byte_at[p.min(byte_at.len() - 1)];
+    // ce qui suit le mot k : jusqu'au mot suivant, ou la fin du texte
+    let gap = |k: usize| if k + 1 < n { &text[byte(toks[k].e)..byte(toks[k + 1].s)] } else { &text[byte(toks[k].e)..] };
+    let mut long = vec![false; n];
+    let mut a = 0;
+    for k in 0..n {
+        if k + 1 == n || ends_run(gap(k)) {
+            if k + 1 - a > RUN_ON_WORDS {
+                long[a..=k].fill(true);
+            }
+            a = k + 1;
+        }
+    }
+    if !long.contains(&true) {
+        return text.to_string();
+    }
+    let heard = heard_keys(words, lang);
+    let ka: Vec<String> = toks.iter().map(|t| t.k.clone()).collect();
+    let kb: Vec<String> = heard.iter().map(|h| h.k.clone()).collect();
+    let mut punct: Vec<&str> = vec![""; n];
+    for (i, j) in align_keys(&ka, &kb) {
+        if long[i] {
+            punct[i] = &heard[j].punct;
+        }
+    }
+    // saut de paragraphe au milieu d'une phrase : une simple espace
+    let spaced = |g: &str| {
+        if !paragraph_break(g) || closes_sentence(g) {
+            return g.to_string();
+        }
+        let mut s = String::new();
+        for c in g.chars() {
+            if !c.is_whitespace() {
+                s.push(c);
+            } else if !s.ends_with(' ') {
+                s.push(' ');
+            }
+        }
+        s
+    };
+    let mut out = String::with_capacity(text.len() + n * 2);
+    out.push_str(&text[..byte(toks[0].s)]);
+    let mut capital = false;
+    for k in 0..n {
+        // une phrase commence : après la ponctuation reprise, ou en tête d'un passage
+        // (Qwen3-ASR met parfois un point sans majuscule entre deux morceaux)
+        capital |= long[k] && (k == 0 || closes_sentence(gap(k - 1)));
+        let w = &text[byte(toks[k].s)..byte(toks[k].e)];
+        out.push_str(&if capital { capitalized(w, lang) } else { w.to_string() });
+        capital = false;
+        let (g, p) = (gap(k), punct[k]);
+        if !long[k] {
+            out.push_str(g);
+        } else if !p.is_empty() && g.trim().is_empty() {
+            out.push_str(p);
+            out.push_str(&spaced(g));
+            capital = closes_sentence(p);
+        } else if closes_sentence(p) && matches!(g.trim(), "," | "，" | "،") {
+            // une virgule là où Whisper entend la fin d'une phrase
+            out.push_str(p);
+            out.push_str(&spaced(g.trim_start_matches([',', '，', '،'])));
+            capital = true;
+        } else {
+            out.push_str(&spaced(g));
+        }
+    }
+    out
+}
+
 // ---------- recalage sur un texte existant ----------
 
 fn round2(x: f64) -> f64 {
     (x * 100.0).round() / 100.0
 }
 
+/// Mot entendu, redécoupé comme le texte de Lumen.
+struct Heard {
+    k: String,
+    t0: f64,
+    t1: f64,
+    /// ponctuation qui suit le mot de Whisper (portée par sa dernière partie)
+    punct: String,
+}
+
 /// Mots entendus, redécoupés comme le texte de Lumen (élisions comprises),
 /// la durée d'un mot coupé étant répartie au prorata de la longueur.
-fn heard_keys(words: &[WWord], lang: &str) -> Vec<(String, f64, f64)> {
+fn heard_keys(words: &[WWord], lang: &str) -> Vec<Heard> {
     let mut out = Vec::new();
     for w in words {
         let parts: Vec<text::Token> = text::tokenize(w.w.trim(), lang).into_iter().filter(|t| t.w).collect();
         let total: usize = parts.iter().map(|p| p.e - p.s).sum();
         let mut at = w.t0;
-        for p in &parts {
+        for (i, p) in parts.iter().enumerate() {
             let d = if total > 0 { (w.t1 - w.t0).max(0.0) * (p.e - p.s) as f64 / total as f64 } else { 0.0 };
-            out.push((p.k.clone(), at, at + d));
+            let punct = if i + 1 == parts.len() { trailing_punct(&w.w).to_string() } else { String::new() };
+            out.push(Heard { k: p.k.clone(), t0: at, t1: at + d, punct });
             at += d;
         }
     }
@@ -481,11 +714,11 @@ pub fn align_timings(text_in: &str, lang: &str, words: &[WWord]) -> (String, f64
     let toks: Vec<text::Token> = text::tokenize(text_in, lang).into_iter().filter(|t| t.w).collect();
     let heard = heard_keys(words, lang);
     let a: Vec<String> = toks.iter().map(|t| t.k.clone()).collect();
-    let b: Vec<String> = heard.iter().map(|h| h.0.clone()).collect();
+    let b: Vec<String> = heard.iter().map(|h| h.k.clone()).collect();
     let pairs = align_keys(&a, &b);
     let mut times: Vec<Option<(f64, f64)>> = vec![None; toks.len()];
     for &(i, j) in &pairs {
-        times[i] = Some((heard[j].1, heard[j].2));
+        times[i] = Some((heard[j].t0, heard[j].t1));
     }
     // mots non retrouvés entre deux mots retrouvés : temps réparti au prorata de la longueur
     let mut i = 0;
@@ -913,6 +1146,99 @@ mod tests {
         let (out, ot) = airy(text, "it", &some);
         assert_eq!(out, "Prima frase qui.\n\nSeconda frase qui.\n\nTerza frase qui.");
         same_words(text, &some, &out, &ot);
+    }
+
+    #[test]
+    fn whisper_punctuates_run_on_transcripts() {
+        // Qwen3-ASR : 48 mots sans un point, mieux entendus (« due tre ») ; Whisper ponctue
+        let base = "ne fumavo due tre o quattro al massimo ed è stato più facile per chi fuma un pacchetto capisco che possa diventare difficile due nazioni possono avere vizi diversi penso di sì poi l'uomo è uomo in ogni caso uomini e donne però il luogo influenza il vizio che si può sviluppare";
+        let heard = "Ne fumavo tre o quattro al massimo, ed è stato più facile. Per chi fuma un pacchetto capisco che possa diventare difficile. Due nazioni possono avere vizi diversi? Penso di sì, poi l'uomo è uomo in ogni caso, uomini e donne, però il luogo influenza il vizio che si può sviluppare.";
+        let words: Vec<WWord> = heard.split(' ').enumerate().map(|(i, w)| ww(&format!(" {w}"), i as f64 * 0.3, i as f64 * 0.3 + 0.25)).collect();
+        assert!(longest_run(base, "it") > RUN_ON_WORDS);
+        let out = borrow_punctuation(base, "it", &words);
+        assert_eq!(
+            out,
+            "Ne fumavo due tre o quattro al massimo, ed è stato più facile. Per chi fuma un pacchetto capisco che possa diventare difficile. Due nazioni possono avere vizi diversi? Penso di sì, poi l'uomo è uomo in ogni caso, uomini e donne, però il luogo influenza il vizio che si può sviluppare."
+        );
+        // mêmes mots, mêmes clés : le vocabulaire n'y voit rien
+        assert_eq!(text::word_keys(&out, "it"), text::word_keys(base, "it"));
+        assert_eq!(longest_run(&out, "it"), 24);
+        // texte déjà ponctué, ou suite courte : rien ne change
+        assert_eq!(borrow_punctuation(heard, "it", &words), heard);
+        let short = "penso di sì poi l'uomo è uomo";
+        assert_eq!(borrow_punctuation(short, "it", &words), short);
+    }
+
+    #[test]
+    fn run_on_lessons_are_repaired_and_songs_left_alone() {
+        // leçon déjà aérée : sauts de paragraphe au milieu des phrases, une virgule à la place d'un point
+        let text = (0..30).map(|i| format!("parola{i}")).collect::<Vec<_>>().join(" ")
+            + ",\n\n"
+            + &(30..60).map(|i| format!("parola{i}")).collect::<Vec<_>>().join(" ");
+        let heard: Vec<WWord> = (0..60).map(|i| ww(&format!(" parola{i}{}", if i == 29 { "." } else if i == 59 { "!" } else { "" }), i as f64, i as f64 + 0.5)).collect();
+        assert_eq!(longest_run(&text, "it"), 60);
+        let out = borrow_punctuation(&text, "it", &heard);
+        assert!(out.starts_with("Parola0 ") && out.contains("parola29. Parola30") && out.ends_with("parola59!"), "{out}");
+        // un point sans majuscule (entre deux morceaux de Qwen3-ASR), une apostrophe avant un saut de paragraphe
+        let text = format!("Fine. {}\n\n{}", (0..30).map(|i| format!("parola{i}")).collect::<Vec<_>>().join(" "), (30..60).map(|i| format!("parola{i}")).collect::<Vec<_>>().join(" ").replacen("parola40", "po'\n\nparola40", 1));
+        let out = borrow_punctuation(&text, "it", &[]);
+        assert!(out.starts_with("Fine. Parola0 parola1") && out.contains("po' parola40") && !out.contains('\n'), "{out}");
+        // une chanson : un vers par ligne, sans ponctuation ; chaque retour à la ligne termine une suite
+        let song = (0..12).map(|v| (0..6).map(|i| format!("mot{v}x{i}")).collect::<Vec<_>>().join(" ")).collect::<Vec<_>>().join("\n");
+        assert_eq!(longest_run(&song, "it"), 6);
+        // japonais, sans espaces
+        let ja = "今日はとても暑いですね".repeat(6);
+        let jw: Vec<WWord> = (0..6).map(|i| ww(&format!("今日はとても暑いですね{}", if i == 2 { "。" } else { "" }), i as f64, i as f64 + 0.9)).collect();
+        let out = borrow_punctuation(&ja, "ja", &jw);
+        assert_eq!(out.matches('。').count(), 1);
+        assert_eq!(text::word_keys(&out, "ja"), text::word_keys(&ja, "ja"));
+    }
+
+    #[test]
+    fn transcription_loops_are_collapsed() {
+        let text = format!("Scrivicelo nei commenti. Ciao!{} Oh oh", " oh".repeat(300));
+        assert_eq!(collapse_loops(&text, "it"), "Scrivicelo nei commenti. Ciao! oh");
+        let text = "Ciao a tutti. E poi e poi e poi e poi e poi e poi, basta.";
+        assert_eq!(collapse_loops(text, "it"), "Ciao a tutti. E poi, basta.");
+        // la parole ordinaire ne bouge pas : « sì » redit, refrain redit trois fois
+        let speech = "Sì, sì, sì, sì. Vieni qui, vieni qui, vieni qui!";
+        assert_eq!(collapse_loops(speech, "it"), speech);
+        let words: Vec<WWord> = (0..20).map(|i| ww(if i < 2 { " Grazie." } else { " oh" }, i as f64, i as f64 + 0.5)).collect();
+        let kept = collapse_word_loops(words, "it");
+        assert_eq!(kept.iter().map(|w| w.w.as_str()).collect::<String>(), " Grazie. Grazie. oh");
+    }
+
+    /// Ponctuation reprise sur une vraie transcription : LUMEN_TEST_TEXT=texte.txt
+    /// LUMEN_TEST_WORDS=mots.json (sortie `done` de lumen-whisper) LUMEN_TEST_LANG=it
+    /// cargo test --lib punctuation_live -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn punctuation_live() {
+        let (Ok(t), Ok(w)) = (std::env::var("LUMEN_TEST_TEXT"), std::env::var("LUMEN_TEST_WORDS")) else { return };
+        let lang = std::env::var("LUMEN_TEST_LANG").unwrap_or_else(|_| "en".into());
+        let text = std::fs::read_to_string(t).unwrap();
+        let words: Vec<WWord> = serde_json::from_str(&std::fs::read_to_string(w).unwrap()).unwrap();
+        // comme « Recaler la lanterne » sur une leçon déjà importée
+        let words = collapse_word_loops(words, &lang);
+        let unlooped = collapse_loops(&text, &lang);
+        let fixed = borrow_punctuation(&unlooped, &lang, &words);
+        assert_eq!(text::word_keys(&fixed, &lang), text::word_keys(&unlooped, &lang));
+        println!("{} mots, {} sans les boucles", text::word_count(&text, &lang), text::word_count(&unlooped, &lang));
+        let (tm, found) = align_timings(&fixed, &lang, &words);
+        let (out, _) = airy(&fixed, &lang, &tm);
+        let sizes: Vec<usize> = out.split("\n\n").map(|p| p.split_whitespace().count()).collect();
+        println!(
+            "{:.0} % retrouvés · plus longue suite sans point : {} → {} mots · {} paragraphes, {:.1} mots en moyenne",
+            found * 100.0,
+            longest_run(&text, &lang),
+            longest_run(&out, &lang),
+            sizes.len(),
+            sizes.iter().sum::<usize>() as f64 / sizes.len() as f64
+        );
+        println!("{}", out.split("\n\n").take(30).collect::<Vec<_>>().join("\n\n"));
+        if let Ok(path) = std::env::var("LUMEN_AIRY_OUT") {
+            std::fs::write(path, &out).unwrap();
+        }
     }
 
     /// Mise en page réelle : LUMEN_TEST_TEXT=texte.txt LUMEN_TEST_WORDS=mots.json LUMEN_TEST_LANG=it

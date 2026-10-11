@@ -349,6 +349,17 @@ pub fn lessons_list(c: &Connection, lang: &str) -> Result<Vec<LessonSummary>> {
     Ok(out)
 }
 
+/// Leçons d'une langue dont la durée du son reste inconnue (jamais ouvertes :
+/// LingQ, imports d'avant) : chemin du son et fin du dernier mot minuté.
+pub fn media_without_duration(c: &Connection, lang: &str) -> Result<Vec<(i64, String, Option<f64>)>> {
+    let mut st = c.prepare(
+        "SELECT id, media_path, CASE WHEN json_valid(timings) THEN json_extract(timings, '$[#-1][3]') END
+         FROM lessons WHERE lang=?1 AND media_path IS NOT NULL AND duration<=0",
+    )?;
+    let rows = st.query_map([lang], |r| Ok((r.get(0)?, r.get(1)?, r.get::<_, Option<f64>>(2).unwrap_or(None))))?;
+    Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+}
+
 pub fn lesson_get(c: &Connection, id: i64) -> Result<Lesson> {
     let l = c.query_row(
         "SELECT id,lang,title,collection,kind,source,text,media_path,timings,hue,word_count,page,completed,video_path,position,anchor,duration,cover_path,timing_v
@@ -433,6 +444,24 @@ pub fn lesson_delete(c: &Connection, id: i64) -> Result<Vec<String>> {
     Ok(out)
 }
 
+/// Supprime des leçons d'un coup. Renvoie leurs fichiers (son, image,
+/// couverture) qu'aucune autre leçon ne cite plus, à supprimer du disque.
+pub fn lessons_delete(c: &mut Connection, ids: &[i64]) -> Result<Vec<String>> {
+    let tx = c.transaction()?;
+    let mut files = Vec::new();
+    for &id in ids {
+        files.extend(lesson_delete(&tx, id)?);
+    }
+    files.sort();
+    files.dedup();
+    files.retain(|f| {
+        let used = "SELECT 1 FROM lessons WHERE media_path=?1 OR video_path=?1 OR cover_path=?1 LIMIT 1";
+        tx.query_row(used, [f], |_| Ok(())).optional().ok().flatten().is_none()
+    });
+    tx.commit()?;
+    Ok(files)
+}
+
 /// Son, image et adresse d'origine de chaque leçon qui a un son ou une image (pour les alléger).
 #[allow(clippy::type_complexity)]
 pub fn media_files(c: &Connection) -> Result<Vec<(i64, String, Option<String>, Option<String>, String)>> {
@@ -489,6 +518,21 @@ pub fn lesson_set_voice(c: &Connection, id: i64, media: &str, timings: &str, ver
 
 pub fn lesson_set_timings(c: &Connection, id: i64, timings: &str, version: i64) -> Result<()> {
     c.execute("UPDATE lessons SET timings=?1, timing_v=?2 WHERE id=?3", params![timings, version, id])?;
+    Ok(())
+}
+
+/// Texte reponctué d'une leçon transcrite, et ses horodatages précis. Les mots
+/// sont les mêmes, pas les jetons (ponctuation, sauts de paragraphe) : le mot
+/// où la lecture s'était arrêtée est retrouvé par son rang.
+pub fn lesson_set_text(c: &Connection, id: i64, text: &str, timings: &str) -> Result<()> {
+    let (lang, old, anchor): (String, String, i64) =
+        c.query_row("SELECT lang, text, anchor FROM lessons WHERE id=?1", [id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?;
+    let rank = text::tokenize(&old, &lang).iter().take(anchor.max(0) as usize).filter(|t| t.w).count();
+    let anchor = text::tokenize(text, &lang).iter().enumerate().filter(|(_, t)| t.w).nth(rank).map(|(i, _)| i as i64).unwrap_or(0);
+    c.execute(
+        "UPDATE lessons SET text=?1, timings=?2, timing_v=?3, word_count=?4, anchor=?5 WHERE id=?6",
+        params![text, timings, TIMING_PRECISE, text::word_count(text, &lang) as i64, anchor, id],
+    )?;
     Ok(())
 }
 
@@ -1541,6 +1585,30 @@ mod tests {
         let s = &lessons_list(&c, "en").unwrap()[0];
         assert_eq!((s.position, s.duration, s.cover_path.as_deref()), (754.3, 1510.0, Some("/m/b.cover.jpg")));
         assert!(lesson_delete(&c, 1).unwrap().contains(&"/m/b.cover.jpg".to_string()));
+        drop(c);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn lessons_deleted_together_keep_shared_files() {
+        let path = std::env::temp_dir().join(format!("lumen-db-bulk-{}.db", std::process::id()));
+        let _ = std::fs::remove_file(&path);
+        let mut c = open(&path).unwrap();
+        let mk = |c: &Connection, title: &str, media: &str| {
+            lesson_create(c, &NewLesson {
+                lang: "it".into(), title: title.into(), collection: String::new(), kind: "audio".into(),
+                source: String::new(), text: "Ciao a tutti.".into(), media_path: Some(media.into()), timings: None, video_path: None,
+            }).unwrap()
+        };
+        // une leçon simplifiée garde le son de l'originale
+        let (a, b, d) = (mk(&c, "A", "/m/a.m4a"), mk(&c, "B", "/m/shared.m4a"), mk(&c, "D", "/m/shared.m4a"));
+        lesson_set_cover(&c, a, Some("/m/a.cover.jpg")).unwrap();
+        let mut gone = lessons_delete(&mut c, &[a, b]).unwrap();
+        gone.sort();
+        assert_eq!(gone, vec!["/m/a.cover.jpg".to_string(), "/m/a.m4a".to_string()]);
+        let left: Vec<i64> = lessons_list(&c, "it").unwrap().iter().map(|l| l.id).collect();
+        assert_eq!(left, vec![d]);
+        assert_eq!(lessons_delete(&mut c, &[d, 999]).unwrap(), vec!["/m/shared.m4a".to_string()]);
         drop(c);
         let _ = std::fs::remove_file(path);
     }

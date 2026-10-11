@@ -151,23 +151,28 @@ fn transcribe_piece(model: &LlamaModel, mctx: &MtmdContext, audio: &[f32], name:
     let mut batch = LlamaBatch::new(8, 1);
     let mut bytes: Vec<u8> = Vec::new();
     let mut idx = -1;
+    // japonais et chinois s'écrivent sans espaces : une boucle s'y repère caractère par caractère
+    let spaced = !matches!(name, "Japanese" | "Chinese");
+    // boucle déjà écrite : on coupe après sa première occurrence (le modèle n'en ressortirait pas)
+    let looped = |bytes: &[u8]| std::str::from_utf8(bytes).ok().and_then(|text| repeated_tail(text, spaced));
     for _ in 0..max_new {
         let token = sampler.sample(&ctx, idx);
         sampler.accept(token);
         if vocab.is_eog(token) {
             break;
         }
-        bytes.extend(vocab.token_to_piece(token, false, None));
-        if bytes.ends_with(b"<|im_end|>") {
-            bytes.truncate(bytes.len() - 10);
-            break;
-        }
-        if bytes.ends_with(b" ") || bytes.ends_with(b".") {
-            let text = String::from_utf8_lossy(&bytes).to_string();
-            if let Some(cut) = repeated_tail(&text) {
+        let piece = vocab.token_to_piece(token, false, None);
+        // les jetons portent leur espace en tête (« oh») : un mot commence, les précédents sont complets
+        if !spaced || piece.first() == Some(&b' ') {
+            if let Some(cut) = looped(&bytes) {
                 bytes.truncate(cut);
                 break;
             }
+        }
+        bytes.extend(piece);
+        if bytes.ends_with(b"<|im_end|>") {
+            bytes.truncate(bytes.len() - 10);
+            break;
         }
         batch.clear();
         batch.add(token, n_past, &[0], true).map_err(|e| anyhow!("{e}"))?;
@@ -175,6 +180,10 @@ fn transcribe_piece(model: &LlamaModel, mctx: &MtmdContext, audio: &[f32], name:
         ctx.decode(&mut batch).map_err(|e| anyhow!("décodage : {e}"))?;
         idx = batch.n_tokens() - 1;
         n_gen += 1;
+    }
+    // arrêté par la limite de longueur : la boucle peut aller jusqu'au dernier mot
+    if let Some(cut) = looped(&bytes) {
+        bytes.truncate(cut);
     }
     if prof { eprintln!("PROFIL morceau {:.1} s : contexte {:.3} s, écoute {:.3} s ({} jetons), écriture {:.3} s ({} jetons)", secs, t_ctx, t_eval - t_ctx, chunks.total_tokens(), t0.elapsed().as_secs_f64() - t_eval, n_gen); }
     let text = String::from_utf8_lossy(&bytes).to_string();
@@ -184,14 +193,25 @@ fn transcribe_piece(model: &LlamaModel, mctx: &MtmdContext, audio: &[f32], name:
 }
 
 /// Boucle en fin de texte : une suite de 1 à 8 mots répétée au moins 4 fois de
-/// suite. Renvoie la position (octets) où couper, après la première occurrence.
-fn repeated_tail(text: &str) -> Option<usize> {
-    let words: Vec<(usize, &str)> = text.split_whitespace().map(|w| (w.as_ptr() as usize - text.as_ptr() as usize, w)).collect();
+/// suite (6 pour un seul mot) ; sans espaces (`spaced` faux : japonais,
+/// chinois), de 1 à 12 caractères répétés 5 fois (10 pour un seul).
+/// Renvoie la position (octets) où couper, après la première occurrence.
+fn repeated_tail(text: &str, spaced: bool) -> Option<usize> {
+    let words: Vec<(usize, &str)> = if spaced {
+        text.split_whitespace().map(|w| (w.as_ptr() as usize - text.as_ptr() as usize, w)).collect()
+    } else {
+        text.char_indices().filter(|(_, c)| !c.is_whitespace()).map(|(i, c)| (i, &text[i..i + c.len_utf8()])).collect()
+    };
     // « E poi » et « e poi, » sont le même motif
     let keys: Vec<String> = words.iter().map(|(_, w)| w.trim_matches(|c: char| !c.is_alphanumeric()).to_lowercase()).collect();
     let n = words.len();
-    for k in 1..=8 {
-        let reps = if k == 1 { 6 } else { 4 };
+    for k in 1..=(if spaced { 8 } else { 12 }) {
+        let reps = match (spaced, k) {
+            (true, 1) => 6,
+            (true, _) => 4,
+            (false, 1) => 10,
+            (false, _) => 5,
+        };
         if n < k * reps {
             continue;
         }
@@ -270,9 +290,17 @@ mod tests {
     #[test]
     fn loops_are_cut() {
         let t = "Ciao a tutti. E poi e poi e poi e poi ";
-        let cut = repeated_tail(t).unwrap();
+        let cut = repeated_tail(t, true).unwrap();
         assert_eq!(&t[..cut], "Ciao a tutti. E poi");
-        assert_eq!(repeated_tail("Andrea va al negozio e prende un cestino. "), None);
+        assert_eq!(repeated_tail("Andrea va al negozio e prende un cestino. ", true), None);
+        // sans espace final (les jetons portent leur espace en tête : « oh»)
+        let t = "Scrivicelo nei commenti. Oh oh oh oh oh oh";
+        assert_eq!(&t[..repeated_tail(t, true).unwrap()], "Scrivicelo nei commenti. Oh");
+        assert_eq!(repeated_tail("Sì, sì, sì, certo.", true), None);
+        // japonais : caractère par caractère
+        let t = "ありがとうございました。はいはいはいはいはい";
+        assert_eq!(&t[..repeated_tail(t, false).unwrap()], "ありがとうございました。はい");
+        assert_eq!(repeated_tail("今日はとても暑いですね。", false), None);
         assert_eq!(language_name("it"), Some("Italian"));
         assert_eq!(language_name("uk"), None);
     }

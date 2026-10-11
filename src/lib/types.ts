@@ -654,6 +654,12 @@ export interface BackupRestored {
   missing_media: number;
 }
 
+/** Lanterne recalée sur la voix ; `text` : le texte, quand sa ponctuation oubliée a été reprise. */
+export interface Resynced {
+  timings: string;
+  text: string | null;
+}
+
 /** Audio créé par la voix naturelle pour une leçon de texte. */
 export interface VoicedLesson {
   media_path: string;

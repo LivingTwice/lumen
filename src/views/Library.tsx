@@ -9,6 +9,7 @@ import { confirmAsk } from "../lib/dialogs";
 import { count, isEn, t } from "../lib/i18n";
 import { STARTERS, inLang, starterCollection } from "../lib/langs";
 import { formatDuration, formatNumber, useApp } from "../lib/store";
+import { isWindows } from "../lib/platform";
 import type { LessonSummary } from "../lib/types";
 import { useUserName } from "../lib/user";
 
@@ -45,6 +46,10 @@ const BATCH = 24;
 function LessonCard({
   l,
   rise,
+  selecting,
+  picked,
+  onPick,
+  onSelect,
   onDelete,
   onRename,
   onPlaylist,
@@ -53,6 +58,12 @@ function LessonCard({
   l: LessonSummary;
   /** rang de la carte quand elle se lève avec les autres (première apparition de la bibliothèque, « Voir plus ») */
   rise?: number;
+  /** mode sélection : toucher la carte la coche au lieu de l'ouvrir */
+  selecting: boolean;
+  picked: boolean;
+  onPick(e: React.MouseEvent): void;
+  /** « Sélectionner » du menu : la sélection commence par cette leçon */
+  onSelect(): void;
   onDelete(): void;
   onRename(): void;
   onPlaylist(): void;
@@ -77,9 +88,28 @@ function LessonCard({
         layout: SLIDE,
       }}
     >
-      <div className="lesson-card glow-surface" ref={glow.ref} onMouseMove={glow.onMouseMove}>
-        <button className="lesson-hit" onClick={() => openLesson(l.id)} aria-label={t(`Ouvrir ${l.title}`, `Open ${l.title}`)} />
-        <Cover lesson={l} progress={progressOf(l)} editable />
+      <div className={`lesson-card glow-surface ${selecting ? "selecting" : ""} ${picked ? "picked" : ""}`} ref={glow.ref} onMouseMove={glow.onMouseMove}>
+        {selecting ? (
+          <button className="lesson-hit" onClick={onPick} aria-pressed={picked} aria-label={t(`Sélectionner ${l.title}`, `Select ${l.title}`)} />
+        ) : (
+          <button className="lesson-hit" onClick={() => openLesson(l.id)} aria-label={t(`Ouvrir ${l.title}`, `Open ${l.title}`)} />
+        )}
+        <AnimatePresence>
+          {selecting && (
+            <motion.span
+              className={`lesson-check ${picked ? "on" : ""}`}
+              aria-hidden="true"
+              initial={{ opacity: 0, scale: 0.5 }}
+              // cochée : un petit rebond de lumière
+              animate={{ opacity: 1, scale: picked ? [null, 1.22, 1] : 1 }}
+              exit={{ opacity: 0, scale: 0.6, transition: { duration: 0.14 } }}
+              transition={{ opacity: { duration: 0.16 }, scale: { duration: 0.32, ease: [0.2, 0.8, 0.2, 1] } }}
+            >
+              <Icon name="check" size={14} stroke={2.8} />
+            </motion.span>
+          )}
+        </AnimatePresence>
+        <Cover lesson={l} progress={progressOf(l)} duration={l.has_media ? l.duration : 0} editable />
         <div className="lesson-body">
           {l.collection && <span className="lesson-collection">{l.collection}</span>}
           <h3 className="lesson-title">{l.title}</h3>
@@ -126,6 +156,9 @@ function LessonCard({
             </button>
             <button className="menu-item" onClick={() => (setMenu(false), onRename())}>
               <Icon name="edit" size={16} /> {t("Renommer", "Rename")}
+            </button>
+            <button className="menu-item" onClick={() => (setMenu(false), onSelect())}>
+              <Icon name="check" size={16} /> {t("Sélectionner plusieurs leçons", "Select several lessons")}
             </button>
             <div className="menu-sep" />
             <button className="menu-item danger" onClick={() => (setMenu(false), onDelete())}>
@@ -222,6 +255,99 @@ export function Library() {
     bump();
   };
 
+  // ---------- sélection de plusieurs leçons (pour les supprimer d'un coup) ----------
+  const [selecting, setSelecting] = useState(false);
+  const [picked, setPicked] = useState<Set<number>>(() => new Set());
+  // dernière carte touchée : Maj + clic coche tout l'intervalle jusqu'à elle
+  const pickFrom = useRef<number | null>(null);
+  const startSelect = (first?: number) => {
+    setSelecting(true);
+    setPicked(new Set(first === undefined ? [] : [first]));
+    pickFrom.current = first ?? null;
+  };
+  const stopSelect = () => {
+    setSelecting(false);
+    setPicked(new Set());
+    pickFrom.current = null;
+  };
+  const pick = (id: number, range: boolean) => {
+    // lu avant la mise à jour : React l'applique plus tard, pickFrom aura déjà changé
+    const fromId = pickFrom.current;
+    pickFrom.current = id;
+    setPicked((now) => {
+      const next = new Set(now);
+      const from = fromId === null ? -1 : shown.findIndex((x) => x.id === fromId);
+      const to = shown.findIndex((x) => x.id === id);
+      if (range && from >= 0 && to >= 0) {
+        for (let i = Math.min(from, to); i <= Math.max(from, to); i++) next.add(shown[i].id);
+      } else if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  };
+  const allPicked = shown.length > 0 && shown.every((l) => picked.has(l.id));
+  const pickAll = () => setPicked(allPicked ? new Set() : new Set(shown.map((l) => l.id)));
+  // ce qui est coché reste visible : un filtre ou une recherche décoche ce qu'il cache
+  useEffect(() => {
+    setPicked((now) => {
+      const ids = new Set(shown.map((l) => l.id));
+      const kept = [...now].filter((id) => ids.has(id));
+      return kept.length === now.size ? now : new Set(kept);
+    });
+  }, [shown]);
+  const removePicked = async () => {
+    const ids = shown.filter((l) => picked.has(l.id)).map((l) => l.id);
+    if (!ids.length) return;
+    const one = ids.length === 1 ? shown.find((l) => l.id === ids[0]) : null;
+    const ok = await confirmAsk(
+      one
+        ? t(`Supprimer « ${one.title} » ? Les mots appris sont conservés.`, `Delete “${one.title}”? The words you learned are kept.`)
+        : t(`Supprimer ces ${ids.length} leçons ? Les mots appris sont conservés.`, `Delete these ${ids.length} lessons? The words you learned are kept.`),
+      one ? t("Supprimer la leçon", "Delete the lesson") : t("Supprimer les leçons", "Delete the lessons"),
+      t("Supprimer", "Delete"),
+    );
+    if (!ok) return;
+    try {
+      await api().lessonsDelete(ids);
+    } catch (e) {
+      toast(errorText(e), "error");
+      bump();
+      return;
+    }
+    for (const id of ids) useApp.getState().forgetLesson(id);
+    toast(count(ids.length, "leçon supprimée", "leçons supprimées", "lesson deleted", "lessons deleted"));
+    stopSelect();
+    bump();
+  };
+  useEffect(() => {
+    if (!selecting) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.defaultPrevented) return;
+      const typing = e.target instanceof HTMLElement && !!e.target.closest("input, textarea, select, [contenteditable]");
+      if (e.key === "Escape") {
+        e.preventDefault();
+        stopSelect();
+      } else if (!typing && (isWindows ? e.ctrlKey : e.metaKey) && e.key.toLowerCase() === "a") {
+        e.preventDefault();
+        setPicked(new Set(shown.map((l) => l.id)));
+      } else if (!typing && (e.key === "Backspace" || e.key === "Delete") && picked.size) {
+        e.preventDefault();
+        void removePicked();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  });
+  // menu Édition › Sélectionner des leçons
+  useEffect(() => {
+    const onMenu = () => startSelect();
+    window.addEventListener("lumen:select-lessons", onMenu);
+    return () => window.removeEventListener("lumen:select-lessons", onMenu);
+  }, []);
+
   const [adding, setAdding] = useState<LessonSummary | null>(null);
   const [renaming, setRenaming] = useState<LessonSummary | null>(null);
   const [newTitle, setNewTitle] = useState("");
@@ -272,7 +398,7 @@ export function Library() {
               animate={{ opacity: 1, y: 0 }}
               transition={{ type: "spring", stiffness: 220, damping: 26 }}
             >
-              <Cover lesson={resume} big progress={progressOf(resume)} />
+              <Cover lesson={resume} big progress={progressOf(resume)} duration={resume.has_media ? resume.duration : 0} />
               <div className="hero-body">
                 <span className="eyebrow">{t("Reprendre la lecture", "Continue reading")}</span>
                 <h2 className="display">{resume.title}</h2>
@@ -313,6 +439,9 @@ export function Library() {
                   { value: "done", label: t("Terminées", "Finished") },
                 ]}
               />
+              <button className={`btn sm ${selecting ? "soft" : "ghost"} lib-select`} onClick={() => (selecting ? stopSelect() : startSelect())} aria-pressed={selecting}>
+                <Icon name="check" size={15} stroke={2.4} /> {selecting ? t("Terminé", "Done") : t("Sélectionner", "Select")}
+              </button>
             </div>
           )}
 
@@ -341,13 +470,17 @@ export function Library() {
           )}
 
           {/* « popLayout » : une carte qui s'en va quitte aussitôt la grille, les autres prennent sa place en glissant */}
-          <div className="lesson-grid">
+          <div className={`lesson-grid ${selecting ? "selecting" : ""}`}>
             <AnimatePresence mode="popLayout">
               {shown.slice(0, limit).map((l, i) => (
                 <LessonCard
                   key={l.id}
                   l={l}
                   rise={intro ? i : risen !== null && i >= risen ? i - risen : undefined}
+                  selecting={selecting}
+                  picked={picked.has(l.id)}
+                  onPick={(e) => pick(l.id, e.shiftKey)}
+                  onSelect={() => startSelect(l.id)}
                   onDelete={() => remove(l)}
                   onRename={() => rename(l)}
                   onPlaylist={() => setAdding(l)}
@@ -367,6 +500,36 @@ export function Library() {
         </div>
       </div>
       <ScrollTop target={scroller} />
+      <div className="lib-selbar-wrap">
+        <AnimatePresence>
+          {selecting && (
+            <motion.div
+              className="lib-selbar"
+              role="toolbar"
+              aria-label={t("Leçons sélectionnées", "Selected lessons")}
+              initial={{ opacity: 0, y: 22, scale: 0.96 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 14, scale: 0.97, transition: { duration: 0.16, ease: "easeOut" } }}
+              transition={{ type: "spring", stiffness: 380, damping: 30 }}
+            >
+              <span className="lib-selcount num" aria-live="polite">
+                {picked.size
+                  ? count(picked.size, "leçon sélectionnée", "leçons sélectionnées", "lesson selected", "lessons selected")
+                  : t("Touchez les leçons à sélectionner", "Click the lessons to select")}
+              </span>
+              <button className="btn sm ghost" onClick={pickAll} disabled={!shown.length}>
+                {allPicked ? t("Tout désélectionner", "Deselect all") : t("Tout sélectionner", "Select all")}
+              </button>
+              <button className="btn sm danger" onClick={() => void removePicked()} disabled={!picked.size}>
+                <Icon name="trash" size={15} /> {t("Supprimer", "Delete")}
+              </button>
+              <button className="icon-btn" onClick={stopSelect} aria-label={t("Terminer la sélection", "Done selecting")} title={t("Terminer la sélection (Échap)", "Done selecting (Esc)")}>
+                <Icon name="close" size={16} />
+              </button>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
       <Sheet
         open={!!renaming}
         onClose={() => setRenaming(null)}

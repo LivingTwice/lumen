@@ -1,7 +1,7 @@
 import { useId, useMemo, useState, type ReactNode } from "react";
 import { api, errorText } from "../lib/api";
 import { chooseCover, grainTexture, youtubeId, youtubeThumbs } from "../lib/covers";
-import { useApp } from "../lib/store";
+import { formatDuration, useApp } from "../lib/store";
 import type { LessonSummary } from "../lib/types";
 import { Icon, type IconName } from "./Icon";
 import { Menu } from "./ui";
@@ -207,6 +207,7 @@ export function Cover({
   progress = 0,
   editable = false,
   bare = false,
+  duration = 0,
 }: {
   lesson: CoverLesson;
   big?: boolean;
@@ -214,6 +215,8 @@ export function Cover({
   editable?: boolean;
   /** image seule, sans étiquette ni avancement (vignettes, mosaïques) */
   bare?: boolean;
+  /** durée du son ou de la vidéo, en secondes (0 : rien n'est affiché) */
+  duration?: number;
 }) {
   const yt = useMemo(() => youtubeId(lesson.source), [lesson.source]);
   const [stage, setStage] = useState(0);
@@ -246,6 +249,7 @@ export function Cover({
           <span className="cover-kind">
             <Icon name={yt ? "youtube" : k.icon} size={14} />
             {k.label}
+            {duration >= 1 && <span className="cover-duration num">{formatDuration(duration)}</span>}
           </span>
         )}
         {!bare && progress > 0.005 && progress < 0.995 && (

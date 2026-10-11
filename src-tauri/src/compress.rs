@@ -294,6 +294,18 @@ pub fn true_duration(path: &Path, seen: f64) -> f64 {
     }
 }
 
+/// Durée d'un son ou d'une vidéo : AVFoundation sur Mac (MP3 compris).
+#[cfg(target_os = "macos")]
+pub fn duration(path: &Path) -> Option<f64> {
+    mac::duration(path)
+}
+
+/// Durée d'un son ou d'une vidéo : l'en-tête des MP4 et M4A (sons de YouTube, leçons allégées).
+#[cfg(not(target_os = "macos"))]
+pub fn duration(path: &Path) -> Option<f64> {
+    mp4_header(path).map(|(d, _)| d).filter(|d| d.is_finite() && *d > 0.0)
+}
+
 // ---------- allègement ----------
 
 /// Une vidéo à la fois (la puce vidéo ne court pas deux lièvres), un son à la
@@ -859,6 +871,17 @@ mod mac {
         } else {
             track.estimatedDataRate() as f64
         }
+    }
+
+    pub fn duration(path: &Path) -> Option<f64> {
+        if !path.is_file() {
+            return None;
+        }
+        autoreleasepool(|_| unsafe {
+            let asset = AVURLAsset::URLAssetWithURL_options(&url(path), None);
+            let d = super::true_duration(path, asset.duration().seconds());
+            (d.is_finite() && d > 0.0).then_some(d)
+        })
     }
 
     pub fn probe(path: &Path) -> Result<Probe> {

@@ -330,6 +330,7 @@ function editMenu(s: Snap): SubmenuOptions {
     { item: "Copy", text: t("Copier", "Copy") },
     { item: "Paste", text: t("Coller", "Paste") },
     { item: "SelectAll", text: t("Tout sélectionner", "Select All") },
+    act(t("Sélectionner des leçons", "Select Lessons"), () => window.dispatchEvent(new Event("lumen:select-lessons")), { on: !s.calm && s.view === "library" }),
     sep,
     act(t("Rechercher…", "Find…"), focusSearch, { key: "CmdOrCtrl+F", on: !s.calm }),
   ]);

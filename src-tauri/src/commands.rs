@@ -122,7 +122,25 @@ fn fetch_dict(app: &tauri::AppHandle, lang: &str) {
 
 #[tauri::command]
 pub async fn lessons_list(state: State<'_, AppState>, lang: String) -> R<Vec<db::LessonSummary>> {
-    db::lessons_list(&state.db.lock(), &lang).map_err(err)
+    let mut list = db::lessons_list(&state.db.lock(), &lang).map_err(err)?;
+    // durée du son encore inconnue (leçon jamais ouverte) : lue dans le fichier, une fois pour
+    // toutes ; un échec ne doit jamais empêcher la bibliothèque de s'afficher
+    if list.iter().any(|l| l.has_media && l.duration <= 0.0) {
+        let missing = db::media_without_duration(&state.db.lock(), &lang).unwrap_or_default();
+        let found: Vec<(i64, f64)> = tauri::async_runtime::spawn_blocking(move || {
+            missing.into_iter().filter_map(|(id, media, end)| media::duration_of(std::path::Path::new(&media), end).map(|d| (id, d))).collect()
+        })
+        .await
+        .unwrap_or_default();
+        let conn = state.db.lock();
+        for &(id, d) in &found {
+            let _ = db::lesson_update(&conn, id, &LessonPatch { duration: Some(d), ..Default::default() });
+            if let Some(l) = list.iter_mut().find(|l| l.id == id) {
+                l.duration = d;
+            }
+        }
+    }
+    Ok(list)
 }
 
 #[derive(Serialize)]
@@ -165,7 +183,14 @@ pub async fn lesson_update(state: State<'_, AppState>, id: i64, patch: LessonPat
 
 #[tauri::command]
 pub async fn lesson_delete(state: State<'_, AppState>, id: i64) -> R<()> {
-    let files = db::lesson_delete(&state.db.lock(), id).map_err(err)?;
+    lessons_delete(state, vec![id]).await
+}
+
+/// Supprime plusieurs leçons (sélection de la bibliothèque), et ceux de leurs
+/// fichiers qu'aucune autre leçon ne cite. Les mots appris restent.
+#[tauri::command]
+pub async fn lessons_delete(state: State<'_, AppState>, ids: Vec<i64>) -> R<()> {
+    let files = db::lessons_delete(&mut state.db.lock(), &ids).map_err(err)?;
     for m in files {
         let p = PathBuf::from(m);
         if p.starts_with(media::media_dir(&state.data_dir)) {
@@ -1196,11 +1221,20 @@ pub async fn import_link(
     Ok(id)
 }
 
+#[derive(Serialize)]
+pub struct Resynced {
+    timings: String,
+    /// nouveau texte, quand sa ponctuation oubliée a été reprise (sinon il ne change pas)
+    text: Option<String>,
+}
+
 /// Recale la lanterne d'une leçon audio ou vidéo : l'audio est réécouté avec
-/// le minutage précis et les mots entendus sont alignés sur le texte, qui ne
-/// change pas. Renvoie les nouveaux horodatages.
+/// le minutage précis et les mots entendus sont alignés sur le texte. Le texte
+/// ne change pas, sauf s'il a de longs passages sans ponctuation (transcription
+/// de Qwen3-ASR d'avant la reprise de la ponctuation) : ceux de Whisper la
+/// lui prêtent, puis le texte est aéré de nouveau.
 #[tauri::command]
-pub async fn lesson_resync(state: State<'_, AppState>, id: i64, on_event: Channel<ImportEvent>) -> R<String> {
+pub async fn lesson_resync(state: State<'_, AppState>, id: i64, on_event: Channel<ImportEvent>) -> R<Resynced> {
     let (lang, text, media) = db::lesson_media(&state.db.lock(), id).map_err(err)?;
     let media = media.ok_or(t("Cette leçon n'a pas d'audio à recaler.", "This lesson has no audio to realign."))?;
     let m = active_model(&state, "asr")?;
@@ -1210,7 +1244,11 @@ pub async fn lesson_resync(state: State<'_, AppState>, id: i64, on_event: Channe
     })
     .await
     .map_err(err)?;
-    let (timings, found) = media::align_timings(&text, &lang, &words);
+    let words = media::collapse_word_loops(words, &lang);
+    let fixed = (media::longest_run(&text, &lang) > media::RUN_ON_WORDS)
+        .then(|| media::borrow_punctuation(&media::collapse_loops(&text, &lang), &lang, &words))
+        .filter(|f| *f != text);
+    let (timings, found) = media::align_timings(fixed.as_deref().unwrap_or(&text), &lang, &words);
     if found < 0.3 {
         return Err(t(
             "L'audio ne correspond pas assez au texte de la leçon pour recaler la lanterne.",
@@ -1218,8 +1256,17 @@ pub async fn lesson_resync(state: State<'_, AppState>, id: i64, on_event: Channe
         )
         .into());
     }
-    db::lesson_set_timings(&state.db.lock(), id, &timings, db::TIMING_PRECISE).map_err(err)?;
-    Ok(timings)
+    match fixed {
+        Some(f) => {
+            let (f, timings) = media::airy(&f, &lang, &timings);
+            db::lesson_set_text(&state.db.lock(), id, &f, &timings).map_err(err)?;
+            Ok(Resynced { timings, text: Some(f) })
+        }
+        None => {
+            db::lesson_set_timings(&state.db.lock(), id, &timings, db::TIMING_PRECISE).map_err(err)?;
+            Ok(Resynced { timings, text: None })
+        }
+    }
 }
 
 /// Télécharge l'image d'une vidéo déjà transcrite (leçons importées sans vidéo).

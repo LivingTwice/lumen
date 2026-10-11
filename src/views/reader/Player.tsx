@@ -8,9 +8,9 @@ import { t } from "../../lib/i18n";
 import { stopPronunciation } from "../../lib/pronounce";
 import { playbackRates } from "../../lib/reading";
 import { formatDuration, useApp } from "../../lib/store";
-import type { PageRange } from "../../lib/tokenize";
+import { RUN_ON_WORDS, longestRun, type PageRange } from "../../lib/tokenize";
 import { loadVoices, speak, ttsAvailable, voicesFor, type SpeakHandle } from "../../lib/tts";
-import type { Lesson, Token, VoicedLesson } from "../../lib/types";
+import type { Lesson, Resynced, Token, VoicedLesson } from "../../lib/types";
 
 export interface PlayerHandle {
   toggle(): void;
@@ -41,7 +41,8 @@ interface Props {
   videoHost?: HTMLElement | null;
   onState?(s: PlaybackState): void;
   /** nouveaux horodatages après un recalage de la lanterne */
-  onResynced?(timings: string): void;
+  /** lanterne recalée ; `text` : le texte a été reponctué */
+  onResynced?(r: Resynced): void;
   /** audio créé par la voix naturelle pour une leçon de texte */
   onVoiced?(v: VoicedLesson): void;
   /** la lecture démarre d'elle-même à l'ouverture (playlist qui s'enchaîne) */
@@ -227,15 +228,28 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player({ lesson, 
     };
   }, [remember]);
 
-  // ---------- recalage de la lanterne (minutage approximatif) ----------
+  // ---------- recalage de la lanterne (minutage approximatif), ponctuation oubliée ----------
   const [resync, setResync] = useState<number | null>(null);
-  const canResync = hasMedia && !(lesson.timing_v >= 2);
+  // transcription d'avant la reprise de la ponctuation : de longs passages sans un point
+  // (proposé seulement quand c'est flagrant, et une fois : Whisper n'a peut-être rien à prêter)
+  const [punctTried, setPunctTried] = useState(false);
+  const runOn = useMemo(() => hasMedia && longestRun(tokens) > RUN_ON_WORDS * 2, [hasMedia, tokens]);
+  const punctuate = runOn && !punctTried;
+  const canResync = hasMedia && (!(lesson.timing_v >= 2) || punctuate);
   const recaler = async () => {
     setResync(0);
     try {
-      const timings = await api().lessonResync(lesson.id, (e) => e.type === "progress" && setResync(e.value));
-      onResynced?.(timings);
-      useApp.getState().toast(t("La lanterne suit maintenant la voix, mot à mot", "The lantern now follows the voice, word by word"), "light");
+      const r = await api().lessonResync(lesson.id, (e) => e.type === "progress" && setResync(e.value));
+      onResynced?.(r);
+      setPunctTried(true);
+      useApp
+        .getState()
+        .toast(
+          r.text
+            ? t("Le texte a retrouvé ses points et ses phrases, et la lanterne suit la voix", "The text has its full stops and sentences back, and the lantern follows the voice")
+            : t("La lanterne suit maintenant la voix, mot à mot", "The lantern now follows the voice, word by word"),
+          "light",
+        );
     } catch (e) {
       useApp.getState().toast(errorText(e), "error");
       if (isNoModel(e)) useApp.getState().openSettings("ai");
@@ -713,14 +727,25 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player({ lesson, 
         </button>
         {canResync &&
           (resync === null ? (
-            <button className="btn sm soft player-resync" onClick={recaler} aria-label={t("Recaler la lanterne", "Realign the lantern")}
-              title={t("Réécoute l'audio pour caler la lanterne sur chaque mot. Le texte ne change pas.", "Listens to the audio again to align the lantern on every word. The text doesn't change.")}
-            >
-              <Icon name="sparkle" size={14} /> <span className="resync-label">{t("Recaler la lanterne", "Realign the lantern")}</span>
-            </button>
+            punctuate ? (
+              <button className="btn sm soft player-resync" onClick={recaler} aria-label={t("Ponctuer le texte", "Add punctuation")}
+                title={t(
+                  "La transcription a oublié la ponctuation sur de longs passages. Lumen réécoute l'audio et remet les points, les virgules et les majuscules entendus. Les mots ne changent pas.",
+                  "The transcription left out punctuation in long passages. Lumen listens to the audio again and puts back the full stops, commas and capitals it hears. The words don't change.",
+                )}
+              >
+                <Icon name="sparkle" size={14} /> <span className="resync-label">{t("Ponctuer le texte", "Add punctuation")}</span>
+              </button>
+            ) : (
+              <button className="btn sm soft player-resync" onClick={recaler} aria-label={t("Recaler la lanterne", "Realign the lantern")}
+                title={t("Réécoute l'audio pour caler la lanterne sur chaque mot. Le texte ne change pas.", "Listens to the audio again to align the lantern on every word. The text doesn't change.")}
+              >
+                <Icon name="sparkle" size={14} /> <span className="resync-label">{t("Recaler la lanterne", "Realign the lantern")}</span>
+              </button>
+            )
           ) : (
             <span className="player-resync busy num" role="status">
-              <span className="dot busy" /> {t(`Calage ${Math.round(resync)} %`, `Aligning ${Math.round(resync)}%`)}
+              <span className="dot busy" /> {punctuate ? t(`Ponctuation ${Math.round(resync)} %`, `Punctuating ${Math.round(resync)}%`) : t(`Calage ${Math.round(resync)} %`, `Aligning ${Math.round(resync)}%`)}
             </span>
           ))}
         {(!hasMedia || lesson.media_path?.includes(".voice.")) && <MakeAudio lesson={lesson} again={hasMedia} onVoiced={onVoiced} />}

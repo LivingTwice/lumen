@@ -5,7 +5,7 @@ import type { Api, TermUpdate } from "./api";
 import { t } from "./i18n";
 import pkg from "../../package.json";
 import { LANGS, STARTERS, bundledDict } from "./langs";
-import { tokenize, normalize } from "./tokenize";
+import { RUN_ON_WORDS, longestRun, normalize, tokenize } from "./tokenize";
 import { roughEstimate } from "./level";
 import type {
   BackupCounts,
@@ -271,6 +271,16 @@ export function createMockApi(): Api {
     return Math.min(99, Math.max(1, Math.round((fresh * 100) / distinct)));
   };
 
+  // fin du dernier mot minuté ([début, fin, t0, t1], …)
+  const lastWordEnd = (timings: string | null): number => {
+    try {
+      const all = JSON.parse(timings ?? "[]") as number[][];
+      return all.length ? all[all.length - 1][3] : 0;
+    } catch {
+      return 0;
+    }
+  };
+
   const summary = (l: Lesson): LessonSummary => {
     const keys = tokenize(l.text, l.lang).filter((t) => t.w).map((t) => t.k);
     const uniq = new Set<string>();
@@ -297,7 +307,8 @@ export function createMockApi(): Api {
       known_pct: distinct ? 100 - newPct : 100,
       excerpt: l.text.slice(0, 220).replace(/\n/g, " "),
       position: l.position ?? 0,
-      duration: l.duration ?? 0,
+      // comme lessons_list : durée lue dans le fichier, à défaut la fin du dernier mot minuté
+      duration: l.duration || (l.media_path ? lastWordEnd(l.timings) : 0),
       cover_path: l.cover_path ?? null,
     };
   };
@@ -565,11 +576,15 @@ export function createMockApi(): Api {
       commit();
     },
     async lessonDelete(id) {
-      db.lessons = db.lessons.filter((l) => l.id !== id);
-      for (const c of chats()) if (c.lesson_id === id) c.lesson_id = null;
+      await this.lessonsDelete([id]);
+    },
+    async lessonsDelete(ids) {
+      const gone = new Set(ids);
+      db.lessons = db.lessons.filter((l) => !gone.has(l.id));
+      for (const c of chats()) if (c.lesson_id !== null && gone.has(c.lesson_id)) c.lesson_id = null;
       for (const p of playlists()) {
-        p.lessons = p.lessons.filter((x) => x !== id);
-        if (p.current === id) p.current = null;
+        p.lessons = p.lessons.filter((x) => !gone.has(x));
+        if (p.current !== null && gone.has(p.current)) p.current = null;
       }
       commit();
     },
@@ -1037,8 +1052,17 @@ export function createMockApi(): Api {
         onEvent({ type: "progress", value: i * 5 });
       }
       l.timing_v = 2;
+      // ponctuation oubliée : un point toutes les douze mots, comme si Whisper l'avait entendue
+      let text: string | null = null;
+      if (longestRun(tokenize(l.text, l.lang)) > RUN_ON_WORDS) {
+        const words = l.text.split(/\s+/).filter(Boolean);
+        text = words
+          .map((w, i) => (i % 12 === 0 ? w.charAt(0).toUpperCase() + w.slice(1) : w) + (i % 12 === 11 || i === words.length - 1 ? "." : ""))
+          .reduce((acc, w, i) => acc + (i === 0 ? "" : i % 12 === 0 ? "\n\n" : " ") + w, "");
+        l.text = text;
+      }
       commit();
-      return l.timings ?? "[]";
+      return { timings: l.timings ?? "[]", text };
     },
     async lingqScan(key) {
       await sleep(900);

@@ -127,6 +127,33 @@ export function sentenceBounds(tokens: Token[], i: number): [number, number] {
   return [a, b];
 }
 
+/** Au-delà, une transcription a oublié sa ponctuation (miroir de RUN_ON_WORDS dans media.rs). */
+export const RUN_ON_WORDS = 40;
+
+// fin de phrase sans le retour à la ligne : un saut de paragraphe ne termine pas une suite
+// (la mise en page aérée en met au milieu des phrases), un simple retour à la ligne oui (chansons)
+const CLOSES_SENTENCE = /[.!?…;。！？।؟]/;
+
+/** Plus longue suite de mots sans fin de phrase (miroir de media::longest_run). */
+export function longestRun(tokens: Token[]): number {
+  let best = 0;
+  let run = 0;
+  let gap = "";
+  for (const tk of tokens) {
+    if (!tk.w) {
+      gap += tk.t;
+      continue;
+    }
+    if (run > 0 && (CLOSES_SENTENCE.test(gap) || gap.split("\n").length === 2)) {
+      best = Math.max(best, run);
+      run = 0;
+    }
+    run++;
+    gap = "";
+  }
+  return Math.max(best, run);
+}
+
 export function sliceText(text: string, tokens: Token[], a: number, b: number): string {
   if (a >= b) return "";
   return text.slice(tokens[a].s, tokens[b - 1].e).replace(/\s+/g, " ").trim();

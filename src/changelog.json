@@ -2,6 +2,39 @@
   "_lisezmoi": "Nouveautés montrées après chaque mise à jour (components/News.tsx) et notes de publication. Ajouter ce qui change sous la version \"next\" au fil du travail ; « Publier une version » lui donne son numéro et sa date. Icônes : noms de components/Icon.tsx. Actions : \"tour\" (visite guidée), \"guide\", \"settings:<page>\" (profile, general, langs, reading, voice, discover, podcasts, ai, videos, backup, storage, lingq, about), \"import:<onglet>\" (text, link, file, media, podcast), \"view:<vue>\" (library, discover, playlists, chat, vocab, progress).",
   "releases": [
     {
+      "version": "1.0.1",
+      "date": "2026-10-11",
+      "title": { "fr": "Des leçons plus claires", "en": "Clearer lessons" },
+      "items": [
+        {
+          "icon": "clock",
+          "title": { "fr": "La durée de chaque leçon", "en": "The length of every lesson" },
+          "body": {
+            "fr": "Dans la bibliothèque, chaque vidéo et chaque son affiche sa durée sur sa couverture : une leçon de cinq minutes ou d'une heure se choisit d'un coup d'œil.",
+            "en": "In the library, every video and sound shows its length on its cover: pick a five-minute or an hour-long lesson at a glance."
+          },
+          "action": "view:library"
+        },
+        {
+          "icon": "text",
+          "title": { "fr": "Des phrases, plus un fil sans fin", "en": "Sentences, not an endless thread" },
+          "body": {
+            "fr": "Sur une conversation spontanée, la transcription oubliait parfois toute ponctuation pendant des minutes, ou répétait un mot à l'infini sur une musique. Lumen reprend désormais les points, les virgules et les majuscules que Whisper entend, et coupe ces boucles. Une leçon déjà touchée propose « Ponctuer le texte » dans son lecteur : les mots ne changent pas.",
+            "en": "On spontaneous conversation, the transcription sometimes left out all punctuation for minutes, or repeated a word endlessly over music. Lumen now takes back the full stops, commas and capitals Whisper hears, and cuts those loops. A lesson already affected offers “Add punctuation” in its player: the words don't change."
+          }
+        },
+        {
+          "icon": "check",
+          "title": { "fr": "Supprimer plusieurs leçons d'un coup", "en": "Delete several lessons at once" },
+          "body": {
+            "fr": "« Sélectionner », dans la bibliothèque : touchez les leçons à retirer (Maj + clic pour tout un intervalle, ⌘A pour toute la liste), puis « Supprimer ». Les mots appris restent.",
+            "en": "“Select”, in the library: click the lessons to remove (Shift-click for a whole range, ⌘A for the whole list), then “Delete”. The words you learned stay."
+          },
+          "action": "view:library"
+        }
+      ]
+    },
+    {
       "version": "1.0.0",
       "date": "2026-10-06",
       "title": { "fr": "Plus léger que jamais", "en": "Lighter than ever" },

@@ -1,4 +1,4 @@
-import type { AppInfo, BackupInfo, BackupPlace, BackupRestored, BackupStatus, ChatEvent, ChatOptions, ChatPatch, ChatReply, ChatSummary, ChatThread, DictResult, DictStatus, DiscoverFeed, DiscoverReport, DownloadEvent, GeminiModels, GoalReached, GpuInfo, ImportEvent, LangCode, LessonSummary, LevelEstimate, LightenProgress, LightenReport, LinkInfo, LinkMedia, LingqEvent, LingqLang, LingqPlan, LingqReport, Lyrics, MediaStream, MediaUsage, ModelRow, NewLesson, OnlineCheck, OpenedLesson, Playlist, PlaylistPatch, PodcastRequest, SearchPage, SearchPlatform, SongItem, Stats, Term, TermQuery, TextStats, WordAnswer, VoicedLesson } from "./types";
+import type { AppInfo, BackupInfo, BackupPlace, BackupRestored, BackupStatus, ChatEvent, ChatOptions, ChatPatch, ChatReply, ChatSummary, ChatThread, DictResult, DictStatus, DiscoverFeed, DiscoverReport, DownloadEvent, GeminiModels, GoalReached, GpuInfo, ImportEvent, LangCode, LessonSummary, LevelEstimate, LightenProgress, LightenReport, LinkInfo, LinkMedia, LingqEvent, LingqLang, LingqPlan, LingqReport, Lyrics, MediaStream, MediaUsage, ModelRow, NewLesson, OnlineCheck, OpenedLesson, Playlist, PlaylistPatch, PodcastRequest, Resynced, SearchPage, SearchPlatform, SongItem, Stats, Term, TermQuery, TextStats, WordAnswer, VoicedLesson } from "./types";
 
 export const isTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
@@ -33,6 +33,8 @@ export interface Api {
   lessonCreate(lesson: NewLesson): Promise<number>;
   lessonUpdate(id: number, patch: LessonPatch): Promise<void>;
   lessonDelete(id: number): Promise<void>;
+  /** supprime plusieurs leçons d'un coup (les mots appris restent) */
+  lessonsDelete(ids: number[]): Promise<void>;
   /** Couverture (image déjà réduite) ; `null` la retire. Renvoie le chemin enregistré. */
   lessonSetCover(id: number, data: Uint8Array | null, ext: string | null): Promise<string | null>;
   playlistsList(lang: LangCode): Promise<Playlist[]>;
@@ -93,8 +95,8 @@ export interface Api {
   /** allège les vidéos et les sons déjà importés, l'un après l'autre */
   mediaLighten(onEvent: (e: LightenProgress) => void): Promise<LightenReport>;
   mediaLightenCancel(): Promise<void>;
-  /** Réécoute l'audio et recale la lanterne sur le texte existant. Renvoie les horodatages. */
-  lessonResync(id: number, onEvent: (e: ImportEvent) => void): Promise<string>;
+  /** Réécoute l'audio et recale la lanterne sur le texte (reponctué s'il en manquait). */
+  lessonResync(id: number, onEvent: (e: ImportEvent) => void): Promise<Resynced>;
   lingqScan(key: string): Promise<LingqLang[]>;
   lingqImport(key: string, plan: LingqPlan, onEvent: (e: LingqEvent) => void): Promise<LingqReport>;
   lingqCancel(): Promise<void>;
@@ -163,6 +165,7 @@ async function createTauriApi(): Promise<Api> {
     lessonCreate: (lesson) => invoke("lesson_create", { lesson }),
     lessonUpdate: (id, patch) => invoke("lesson_update", { id, patch }),
     lessonDelete: (id) => invoke("lesson_delete", { id }),
+    lessonsDelete: (ids) => invoke("lessons_delete", { ids }),
     lessonSetCover: (id, data, ext) => invoke("lesson_set_cover", { id, data: data ? Array.from(data) : null, ext }),
     playlistsList: (lang) => invoke("playlists_list", { lang }),
     playlistCreate: (lang, name, lessons) => invoke("playlist_create", { lang, name, lessons }),
