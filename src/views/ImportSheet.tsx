@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { Icon, type IconName } from "../components/Icon";
 import { Sheet } from "../components/ui";
 import { api, errorText, isTauri } from "../lib/api";
-import { youtubeId } from "../lib/covers";
+import { prepareCover, youtubeId } from "../lib/covers";
 import { pickFiles } from "../lib/dialogs";
 import { cleanTitle, useDiscover } from "../lib/discover";
 import { stageText } from "../lib/imports";
@@ -24,7 +24,7 @@ import {
 import { count, formatNumber, locale, pick, t } from "../lib/i18n";
 import { inLang } from "../lib/langs";
 import { formatBytes, formatDuration, useApp, type ImportTab } from "../lib/store";
-import type { DiscoverItem, ImportEvent, LinkInfo, LinkMedia, NewLesson } from "../lib/types";
+import type { BookChapter, CreatedBook, DiscoverItem, ImportEvent, LinkInfo, LinkMedia, NewLesson } from "../lib/types";
 import { PodcastTab, usePodcastForm } from "./import/PodcastTab";
 
 type Tab = ImportTab;
@@ -43,6 +43,8 @@ interface Pending {
   kind: string;
   source: string;
   collection?: string;
+  /** image d'un article (Découvrir, ou celle que la page annonce) : la couverture de la leçon */
+  image?: string;
 }
 
 /** Ce qu'on importe d'un lien qui offre à la fois un texte et un son. */
@@ -55,6 +57,48 @@ interface Found {
   choice: Choice;
   /** éléments cochés d'une liste, dans l'ordre de la liste */
   picked: number[];
+}
+
+/** Livre ouvert dans la feuille : ses chapitres à cocher, sa couverture. */
+interface OpenBook {
+  title: string;
+  chapters: (Chapter & { on: boolean })[];
+  cover: Blob | null;
+  source: string;
+}
+
+/** Les leçons d'un livre : un chapitre trop long se lit en plusieurs parties. */
+function bookLessons(chapters: Chapter[]): BookChapter[] {
+  return chapters.flatMap((c) => {
+    const parts = splitLong(c.text);
+    return parts.map((text, i) => ({ title: parts.length > 1 ? `${c.title} · ${i + 1}/${parts.length}` : c.title, text }));
+  });
+}
+
+/** Couverture réduite pour la bibliothèque ; une image illisible n'empêche pas l'import. */
+async function coverBytes(blob: Blob | null): Promise<Uint8Array | null> {
+  if (!blob) return null;
+  try {
+    return await prepareCover(blob);
+  } catch {
+    return null;
+  }
+}
+
+/** Couverture du livre en attente d'import, le temps que la feuille est ouverte. */
+function BookCoverThumb({ blob }: { blob: Blob | null }) {
+  const [url, setUrl] = useState<string | null>(null);
+  useEffect(() => {
+    if (!blob) return setUrl(null);
+    const u = URL.createObjectURL(blob);
+    setUrl(u);
+    return () => URL.revokeObjectURL(u);
+  }, [blob]);
+  return (
+    <span className="book-thumb" aria-hidden="true">
+      {url ? <img src={url} alt="" draggable={false} /> : <Icon name="book" size={26} stroke={1.6} />}
+    </span>
+  );
 }
 
 /** Un lien seul, collé dans le champ de texte. */
@@ -116,6 +160,7 @@ export function ImportSheet() {
   const toast = useApp((s) => s.toast);
   const bump = useApp((s) => s.bumpLibrary);
   const openLesson = useApp((s) => s.openLesson);
+  const openPlaylist = useApp((s) => s.openPlaylist);
   const go = useApp((s) => s.go);
 
   const [tab, setTab] = useState<Tab>("text");
@@ -125,7 +170,7 @@ export function ImportSheet() {
   const [busy, setBusy] = useState<string | null>(null);
   const [progress, setProgress] = useState<number | null>(null);
   const [preview, setPreview] = useState<Pending | null>(null);
-  const [book, setBook] = useState<{ title: string; chapters: (Chapter & { on: boolean })[] } | null>(null);
+  const [book, setBook] = useState<OpenBook | null>(null);
   const [mediaFiles, setMediaFiles] = useState<string[]>([]);
   const [found, setFound] = useState<Found | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -201,10 +246,39 @@ export function ImportSheet() {
     else go("library");
   };
 
-  const create = async (items: Pending[]) => {
+  /** Livre créé : il s'ouvre, avec ses chapitres. */
+  const finishBook = (made: CreatedBook, title: string) => {
+    bump();
+    toast(t(`« ${title} » : ${made.lessons.length} leçons réunies en un livre`, `“${title}”: ${made.lessons.length} lessons gathered into a book`), "light");
+    close();
+    openPlaylist(made.playlist);
+  };
+
+  /** L'image d'un article devient la couverture de ses leçons, téléchargée sans faire attendre. */
+  const coverFrom = (image: string, ids: number[]) =>
+    void api()
+      .lessonCoverFetch(ids[0], image, ids.slice(1))
+      .then((p) => p && bump())
+      .catch(() => {});
+
+  /**
+   * Crée les leçons. `books` : un long fichier (PDF, texte) découpé en parties devient
+   * un livre, une seule carte dans la bibliothèque ; renvoie alors ce livre.
+   */
+  const create = async (items: Pending[], books = false) => {
     const ids: number[] = [];
+    let made: { book: CreatedBook; title: string } | null = null;
     for (const it of items) {
       const parts = splitLong(it.text);
+      if (books && parts.length > 1) {
+        const chapters = parts.map((text, i) => ({ title: `${it.title} · ${i + 1}/${parts.length}`, text }));
+        const book = await api().bookCreate({ lang, title: it.title, kind: it.kind, source: it.source, chapters }, null);
+        if (it.image && book.lessons.length) coverFrom(it.image, book.lessons);
+        ids.push(...book.lessons);
+        made = { book, title: it.title };
+        continue;
+      }
+      const mine: number[] = [];
       for (let i = 0; i < parts.length; i++) {
         const l: NewLesson = {
           lang,
@@ -214,10 +288,12 @@ export function ImportSheet() {
           source: it.source,
           collection: it.collection ?? (parts.length > 1 ? it.title : ""),
         };
-        ids.push(await api().lessonCreate(l));
+        mine.push(await api().lessonCreate(l));
       }
+      if (it.image && mine.length) coverFrom(it.image, mine);
+      ids.push(...mine);
     }
-    return ids;
+    return Object.assign(ids, { book: items.length === 1 ? made : null });
   };
 
   const run = async (label: string, fn: () => Promise<void>) => {
@@ -262,7 +338,14 @@ export function ImportSheet() {
       if (!info.media.length || hint?.kind === "text") {
         if (!article) throw info.note || t("Lumen n'a trouvé ni texte ni son à importer à cette adresse.", "Lumen found no text or sound to import at this address.");
         // le titre donné par la source est plus sûr que celui que Readability devine (« … – ANSA.it »)
-        setPreview({ title: hint ? cleanTitle(hint.title) : article.title || info.title, text: article.text, kind: "web", source: info.url, collection: hint?.source_name });
+        setPreview({
+          title: hint ? cleanTitle(hint.title) : article.title || info.title,
+          text: article.text,
+          kind: "web",
+          source: info.url,
+          collection: hint?.source_name,
+          image: hint?.image || info.image,
+        });
         return;
       }
       // un long article accompagné d'un son : le texte d'abord ; un texte court : le son, recalé sur le texte s'il le suit.
@@ -275,7 +358,7 @@ export function ImportSheet() {
     if (!found) return;
     const { info, article, choice } = found;
     if (choice === "article" && article) {
-      setPreview({ title: article.title, text: article.text, kind: "web", source: info.url });
+      setPreview({ title: article.title, text: article.text, kind: "web", source: info.url, image: info.image });
       return;
     }
     const items: LinkMedia[] = info.list ? found.picked.map((i) => info.media[i]) : info.media.slice(0, 1);
@@ -320,8 +403,9 @@ export function ImportSheet() {
         const ext = extOf(p);
         const data = await api().readFile(p);
         if (ext === "epub") {
-          const { book, chapters } = await extractEpub(data);
-          setBook({ title: book, chapters: chapters.map((c) => ({ ...c, on: true })) });
+          const b = await extractEpub(data);
+          // pages de garde, table des matières, mentions légales : décochées, mais là si on les veut
+          setBook({ title: b.title, chapters: b.chapters.map((c) => ({ ...c, on: !c.extra })), cover: b.cover, source: p });
           return;
         }
         if (ext === "pdf") {
@@ -338,7 +422,7 @@ export function ImportSheet() {
       }
       if (pend.length === 1) setPreview(pend[0]);
       else if (pend.length > 1) {
-        const ids = await create(pend);
+        const ids = await create(pend, true);
         finish(ids, t(`${ids.length} leçons créées`, `${ids.length} lessons created`));
       }
     });
@@ -349,12 +433,21 @@ export function ImportSheet() {
     if (paths.length) await loadDocs(paths);
   };
 
+  // un livre : ses chapitres et sa playlist, une seule carte dans la bibliothèque
   const createBook = () =>
-    run(t("Création des chapitres", "Creating the chapters"), async () => {
+    run(t("Création du livre", "Creating the book"), async () => {
       if (!book) return;
-      const chosen = book.chapters.filter((c) => c.on);
-      const ids = await create(chosen.map((c) => ({ title: c.title, text: c.text, kind: "book", source: "", collection: book.title })));
-      finish(ids, t(`${chosen.length} chapitre${chosen.length > 1 ? "s" : ""} ajouté${chosen.length > 1 ? "s" : ""}`, `${count(chosen.length, "", "", "chapter", "chapters")} added`));
+      const title = book.title.trim() || t("Livre", "Book");
+      const chapters = bookLessons(book.chapters.filter((c) => c.on));
+      const cover = await coverBytes(book.cover);
+      if (chapters.length === 1) {
+        // un seul chapitre retenu : une leçon, pas un livre
+        const id = await api().lessonCreate({ lang, title: chapters[0].title, text: chapters[0].text, kind: "book", source: "", collection: title });
+        if (cover) await api().lessonSetCover(id, cover, "jpg").catch(() => null);
+        finish([id], t("Leçon créée", "Lesson created"));
+        return;
+      }
+      finishBook(await api().bookCreate({ lang, title, kind: "book", source: "", chapters }, cover), title);
     });
 
   // ---------- audio et vidéo ----------
@@ -445,19 +538,28 @@ export function ImportSheet() {
           <button className="btn ghost" onClick={() => setPreview(null)}>
             {t("Retour", "Back")}
           </button>
-          <button className="btn primary" onClick={() => run(t("Création", "Creating"), async () => finish(await create([preview]), t("Leçon créée", "Lesson created")))}>
-            {t("Créer la leçon", "Create the lesson")}
+          <button
+            className="btn primary"
+            onClick={() =>
+              run(t("Création", "Creating"), async () => {
+                const ids = await create([preview], tab === "file");
+                if (ids.book) finishBook(ids.book.book, ids.book.title);
+                else finish(ids, t("Leçon créée", "Lesson created"));
+              })
+            }
+          >
+            {tab === "file" && splitLong(preview.text).length > 1 ? t("Créer le livre", "Create the book") : t("Créer la leçon", "Create the lesson")}
           </button>
         </>
       );
     if (tab === "file" && book)
       footer = (
         <>
-          <span className="muted" style={{ marginRight: "auto" }}>
-            {t(`${book.chapters.filter((c) => c.on).length} chapitres sélectionnés`, `${book.chapters.filter((c) => c.on).length} chapters selected`)}
+          <span className="muted num" style={{ marginRight: "auto" }}>
+            {count(book.chapters.filter((c) => c.on).length, "chapitre sélectionné", "chapitres sélectionnés", "chapter selected", "chapters selected")}
           </span>
           <button className="btn primary" disabled={!book.chapters.some((c) => c.on)} onClick={createBook}>
-            {t("Ajouter à la bibliothèque", "Add to the library")}
+            {t("Ajouter le livre", "Add the book")}
           </button>
         </>
       );
@@ -547,7 +649,11 @@ export function ImportSheet() {
                   <Icon name="text" size={16} />
                   <span className="grow">
                     {count(wordCount(preview.text), "mot", "mots", "word", "words")}
-                    {wordCount(preview.text) > 2600 ? t(` · découpé en ${splitLong(preview.text).length} leçons`, ` · split into ${splitLong(preview.text).length} lessons`) : ""}
+                    {splitLong(preview.text).length > 1
+                      ? tab === "file"
+                        ? t(` · un livre de ${splitLong(preview.text).length} parties, une seule carte dans la bibliothèque`, ` · a book in ${splitLong(preview.text).length} parts, a single card in the library`)
+                        : t(` · découpé en ${splitLong(preview.text).length} leçons`, ` · split into ${splitLong(preview.text).length} lessons`)
+                      : ""}
                   </span>
                 </div>
                 <div className="textarea" style={{ maxHeight: 260, overflow: "auto", whiteSpace: "pre-wrap", minHeight: 0 }}>
@@ -639,26 +745,41 @@ export function ImportSheet() {
               <button className="file-drop" onClick={chooseDocs} disabled={!isTauri}>
                 <Icon name="file" size={28} />
                 <strong style={{ color: "var(--text)" }}>{t("Choisir des fichiers", "Choose files")}</strong>
-                <span>{t("EPUB (un chapitre par leçon), PDF, TXT, Markdown, sous-titres SRT ou VTT, pages HTML", "EPUB (one chapter per lesson), PDF, TXT, Markdown, SRT or VTT subtitles, HTML pages")}</span>
+                <span>{t("EPUB (un livre, un chapitre par leçon), PDF, TXT, Markdown, sous-titres SRT ou VTT, pages HTML", "EPUB (a book, one chapter per lesson), PDF, TXT, Markdown, SRT or VTT subtitles, HTML pages")}</span>
                 <span className="import-hint">{t("Vous pouvez aussi les déposer n'importe où dans la fenêtre.", "You can also drop them anywhere in the window.")}</span>
               </button>
             )}
 
             {tab === "file" && book && (
               <>
-                <div className="field">
-                  <label htmlFor="book-title">{t("Livre", "Book")}</label>
-                  <input id="book-title" className="input" value={book.title} onChange={(e) => setBook({ ...book, title: e.target.value })} />
+                <div className="book-head">
+                  <BookCoverThumb blob={book.cover} />
+                  <div className="field grow">
+                    <label htmlFor="book-title">{t("Livre", "Book")}</label>
+                    <input id="book-title" className="input" value={book.title} onChange={(e) => setBook({ ...book, title: e.target.value })} />
+                    <span className="import-hint num">
+                      {count(book.chapters.length, "chapitre", "chapitres", "chapter", "chapters")} ·{" "}
+                      {count(
+                        book.chapters.filter((c) => c.on).reduce((n, c) => n + c.words, 0),
+                        "mot",
+                        "mots",
+                        "word",
+                        "words",
+                      )}{" "}
+                      · {t("une seule carte dans la bibliothèque, et une playlist pour lire dans l'ordre", "a single card in the library, and a playlist to read in order")}
+                    </span>
+                  </div>
                 </div>
                 <div className="chapter-list">
                   {book.chapters.map((c, i) => (
-                    <label key={i} className="chapter-item">
+                    <label key={i} className={`chapter-item ${c.extra ? "extra" : ""}`}>
                       <input
                         type="checkbox"
                         checked={c.on}
                         onChange={(e) => setBook({ ...book, chapters: book.chapters.map((x, j) => (j === i ? { ...x, on: e.target.checked } : x)) })}
                       />
-                      <span style={{ flex: 1 }}>{c.title}</span>
+                      <span className="chapter-title">{c.title}</span>
+                      {c.extra && <span className="chapter-tag">{t("annexe", "front or back matter")}</span>}
                       <span className="muted num">{count(c.words, "mot", "mots", "word", "words")}</span>
                     </label>
                   ))}

@@ -1514,21 +1514,18 @@ pub async fn fetch_cover(data_dir: &Path, url: &str) -> Option<PathBuf> {
     let c = client().ok()?;
     let resp = c.get(url).send().await.ok()?;
     let ctype = resp.headers().get(CONTENT_TYPE).and_then(|v| v.to_str().ok()).unwrap_or("").to_lowercase();
-    if !resp.status().is_success() || !ctype.starts_with("image/") {
+    // une page d'erreur (HTML) n'est pas une image ; « octet-stream » peut en être une
+    if !resp.status().is_success() || ctype.starts_with("text/") || ctype.contains("svg") {
         return None;
     }
     let bytes = resp.bytes().await.ok()?;
     if bytes.is_empty() || bytes.len() > 30_000_000 {
         return None;
     }
+    // le contenu fait foi : certains serveurs d'images ne disent pas ce qu'ils envoient
+    let ext = image_kind(&bytes).or_else(|| ctype.starts_with("image/").then_some("jpg"))?;
     let dir = media::media_dir(data_dir);
     std::fs::create_dir_all(&dir).ok()?;
-    let ext = match ctype.as_str() {
-        "image/png" => "png",
-        "image/webp" => "webp",
-        "image/gif" => "gif",
-        _ => "jpg",
-    };
     let stem = media::new_stem();
     let raw = dir.join(format!("{stem}.cover-src.{ext}"));
     let out = dir.join(format!("{stem}.cover.jpg"));
@@ -1554,6 +1551,27 @@ pub async fn fetch_cover(data_dir: &Path, url: &str) -> Option<PathBuf> {
     let kept = dir.join(format!("{stem}.cover.{ext}"));
     std::fs::rename(&raw, &kept).ok()?;
     Some(kept)
+}
+
+/// Format d'une image d'après ses premiers octets (JPEG, PNG, WebP, GIF, AVIF, HEIC).
+fn image_kind(b: &[u8]) -> Option<&'static str> {
+    if b.starts_with(&[0xFF, 0xD8, 0xFF]) {
+        Some("jpg")
+    } else if b.starts_with(b"\x89PNG") {
+        Some("png")
+    } else if b.len() > 12 && &b[..4] == b"RIFF" && &b[8..12] == b"WEBP" {
+        Some("webp")
+    } else if b.starts_with(b"GIF8") {
+        Some("gif")
+    } else if b.len() > 12 && &b[4..8] == b"ftyp" {
+        match &b[8..12] {
+            b"avif" | b"avis" => Some("avif"),
+            b"heic" | b"heix" | b"mif1" => Some("heic"),
+            _ => None,
+        }
+    } else {
+        None
+    }
 }
 
 /// Réduit une image à 1 280 px au plus et la convertit en JPEG (qualité 85),
@@ -1582,6 +1600,17 @@ mod tests {
         assert_eq!((back.width(), back.height()), (1280, 720));
         assert_eq!(image::guess_format(&jpg).unwrap(), image::ImageFormat::Jpeg);
         assert!(shrink_image(b"pas une image").is_none());
+    }
+
+    #[test]
+    fn image_kinds_from_their_bytes() {
+        assert_eq!(image_kind(&[0xFF, 0xD8, 0xFF, 0xE0, 0, 0x10]), Some("jpg"));
+        assert_eq!(image_kind(b"\x89PNG\r\n\x1a\n...."), Some("png"));
+        assert_eq!(image_kind(b"RIFF\x24\0\0\0WEBPVP8 "), Some("webp"));
+        assert_eq!(image_kind(b"GIF89a......"), Some("gif"));
+        assert_eq!(image_kind(b"\0\0\0\x1cftypavif\0\0\0\0"), Some("avif"));
+        assert_eq!(image_kind(b"<!doctype html><html>"), None);
+        assert_eq!(image_kind(b""), None);
     }
 
     #[test]

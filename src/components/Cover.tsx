@@ -224,11 +224,14 @@ export function Cover({
   const custom = lesson.cover_path ? api().mediaUrl(lesson.cover_path) : null;
   const src = custom ?? (yt ? youtubeThumbs(yt)[stage] : undefined) ?? null;
   const k = KIND[lesson.kind] ?? KIND.text;
+  // chapitre d'un livre : sa couverture se tient debout sur son reflet, sans être rognée
+  const standing = !!custom && lesson.kind === "book";
 
   return (
     <div className={`cover-box ${big ? "big" : ""}`}>
-      <div className="cover">
+      <div className={`cover ${standing ? "standing" : ""}`}>
         <CoverArt seed={lesson.id} hue={lesson.hue} />
+        {standing && <img className={`cover-blur ${shown === src ? "on" : ""}`} src={custom} alt="" draggable={false} />}
         <span className="cover-grain" style={{ backgroundImage: `url(${grainTexture()})` }} />
         {src && (
           <img
@@ -264,6 +267,67 @@ export function Cover({
 }
 
 /**
+ * Couverture d'un livre : le livre debout sur le reflet flou de sa couverture ;
+ * sans image, une jaquette générée qui porte son titre. `lesson` : le premier
+ * chapitre (couverture partagée par tous) ; `also` : les autres, qui changent
+ * de couverture avec lui.
+ */
+export function BookCover({
+  lesson,
+  title,
+  label,
+  progress = 0,
+  editable = false,
+  also,
+  bare = false,
+}: {
+  lesson: CoverLesson;
+  title: string;
+  /** étiquette du bas : « Livre · 24 chapitres » */
+  label?: string;
+  progress?: number;
+  editable?: boolean;
+  also?: number[];
+  bare?: boolean;
+}) {
+  const [shown, setShown] = useState<string | null>(null);
+  const src = lesson.cover_path ? api().mediaUrl(lesson.cover_path) : null;
+  const on = !!src && shown === src;
+  return (
+    <div className="cover-box">
+      <div className="cover book-cover">
+        <CoverArt seed={lesson.id} hue={lesson.hue} />
+        {src && <img className={`cover-blur ${on ? "on" : ""}`} src={src} alt="" draggable={false} />}
+        <span className="cover-grain" style={{ backgroundImage: `url(${grainTexture()})` }} />
+        <span className={`book-3d ${src && !on ? "waiting" : ""}`}>
+          {src ? (
+            <img key={src} className="book-face" src={src} alt="" draggable={false} onLoad={() => setShown(src)} onError={() => setShown(null)} />
+          ) : (
+            <span className="book-jacket">
+              <CoverArt seed={lesson.id * 31 + 7} hue={lesson.hue} />
+              <span className="book-jacket-title">{title}</span>
+            </span>
+          )}
+          <span className="book-spine" aria-hidden="true" />
+        </span>
+        {!bare && label && (
+          <span className="cover-kind">
+            <Icon name="book" size={14} />
+            {label}
+          </span>
+        )}
+        {!bare && progress > 0.005 && progress < 0.995 && (
+          <span className="cover-progress" aria-hidden="true">
+            <i style={{ width: `${progress * 100}%` }} />
+          </span>
+        )}
+      </div>
+      {editable && <CoverButton lessonId={lesson.id} custom={!!lesson.cover_path} also={also} />}
+    </div>
+  );
+}
+
+/**
  * Couverture d'une playlist : la couverture de sa première leçon, ou une
  * mosaïque des quatre premières ; vide, une œuvre générée pour elle.
  */
@@ -289,7 +353,7 @@ export function PlaylistCover({ lessons, seed, big = false }: { lessons: CoverLe
 }
 
 /** Petit bouton discret (au survol) pour choisir ou retirer une couverture. */
-function CoverButton({ lessonId, custom }: { lessonId: number; custom: boolean }) {
+function CoverButton({ lessonId, custom, also }: { lessonId: number; custom: boolean; also?: number[] }) {
   const [menu, setMenu] = useState(false);
   const [busy, setBusy] = useState(false);
   const toast = useApp((s) => s.toast);
@@ -299,7 +363,7 @@ function CoverButton({ lessonId, custom }: { lessonId: number; custom: boolean }
     setMenu(false);
     setBusy(true);
     try {
-      if (await chooseCover(lessonId)) {
+      if (await chooseCover(lessonId, also)) {
         bump();
         toast(t("Nouvelle couverture", "New cover"), "light");
       }
@@ -312,7 +376,7 @@ function CoverButton({ lessonId, custom }: { lessonId: number; custom: boolean }
   const remove = async () => {
     setMenu(false);
     try {
-      await api().lessonSetCover(lessonId, null, null);
+      await api().lessonSetCover(lessonId, null, null, also);
       bump();
     } catch (e) {
       toast(errorText(e), "error");

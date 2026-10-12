@@ -200,32 +200,101 @@ pub async fn lessons_delete(state: State<'_, AppState>, ids: Vec<i64>) -> R<()> 
     Ok(())
 }
 
+/// Écrit une image de couverture (déjà réduite par l'interface) dans `media/`.
+fn save_cover(data_dir: &std::path::Path, bytes: &[u8], ext: Option<String>) -> R<String> {
+    if bytes.len() > 30_000_000 {
+        return Err(t("Cette image est trop lourde (30 Mo au plus).", "This image is too large (30 MB at most).").into());
+    }
+    let ext = ext.unwrap_or_default().to_lowercase();
+    let ext = if ["jpg", "jpeg", "png", "webp", "gif", "heic", "avif"].contains(&ext.as_str()) { ext } else { "jpg".into() };
+    let media = media::media_dir(data_dir);
+    std::fs::create_dir_all(&media).map_err(err)?;
+    let p = media.join(format!("{}.cover.{ext}", media::new_stem()));
+    std::fs::write(&p, bytes).map_err(|e| tr!("Image impossible à enregistrer : {e}", "Couldn't save the image: {e}"))?;
+    Ok(p.display().to_string())
+}
+
 /// Enregistre l'image de couverture choisie (déjà réduite par l'interface),
-/// ou la retire si `data` est vide. Renvoie le chemin de la nouvelle image.
+/// ou la retire si `data` est vide. `also` : autres leçons qui prennent la même
+/// image (les chapitres d'un livre). Renvoie le chemin de la nouvelle image.
 #[tauri::command]
-pub async fn lesson_set_cover(state: State<'_, AppState>, id: i64, data: Option<Vec<u8>>, ext: Option<String>) -> R<Option<String>> {
-    let media = media::media_dir(&state.data_dir);
+pub async fn lesson_set_cover(state: State<'_, AppState>, id: i64, data: Option<Vec<u8>>, ext: Option<String>, also: Option<Vec<i64>>) -> R<Option<String>> {
     let new_path = match data {
-        Some(bytes) if !bytes.is_empty() => {
-            if bytes.len() > 30_000_000 {
-                return Err(t("Cette image est trop lourde (30 Mo au plus).", "This image is too large (30 MB at most).").into());
-            }
-            let ext = ext.unwrap_or_default().to_lowercase();
-            let ext = if ["jpg", "jpeg", "png", "webp", "gif", "heic", "avif"].contains(&ext.as_str()) { ext } else { "jpg".into() };
-            std::fs::create_dir_all(&media).map_err(err)?;
-            let p = media.join(format!("{}.cover.{ext}", media::new_stem()));
-            std::fs::write(&p, bytes).map_err(|e| tr!("Image impossible à enregistrer : {e}", "Couldn't save the image: {e}"))?;
-            Some(p.display().to_string())
-        }
+        Some(bytes) if !bytes.is_empty() => Some(save_cover(&state.data_dir, &bytes, ext)?),
         _ => None,
     };
-    let old = db::lesson_set_cover(&state.db.lock(), id, new_path.as_deref()).map_err(err)?;
-    if let Some(old) = old.map(PathBuf::from) {
-        if old.starts_with(&media) {
-            let _ = std::fs::remove_file(old);
+    put_cover(&state, std::iter::once(id).chain(also.unwrap_or_default()), new_path.as_deref())?;
+    Ok(new_path)
+}
+
+/// Donne la couverture `path` (ou aucune) aux leçons `ids`, et supprime les anciennes
+/// images que plus aucune leçon ne cite.
+fn put_cover(state: &AppState, ids: impl IntoIterator<Item = i64>, path: Option<&str>) -> R<()> {
+    let media = media::media_dir(&state.data_dir);
+    let conn = state.db.lock();
+    let mut old = Vec::new();
+    for l in ids {
+        old.extend(db::lesson_set_cover(&conn, l, path).map_err(err)?);
+    }
+    old.sort();
+    old.dedup();
+    // l'ancienne image peut rester la couverture d'un autre chapitre du livre
+    for o in old.into_iter().filter(|o| !db::file_used(&conn, o)).map(PathBuf::from) {
+        if o.starts_with(&media) {
+            let _ = std::fs::remove_file(o);
         }
     }
-    Ok(new_path)
+    Ok(())
+}
+
+/// Télécharge l'image d'un article (celle de Découvrir ou de la recherche, sinon celle
+/// que la page annonce) et en fait la couverture de la leçon et de ses parties (`also`),
+/// réduite comme les autres. Rien si l'image ne se télécharge pas.
+#[tauri::command]
+pub async fn lesson_cover_fetch(state: State<'_, AppState>, id: i64, url: String, also: Option<Vec<i64>>) -> R<Option<String>> {
+    let url = url.trim();
+    if !url.starts_with("https://") && !url.starts_with("http://") {
+        return Ok(None);
+    }
+    let Some(p) = link::fetch_cover(&state.data_dir, url).await else { return Ok(None) };
+    let path = p.display().to_string();
+    put_cover(&state, std::iter::once(id).chain(also.unwrap_or_default()), Some(&path))?;
+    Ok(Some(path))
+}
+
+/// Les leçons d'une langue telles que Découvrir et la recherche les reconnaissent
+/// (même page, même vidéo, même chanson) : « Dans la bibliothèque ».
+#[tauri::command]
+pub async fn lesson_links(state: State<'_, AppState>, lang: String) -> R<Vec<db::LessonLink>> {
+    db::lesson_links(&state.db.lock(), &lang).map_err(err)
+}
+
+#[derive(Serialize)]
+pub struct CreatedBook {
+    /// playlist du livre
+    playlist: i64,
+    /// chapitres, dans l'ordre du livre
+    lessons: Vec<i64>,
+}
+
+/// Crée un livre : ses chapitres et sa playlist d'un seul geste, la couverture
+/// (déjà réduite par l'interface) écrite une fois et partagée par les chapitres.
+#[tauri::command]
+pub async fn book_create(state: State<'_, AppState>, book: db::NewBook, cover: Option<Vec<u8>>) -> R<CreatedBook> {
+    let cover = match cover {
+        Some(bytes) if !bytes.is_empty() => save_cover(&state.data_dir, &bytes, Some("jpg".into())).ok(),
+        _ => None,
+    };
+    let made = db::book_create(&mut state.db.lock(), &book, cover.as_deref());
+    match made {
+        Ok((playlist, lessons)) => Ok(CreatedBook { playlist, lessons }),
+        Err(e) => {
+            if let Some(c) = cover {
+                let _ = std::fs::remove_file(c);
+            }
+            Err(err(e))
+        }
+    }
 }
 
 // ---------- playlists ----------

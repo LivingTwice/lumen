@@ -54,6 +54,16 @@ export interface LessonSummary {
   cover_path: string | null;
 }
 
+/** Ce qui reconnaît une leçon dans Découvrir et la recherche (miroir de `db::LessonLink`). */
+export interface LessonLink {
+  id: number;
+  source: string;
+  title: string;
+  /** artiste d'une chanson, émission, chaîne */
+  collection: string;
+  kind: string;
+}
+
 export interface Lesson {
   id: number;
   lang: LangCode;
@@ -88,6 +98,31 @@ export interface Playlist {
   /** leçon où la lecture de la playlist en est (null : elle repart du début) */
   current: number | null;
   created_at: number;
+  /** « book » : les chapitres d'un livre importé ; vide : une playlist faite à la main */
+  kind: string;
+}
+
+/** Un chapitre (ou une partie d'un long chapitre) d'un livre importé. */
+export interface BookChapter {
+  title: string;
+  text: string;
+}
+
+/** Livre importé (EPUB, ou long PDF et long texte découpés en parties). */
+export interface NewBook {
+  lang: LangCode;
+  title: string;
+  /** genre des leçons : « book » (EPUB), « pdf », « text »… */
+  kind: string;
+  source: string;
+  chapters: BookChapter[];
+}
+
+export interface CreatedBook {
+  /** playlist du livre */
+  playlist: number;
+  /** chapitres, dans l'ordre du livre */
+  lessons: number[];
 }
 
 export interface PlaylistPatch {

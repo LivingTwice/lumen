@@ -1,4 +1,4 @@
-import { motion } from "motion/react";
+import { motion, useReducedMotion } from "motion/react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Icon } from "../../components/Icon";
 import { api, errorText, isTauri } from "../../lib/api";
@@ -21,6 +21,9 @@ interface Props {
   onVideoReady(path: string): void;
   cinema: boolean;
   setCinema(v: boolean | ((c: boolean) => boolean)): void;
+  /** vidéo fermée : la scène se replie, le son continue (la vidéo reste dans la page) */
+  hidden: boolean;
+  onClose(): void;
 }
 
 /** Mots au plus dans un sous-titre : quelques mots à la fois, pas la phrase entière. */
@@ -60,7 +63,7 @@ const nativeWindow = () => import("@tauri-apps/api/window").then((m) => m.getCur
  * Scène vidéo : l'image seule au-dessus du texte ; en plein écran, l'image
  * occupe l'écran et les sous-titres interactifs s'affichent dans le noir, dessous.
  */
-export function VideoStage({ lesson, tokens, terms, cursor, playing, onHost, onWord, onToggle, onVideoReady, cinema, setCinema }: Props) {
+export function VideoStage({ lesson, tokens, terms, cursor, playing, onHost, onWord, onToggle, onVideoReady, cinema, setCinema, hidden, onClose }: Props) {
   const settings = useApp((s) => s.settings);
   const setSetting = useApp((s) => s.setSetting);
   const toast = useApp((s) => s.toast);
@@ -76,6 +79,10 @@ export function VideoStage({ lesson, tokens, terms, cursor, playing, onHost, onW
   const [lamp, setLamp] = useState<{ x: number; y: number; width: number; height: number; jump: boolean } | null>(null);
   const [ratio, setRatio] = useState(16 / 9);
   const host = useRef<HTMLDivElement | null>(null);
+  // la scène se replie et se déplie en douceur ; coupée seulement pendant le mouvement
+  // (et une fois fermée), pour ne pas rogner l'ombre de l'image
+  const calm = useReducedMotion();
+  const [clip, setClip] = useState(hidden);
 
   // image présente mais illisible ici (venue d'un autre ordinateur par la sauvegarde, dans
   // un format que ce moteur ne lit pas) : on propose de la télécharger à nouveau
@@ -278,101 +285,124 @@ export function VideoStage({ lesson, tokens, terms, cursor, playing, onHost, onW
   };
 
   return (
-    <div className={`video-stage ${size} ${cinema ? "cinema" : ""}`} style={{ ["--ar" as string]: ratio }}>
-      <div className="video-frame" onClick={hasVideo ? onToggle : undefined}>
-        <div className="video-host" ref={setHost} />
-        {!hasVideo && (
-          <div className="video-missing">
-            <span className="orb" style={{ width: 34, height: 34, ["--s" as string]: "34px" }} />
-            {canFetch ? (
-              fetching === null ? (
-                <>
-                  <strong>
-                    {broken
-                      ? t("Cette vidéo ne se lit pas sur ce Mac", "This video doesn't play on this Mac")
-                      : t("L'image de cette vidéo n'a pas encore été téléchargée", "The picture of this video hasn't been downloaded yet")}
-                  </strong>
-                  <button className="btn sm video-get" onClick={(e) => (e.stopPropagation(), fetchVideo())}>
-                    <Icon name="download" size={14} /> {broken ? t("La télécharger à nouveau", "Download it again") : t("Télécharger la vidéo", "Download the video")}
-                  </button>
-                </>
+    <motion.div
+      className="video-shell"
+      initial={false}
+      animate={hidden ? { height: 0, opacity: 0 } : { height: "auto", opacity: 1 }}
+      transition={
+        calm
+          ? { duration: 0 }
+          : { height: { duration: 0.42, ease: [0.2, 0.8, 0.2, 1] }, opacity: hidden ? { duration: 0.2 } : { duration: 0.34, delay: 0.1 } }
+      }
+      onAnimationStart={() => setClip(true)}
+      onAnimationComplete={() => setClip(hidden)}
+      style={{ overflow: clip || hidden ? "hidden" : undefined }}
+      aria-hidden={hidden || undefined}
+      inert={hidden || undefined}
+    >
+      <div className={`video-stage ${size} ${cinema ? "cinema" : ""}`} style={{ ["--ar" as string]: ratio }}>
+        <div className="video-frame" onClick={hasVideo ? onToggle : undefined}>
+          <div className="video-host" ref={setHost} />
+          {!hasVideo && (
+            <div className="video-missing">
+              <span className="orb" style={{ width: 34, height: 34, ["--s" as string]: "34px" }} />
+              {canFetch ? (
+                fetching === null ? (
+                  <>
+                    <strong>
+                      {broken
+                        ? t("Cette vidéo ne se lit pas sur ce Mac", "This video doesn't play on this Mac")
+                        : t("L'image de cette vidéo n'a pas encore été téléchargée", "The picture of this video hasn't been downloaded yet")}
+                    </strong>
+                    <button className="btn sm video-get" onClick={(e) => (e.stopPropagation(), fetchVideo())}>
+                      <Icon name="download" size={14} /> {broken ? t("La télécharger à nouveau", "Download it again") : t("Télécharger la vidéo", "Download the video")}
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <strong>{t("Téléchargement de la vidéo…", "Downloading the video…")}</strong>
+                    <div className="bar live" style={{ width: 220 }}>
+                      <i style={{ width: `${fetching}%` }} />
+                    </div>
+                  </>
+                )
+              ) : broken ? (
+                <strong>{t("Cette vidéo ne se lit pas sur ce Mac", "This video doesn't play on this Mac")}</strong>
               ) : (
-                <>
-                  <strong>{t("Téléchargement de la vidéo…", "Downloading the video…")}</strong>
-                  <div className="bar live" style={{ width: 220 }}>
-                    <i style={{ width: `${fetching}%` }} />
-                  </div>
-                </>
-              )
-            ) : broken ? (
-              <strong>{t("Cette vidéo ne se lit pas sur ce Mac", "This video doesn't play on this Mac")}</strong>
+                <strong>{t("Leçon audio", "Audio lesson")}</strong>
+              )}
+            </div>
+          )}
+          {hasVideo && !playing && (
+            <div className="video-play" aria-hidden="true">
+              <Icon name="play" size={26} />
+            </div>
+          )}
+          <div className="video-tools" onClick={(e) => e.stopPropagation()}>
+            {cinema ? (
+              <button className={`icon-btn ${showTr ? "on" : ""}`} onClick={() => setSetting("video_translate", showTr ? "0" : "1")} aria-label={t("Sous-titres traduits", "Translated subtitles")}
+                title={t("Sous-titres traduits en français", "Subtitles translated into English")}
+              >
+                <span style={{ fontSize: 11, fontWeight: 700 }}>{t("FR", "EN")}</span>
+              </button>
             ) : (
-              <strong>{t("Leçon audio", "Audio lesson")}</strong>
+              <button className="icon-btn" onClick={() => setSetting("video_size", size === "large" ? "compact" : "large")} aria-label={size === "large" ? t("Réduire la vidéo", "Make the video smaller") : t("Agrandir la vidéo", "Make the video larger")}
+                title={size === "large" ? t("Réduire la vidéo", "Make the video smaller") : t("Agrandir la vidéo", "Make the video larger")}
+              >
+                <Icon name={size === "large" ? "layers" : "video"} size={16} />
+              </button>
+            )}
+            <button className="icon-btn" onClick={() => setCinema((c) => !c)} aria-label={cinema ? t("Quitter le plein écran", "Exit full screen") : t("Plein écran", "Full screen")}
+              title={cinema ? t("Quitter le plein écran (Échap)", "Exit full screen (Esc)") : t("Plein écran, sous-titres sous l'image", "Full screen, subtitles under the picture")}
+            >
+              <Icon name={cinema ? "shrink" : "expand"} size={16} />
+            </button>
+            {!cinema && (
+              <button className="icon-btn" onClick={onClose} aria-label={t("Fermer la vidéo", "Close the video")}
+                title={t("Fermer la vidéo : le son continue, le texte prend toute la place (V)", "Close the video: the sound goes on, the text gets all the room (V)")}
+              >
+                <Icon name="close" size={16} />
+              </button>
+            )}
+          </div>
+        </div>
+        {cinema && (
+          <div className="subtitle-band" dir="auto">
+            {shown ? (
+              <>
+                <div className="sub-box" ref={subBox}>
+                  {lamp && (
+                    <motion.div
+                      className="sub-lantern"
+                      initial={false}
+                      animate={{ x: lamp.x, y: lamp.y, width: lamp.width, height: lamp.height }}
+                      transition={lamp.jump ? { duration: 0 } : LANTERN_SPRING}
+                    />
+                  )}
+                  <p key={shown.chunk[0]} className="sub-line" lang={lesson.lang}>
+                    {tokens.slice(shown.chunk[0], shown.chunk[1]).map((t, j) => {
+                      const i = shown.chunk[0] + j;
+                      if (!t.w) return <span key={i}>{t.t}</span>;
+                      const st = terms[t.k]?.status ?? 0;
+                      return (
+                        <span key={i} data-i={i} className={`sw s${st}`} onClick={() => onWord(i)}>
+                          {t.t}
+                        </span>
+                      );
+                    })}
+                  </p>
+                </div>
+                {showTr && subTr && <p className="sub-tr">{subTr}</p>}
+              </>
+            ) : (
+              <p className="sub-hint">
+                {t("Les sous-titres s'affichent ici pendant la lecture. Touchez un mot : sa traduction apparaît à droite.", "Subtitles appear here while the video plays. Tap a word: its translation appears on the right.")}
+                <span>{t("Espace : lecture · Échap : quitter le plein écran", "Space: play · Esc: exit full screen")}</span>
+              </p>
             )}
           </div>
         )}
-        {hasVideo && !playing && (
-          <div className="video-play" aria-hidden="true">
-            <Icon name="play" size={26} />
-          </div>
-        )}
-        <div className="video-tools" onClick={(e) => e.stopPropagation()}>
-          {cinema ? (
-            <button className={`icon-btn ${showTr ? "on" : ""}`} onClick={() => setSetting("video_translate", showTr ? "0" : "1")} aria-label={t("Sous-titres traduits", "Translated subtitles")}
-              title={t("Sous-titres traduits en français", "Subtitles translated into English")}
-            >
-              <span style={{ fontSize: 11, fontWeight: 700 }}>{t("FR", "EN")}</span>
-            </button>
-          ) : (
-            <button className="icon-btn" onClick={() => setSetting("video_size", size === "large" ? "compact" : "large")} aria-label={size === "large" ? t("Réduire la vidéo", "Make the video smaller") : t("Agrandir la vidéo", "Make the video larger")}
-              title={size === "large" ? t("Réduire la vidéo", "Make the video smaller") : t("Agrandir la vidéo", "Make the video larger")}
-            >
-              <Icon name={size === "large" ? "layers" : "video"} size={16} />
-            </button>
-          )}
-          <button className="icon-btn" onClick={() => setCinema((c) => !c)} aria-label={cinema ? t("Quitter le plein écran", "Exit full screen") : t("Plein écran", "Full screen")}
-            title={cinema ? t("Quitter le plein écran (Échap)", "Exit full screen (Esc)") : t("Plein écran, sous-titres sous l'image", "Full screen, subtitles under the picture")}
-          >
-            <Icon name={cinema ? "shrink" : "expand"} size={16} />
-          </button>
-        </div>
       </div>
-      {cinema && (
-        <div className="subtitle-band" dir="auto">
-          {shown ? (
-            <>
-              <div className="sub-box" ref={subBox}>
-                {lamp && (
-                  <motion.div
-                    className="sub-lantern"
-                    initial={false}
-                    animate={{ x: lamp.x, y: lamp.y, width: lamp.width, height: lamp.height }}
-                    transition={lamp.jump ? { duration: 0 } : LANTERN_SPRING}
-                  />
-                )}
-                <p key={shown.chunk[0]} className="sub-line" lang={lesson.lang}>
-                  {tokens.slice(shown.chunk[0], shown.chunk[1]).map((t, j) => {
-                    const i = shown.chunk[0] + j;
-                    if (!t.w) return <span key={i}>{t.t}</span>;
-                    const st = terms[t.k]?.status ?? 0;
-                    return (
-                      <span key={i} data-i={i} className={`sw s${st}`} onClick={() => onWord(i)}>
-                        {t.t}
-                      </span>
-                    );
-                  })}
-                </p>
-              </div>
-              {showTr && subTr && <p className="sub-tr">{subTr}</p>}
-            </>
-          ) : (
-            <p className="sub-hint">
-              {t("Les sous-titres s'affichent ici pendant la lecture. Touchez un mot : sa traduction apparaît à droite.", "Subtitles appear here while the video plays. Tap a word: its translation appears on the right.")}
-              <span>{t("Espace : lecture · Échap : quitter le plein écran", "Space: play · Esc: exit full screen")}</span>
-            </p>
-          )}
-        </div>
-      )}
-    </div>
+    </motion.div>
   );
 }

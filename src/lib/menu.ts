@@ -40,6 +40,8 @@ export interface LessonActions {
   chat(): void;
   simplify(): void;
   cinema(): void;
+  /** fermer la vidéo, ou la faire revenir */
+  video(): void;
   playlist(): void;
   cover(): void;
   remove(): void;
@@ -244,7 +246,7 @@ function sub(text: string, items: Item[], enabled = true): SubmenuOptions {
   return { text, items, enabled };
 }
 
-const LOOK_KEYS = ["read_font", "read_paper", "font_size", "line_height", "read_width", "reader_layout", "word_style", "word_panel", "theme", "reader_sidebar", "auto_turn", "media_rate", "tts_rate"] as const;
+const LOOK_KEYS = ["read_font", "read_paper", "font_size", "line_height", "read_width", "reader_layout", "word_style", "word_panel", "theme", "reader_sidebar", "auto_turn", "media_rate", "tts_rate", "library_view", "video_show"] as const;
 
 /** Ce dont le menu dépend : il n'est refait que si cela change. */
 function snapshot() {
@@ -347,7 +349,12 @@ function viewMenu(s: Snap): SubmenuOptions {
     ["vocab", t("Vocabulaire", "Vocabulary"), "5"],
     ["progress", t("Progrès", "Progress"), "6"],
   ];
-  const { theme, reader_sidebar: sidebar } = s.look;
+  const { theme, reader_sidebar: sidebar, library_view: shelf } = s.look;
+  const shelves: [string, string][] = [
+    ["large", t("En grandes cartes", "as Large Cards")],
+    ["small", t("En petites cartes", "as Small Cards")],
+    ["list", t("En liste", "as List")],
+  ];
   const themes: [string, string][] = [
     ["light", t("Clair", "Light")],
     ["dark", t("Sombre", "Dark")],
@@ -363,6 +370,17 @@ function viewMenu(s: Snap): SubmenuOptions {
         sep,
         act(t("Ajouter une langue…", "Add a Language…"), () => app().openSettings("langs"), { on }),
       ],
+      on,
+    ),
+    // la bibliothèque, comme une fenêtre du Finder : par cartes ou par liste
+    sub(
+      t("Bibliothèque", "Library"),
+      shelves.map(([v, label]) =>
+        pick(label, (shelf || "large") === v, () => {
+          void app().setSetting("library_view", v);
+          app().go("library");
+        }, { on }),
+      ),
       on,
     ),
     sep,
@@ -479,6 +497,7 @@ function lessonMenu(s: Snap): SubmenuOptions {
     sep,
     act(t("Discuter de la leçon", "Chat About the Lesson"), onLesson((a) => a.chat()), { on }),
     act(t("Simplifier…", "Simplify…"), onLesson((a) => a.simplify()), { on }),
+    pick(t("Afficher la vidéo", "Show Video"), s.look.video_show !== "0", onLesson((a) => a.video()), { on: on && !!l?.video }),
     act(t("Regarder en plein écran", "Watch Full Screen"), onLesson((a) => a.cinema()), { on: on && !!l?.video }),
     sep,
     act(t("Ajouter à une playlist…", "Add to a Playlist…"), onLesson((a) => a.playlist()), { on }),

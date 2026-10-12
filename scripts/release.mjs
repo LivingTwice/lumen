@@ -51,7 +51,8 @@ if (cmd === "bump") {
     const text = readFileSync(CHANGELOG, "utf8");
     const d = new Date();
     const day = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-    const next = text.replace(/"version":\s*"next",(\s*)"date":\s*"[^"]*"/, `"version": "${version}",$1"date": "${day}"`);
+    // la date est ajoutée si la version "next" n'en a pas encore
+    const next = text.replace(/"version":\s*"next",(\s*)(?:"date":\s*"[^"]*",\s*)?/, (_, sp) => `"version": "${version}",${sp}"date": "${day}",${sp}`);
     if (next !== text) {
       writeFileSync(CHANGELOG, next);
       console.log(`  ok : nouveautés datées (${version}, ${day})`);

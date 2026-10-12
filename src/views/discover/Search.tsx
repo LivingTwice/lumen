@@ -9,6 +9,7 @@ import { ago, cleanTitle, levelRange } from "../../lib/discover";
 import { count, formatNumber, t } from "../../lib/i18n";
 import { extractArticle } from "../../lib/importers";
 import { stageText, useJob } from "../../lib/imports";
+import { useLessonOf } from "../../lib/known";
 import { LANGS, inLang } from "../../lib/langs";
 import { fromArticle, fromHit, fromLink, usePreview } from "../../lib/preview";
 import { PLATFORMS, URL_LIKE, forgetSearches, platformName, recentSearches, searchIdeas, useSearch, type Length, type SearchTab } from "../../lib/search";
@@ -131,19 +132,22 @@ function lyricsBadge(hit: SearchHit): { icon: IconName; text: string; on: boolea
   return { icon: "lyrics", text: hit.lyrics.synced ? t("Paroles minutées", "Timed lyrics") : t("Paroles", "Lyrics"), on: true };
 }
 
-function HitCard({ hit, index }: { hit: SearchHit; index: number }) {
+/** `lesson` : la leçon déjà tirée de ce résultat (même vidéo, même page, même chanson). */
+function HitCard({ hit, index, lesson }: { hit: SearchHit; index: number; lesson: number | null }) {
   const glow = useGlow<HTMLDivElement>();
   const open = usePreview((s) => s.open);
   const openImportLink = useApp((s) => s.openImportLink);
-  const p = useMemo(() => fromHit(hit), [hit]);
+  const openLesson = useApp((s) => s.openLesson);
+  const p = useMemo(() => ({ ...fromHit(hit), lesson }), [hit, lesson]);
   const hover = useRef<number | null>(null);
   const square = hit.kind === "song" || hit.kind === "show" || (hit.platform === "podcast" && hit.kind === "audio");
   const title = cleanTitle(hit.title);
   const show = hit.kind === "show";
-  const onOpen = () => (show ? openImportLink(hit.url) : open(p));
+  // déjà dans la bibliothèque : la leçon s'ouvre, comme depuis les cartes de Découvrir
+  const onOpen = () => (lesson ? openLesson(lesson) : show ? openImportLink(hit.url) : open(p));
   // une vidéo survolée un instant se prépare : l'aperçu s'ouvrira aussitôt
   const warm = () => {
-    if (hit.kind !== "video" || hit.platform === "podcast") return;
+    if (lesson || hit.kind !== "video" || hit.platform === "podcast") return;
     hover.current = window.setTimeout(() => void prefetchStream(hit.url, false).catch(() => {}), 450);
   };
   const cool = () => hover.current !== null && window.clearTimeout(hover.current);
@@ -163,12 +167,28 @@ function HitCard({ hit, index }: { hit: SearchHit; index: number }) {
       animate={{ opacity: 1, y: 0 }}
       transition={{ delay: Math.min(index, 8) * 0.035, type: "spring", stiffness: 260, damping: 28 }}
     >
-      <div className={`find-card glow-surface ${hit.in_lang === false ? "elsewhere" : ""}`} ref={glow.ref} onMouseMove={glow.onMouseMove} onMouseEnter={warm} onMouseLeave={cool}>
-        <button className="lesson-hit" onClick={onOpen} aria-label={show ? t(`Voir les épisodes de ${title}`, `See the episodes of ${title}`) : t(`Aperçu de ${title}`, `Preview ${title}`)} />
+      <div
+        className={`find-card glow-surface ${hit.in_lang === false ? "elsewhere" : ""} ${lesson ? "done" : ""}`}
+        ref={glow.ref}
+        onMouseMove={glow.onMouseMove}
+        onMouseEnter={warm}
+        onMouseLeave={cool}
+      >
+        <button
+          className="lesson-hit"
+          onClick={onOpen}
+          aria-label={lesson ? t(`Ouvrir ${title}`, `Open ${title}`) : show ? t(`Voir les épisodes de ${title}`, `See the episodes of ${title}`) : t(`Aperçu de ${title}`, `Preview ${title}`)}
+        />
         <HitThumb hit={hit} square={square} />
-        <span className="hit-badges">
-          <JobBadge jobKey={p.key} />
-        </span>
+        {lesson ? (
+          <span className="find-done">
+            <Icon name="check" size={12} stroke={2.4} /> {t("Dans la bibliothèque", "In your library")}
+          </span>
+        ) : (
+          <span className="hit-badges">
+            <JobBadge jobKey={p.key} />
+          </span>
+        )}
         <div className="find-body">
           <div className="find-top">
             <span className="find-source">{hit.author}</span>
@@ -212,8 +232,12 @@ function Ghosts({ n, square }: { n: number; square?: boolean }) {
 }
 
 /** Les résultats d'une plateforme : une rangée (onglet « Tout ») ou une grille. */
-function PlatformResults({ platform, compact }: { platform: SearchPlatform; compact: boolean }) {
+function PlatformResults({ lang, platform, compact }: { lang: LangCode; platform: SearchPlatform; compact: boolean }) {
   const bucket = useSearch((s) => s.buckets[platform]);
+  const lessonOf = useLessonOf(lang);
+  // une émission (son flux) n'est pas une leçon : seuls ses épisodes le deviennent
+  const lessonFor = (h: SearchHit) =>
+    h.kind === "show" ? null : lessonOf({ url: h.url, page: h.page, ...(h.kind === "song" ? { artist: h.author, title: h.title } : {}) });
   const setTab = useSearch((s) => s.setTab);
   const more = useSearch((s) => s.more);
   const installing = useSearch((s) => s.installing);
@@ -247,7 +271,7 @@ function PlatformResults({ platform, compact }: { platform: SearchPlatform; comp
           <p className="hit-sub">{t("Émissions", "Shows")}</p>
           <div className={compact ? "shelf-track hit-row" : "hit-grid square"}>
             {shows.slice(0, compact ? 6 : 12).map((h, i) => (
-              <HitCard key={h.id} hit={h} index={i} />
+              <HitCard key={h.id} hit={h} index={i} lesson={null} />
             ))}
           </div>
           {hits.length > 0 && <p className="hit-sub">{t("Épisodes", "Episodes")}</p>}
@@ -255,7 +279,7 @@ function PlatformResults({ platform, compact }: { platform: SearchPlatform; comp
       )}
       <div className={compact && platform !== "youtube" ? "shelf-track hit-row" : `hit-grid ${square ? "square" : ""}`}>
         {hits.map((h, i) => (
-          <HitCard key={h.id} hit={h} index={i} />
+          <HitCard key={h.id} hit={h} index={i} lesson={lessonFor(h)} />
         ))}
         {bucket.loading && <Ghosts n={bucket.hits.length ? 4 : compact ? 4 : 8} square={square} />}
       </div>
@@ -513,7 +537,7 @@ export function SearchResults({ lang, local, onBack, renderLocal }: { lang: Lang
             </section>
           )}
           {(tab === "all" ? PLATFORMS : [tab]).map((p) => (
-            <PlatformResults key={p} platform={p as SearchPlatform} compact={tab === "all"} />
+            <PlatformResults key={p} lang={lang} platform={p as SearchPlatform} compact={tab === "all"} />
           ))}
         </>
       )}

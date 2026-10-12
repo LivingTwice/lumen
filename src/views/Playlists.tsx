@@ -1,16 +1,15 @@
 import { AnimatePresence, Reorder, motion, useDragControls } from "motion/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Cover, KIND, PlaylistCover } from "../components/Cover";
+import { BookCover, Cover, KIND, PlaylistCover } from "../components/Cover";
 import { Icon } from "../components/Icon";
 import { Menu, Orb, Segmented, Sheet, useGlow } from "../components/ui";
 import { api, errorText } from "../lib/api";
 import { confirmAsk } from "../lib/dialogs";
 import { count, t } from "../lib/i18n";
 import { inLang, langInfo } from "../lib/langs";
-import { formatLength, lessonsOf, listenSecs, playPlaylist, plural } from "../lib/playlists";
+import { bookView, formatLength, isBook, lessonsOf, listenSecs, playPlaylist, plural, progressOf, readBook } from "../lib/playlists";
 import { formatDuration, useApp } from "../lib/store";
 import type { LessonSummary, Playlist, PlaylistPatch } from "../lib/types";
-import { progressOf } from "./Library";
 
 const SPRING = { type: "spring", stiffness: 260, damping: 28 } as const;
 
@@ -19,7 +18,9 @@ function lengthOf(l: LessonSummary): string {
   return l.has_media && l.duration > 0 ? formatDuration(l.duration) : count(l.word_count, "mot", "mots", "word", "words");
 }
 
-function subtitleOf(l: LessonSummary): string {
+/** `inBook` : chapitre d'un livre, son genre et son livre vont sans dire. */
+function subtitleOf(l: LessonSummary, inBook = false): string {
+  if (inBook) return lengthOf(l);
   const kind = (KIND[l.kind] ?? KIND.text).label;
   return [kind, lengthOf(l), l.collection].filter(Boolean).join(" · ");
 }
@@ -82,9 +83,14 @@ export function Playlists() {
 
   const remove = async (p: Playlist) => {
     const ok = await confirmAsk(
-      t(`Supprimer la playlist « ${p.name} » ? Ses leçons restent dans votre bibliothèque.`, `Delete the playlist “${p.name}”? Its lessons stay in your library.`),
-      t("Supprimer la playlist", "Delete the playlist"),
-      t("Supprimer", "Delete"),
+      isBook(p)
+        ? t(
+            `Défaire le livre « ${p.name} » ? Ses chapitres restent dans votre bibliothèque, chacun sur sa carte. Pour supprimer le livre et ses chapitres, passez par la bibliothèque.`,
+            `Ungroup the book “${p.name}”? Its chapters stay in your library, each on its own card. To delete the book and its chapters, use the library.`,
+          )
+        : t(`Supprimer la playlist « ${p.name} » ? Ses leçons restent dans votre bibliothèque.`, `Delete the playlist “${p.name}”? Its lessons stay in your library.`),
+      isBook(p) ? t("Défaire le livre", "Ungroup the book") : t("Supprimer la playlist", "Delete the playlist"),
+      isBook(p) ? t("Défaire", "Ungroup") : t("Supprimer", "Delete"),
     );
     if (!ok) return;
     try {
@@ -92,7 +98,7 @@ export function Playlists() {
       if (useApp.getState().queue === p.id) useApp.setState({ queue: null });
       openPlaylist(null);
       setLists((ls) => ls?.filter((x) => x.id !== p.id) ?? ls);
-      toast(t("Playlist supprimée", "Playlist deleted"));
+      toast(isBook(p) ? t("Livre défait : ses chapitres sont dans la bibliothèque", "Book ungrouped: its chapters are in the library") : t("Playlist supprimée", "Playlist deleted"));
     } catch (e) {
       toast(errorText(e), "error");
     }
@@ -229,6 +235,8 @@ function PlaylistCard({ p, ls, index, onDelete }: { p: Playlist; ls: LessonSumma
   const [menu, setMenu] = useState(false);
   const done = ls.filter((l) => l.completed).length;
   const secs = listenSecs(ls);
+  // un livre : ses chapitres se lisent (le son ne démarre pas de lui-même)
+  const book = isBook(p) ? bookView(p, ls) : null;
   return (
     <motion.div
       layout
@@ -245,20 +253,26 @@ function PlaylistCard({ p, ls, index, onDelete }: { p: Playlist; ls: LessonSumma
       <span className="pl-layer two" aria-hidden="true" />
       <button className="lesson-hit" onClick={() => openPlaylist(p.id)} aria-label={t(`Ouvrir la playlist ${p.name}`, `Open the playlist ${p.name}`)} />
       <div className="pl-cover-wrap">
-        <PlaylistCover lessons={ls} seed={p.id} />
-        {ls.length > 0 && (
-          <button className="pl-play" onClick={() => playPlaylist(p)} aria-label={t(`Écouter la playlist ${p.name}`, `Play the playlist ${p.name}`)}
-            title={p.current ? t("Reprendre l'écoute", "Resume listening") : t("Écouter la playlist", "Play the playlist")}
-          >
-            <Icon name="play" size={18} />
+        {book ? <BookCover lesson={book.ls[0]} title={p.name} /> : <PlaylistCover lessons={ls} seed={p.id} />}
+        {book ? (
+          <button className="pl-play" onClick={() => readBook(book)} aria-label={t(`Lire ${p.name}`, `Read ${p.name}`)} title={book.started ? t("Reprendre la lecture", "Continue reading") : t("Commencer la lecture", "Start reading")}>
+            <Icon name="book" size={18} />
           </button>
+        ) : (
+          ls.length > 0 && (
+            <button className="pl-play" onClick={() => playPlaylist(p)} aria-label={t(`Écouter la playlist ${p.name}`, `Play the playlist ${p.name}`)}
+              title={p.current ? t("Reprendre l'écoute", "Resume listening") : t("Écouter la playlist", "Play the playlist")}
+            >
+              <Icon name="play" size={18} />
+            </button>
+          )
         )}
       </div>
       <div className="lesson-body">
-        <span className={`lesson-collection ${playing ? "pl-live" : ""}`}>{playing ? t("En cours d'écoute", "Now playing") : "Playlist"}</span>
+        <span className={`lesson-collection ${playing ? "pl-live" : ""}`}>{playing ? (book ? t("En cours de lecture", "Reading now") : t("En cours d'écoute", "Now playing")) : book ? t("Livre", "Book") : "Playlist"}</span>
         <h3 className="lesson-title">{p.name}</h3>
         <div className="lesson-meta">
-          <span className="num">{plural(ls.length, "leçon", "lesson")}</span>
+          <span className="num">{book ? count(ls.length, "chapitre", "chapitres", "chapter", "chapters") : plural(ls.length, "leçon", "lesson")}</span>
           {secs > 0 && (
             <>
               <span className="sep" />
@@ -293,7 +307,7 @@ function PlaylistCard({ p, ls, index, onDelete }: { p: Playlist; ls: LessonSumma
           </button>
           <div className="menu-sep" />
           <button className="menu-item danger" onClick={() => (setMenu(false), onDelete())}>
-            <Icon name="trash" size={16} /> {t("Supprimer la playlist", "Delete the playlist")}
+            <Icon name="trash" size={16} /> {book ? t("Défaire le livre", "Ungroup the book") : t("Supprimer la playlist", "Delete the playlist")}
           </button>
         </Menu>
       </div>
@@ -328,7 +342,9 @@ function PlaylistPage({ p, all, onUpdate, onDelete, onAdd }: { p: Playlist; all:
   const done = ls.filter((l) => l.completed).length;
   const secs = listenSecs(ls);
   const words = ls.reduce((s, l) => s + l.word_count, 0);
-  const resume = p.current ? byId.get(p.current) : undefined;
+  // un livre : on y lit ses chapitres dans l'ordre, sans lancer le son
+  const book = isBook(p) ? bookView(p, ls) : null;
+  const resume = book ? (book.started ? book.at : undefined) : p.current ? byId.get(p.current) : undefined;
 
   const saveTitle = () => {
     setEditing(false);
@@ -354,13 +370,21 @@ function PlaylistPage({ p, all, onUpdate, onDelete, onAdd }: { p: Playlist; all:
       <motion.div className="view" layoutScroll>
         {/* halo des couvertures derrière l'en-tête */}
         <div className="pl-ambient" aria-hidden="true">
-          <PlaylistCover lessons={ls} seed={p.id} />
+          {book ? <BookCover lesson={book.ls[0]} title={p.name} bare /> : <PlaylistCover lessons={ls} seed={p.id} />}
         </div>
         <div className="view-inner">
           <header className="pl-hero">
-            <PlaylistCover lessons={ls} seed={p.id} big />
+            {book ? (
+              <div className="pl-cover pl-big book-big">
+                <BookCover lesson={book.ls[0]} title={p.name} progress={book.progress} label={count(ls.length, "chapitre", "chapitres", "chapter", "chapters")} editable also={book.ls.slice(1).map((l) => l.id)} />
+              </div>
+            ) : (
+              <PlaylistCover lessons={ls} seed={p.id} big />
+            )}
             <div className="pl-hero-body">
-              <span className="eyebrow">Playlist · {li.name}</span>
+              <span className="eyebrow">
+                {book ? t("Livre", "Book") : "Playlist"} · {li.name}
+              </span>
               {editing ? (
                 <input
                   className="pl-title-input display"
@@ -384,18 +408,32 @@ function PlaylistPage({ p, all, onUpdate, onDelete, onAdd }: { p: Playlist; all:
                 </h1>
               )}
               <p className="pl-meta num">
-                {plural(ls.length, "leçon", "lesson")}
+                {book ? count(ls.length, "chapitre", "chapitres", "chapter", "chapters") : plural(ls.length, "leçon", "lesson")}
                 {secs > 0 && t(` · ${formatLength(secs)} d'écoute`, ` · ${formatLength(secs)} of listening`)}
                 {words > 0 && ` · ${count(words, "mot", "mots", "word", "words")}`}
-                {done > 0 && t(` · ${done} terminée${done > 1 ? "s" : ""}`, ` · ${done} finished`)}
+                {done > 0 && (book ? t(` · ${done} lu${done > 1 ? "s" : ""}`, ` · ${done} read`) : t(` · ${done} terminée${done > 1 ? "s" : ""}`, ` · ${done} finished`))}
+                {book && book.progress > 0.005 && t(` · ${Math.round(book.progress * 100)} % du livre`, ` · ${Math.round(book.progress * 100)}% of the book`)}
               </p>
               <div className="pl-actions">
-                <button className="btn primary lg glow" onClick={() => playPlaylist(p)} disabled={!ls.length}>
-                  <Icon name="play" size={15} /> {resume ? t("Reprendre", "Resume") : t("Écouter", "Play")}
-                </button>
-                <button className="btn outline lg" onClick={onAdd}>
-                  <Icon name="plus" size={16} /> {t("Ajouter des leçons", "Add lessons")}
-                </button>
+                {book ? (
+                  <button className="btn primary lg glow" onClick={() => readBook(book)}>
+                    <Icon name="book" size={16} /> {book.started ? t("Reprendre la lecture", "Continue reading") : t("Commencer la lecture", "Start reading")}
+                  </button>
+                ) : (
+                  <>
+                    <button className="btn primary lg glow" onClick={() => playPlaylist(p)} disabled={!ls.length}>
+                      <Icon name="play" size={15} /> {resume ? t("Reprendre", "Resume") : t("Écouter", "Play")}
+                    </button>
+                    <button className="btn outline lg" onClick={onAdd}>
+                      <Icon name="plus" size={16} /> {t("Ajouter des leçons", "Add lessons")}
+                    </button>
+                  </>
+                )}
+                {book && book.hasMedia && (
+                  <button className="btn outline lg" onClick={() => playPlaylist(p, book.at.id)}>
+                    <Icon name="play" size={15} /> {t("Écouter", "Play")}
+                  </button>
+                )}
                 <Menu
                   open={menu}
                   onClose={() => setMenu(false)}
@@ -408,9 +446,14 @@ function PlaylistPage({ p, all, onUpdate, onDelete, onAdd }: { p: Playlist; all:
                   <button className="menu-item" onClick={() => (setMenu(false), setTitle(p.name), setEditing(true))}>
                     <Icon name="edit" size={16} /> {t("Renommer", "Rename")}
                   </button>
+                  {book && (
+                    <button className="menu-item" onClick={() => (setMenu(false), onAdd())}>
+                      <Icon name="plus" size={16} /> {t("Ajouter des leçons", "Add lessons")}
+                    </button>
+                  )}
                   <div className="menu-sep" />
                   <button className="menu-item danger" onClick={() => (setMenu(false), onDelete())}>
-                    <Icon name="trash" size={16} /> {t("Supprimer la playlist", "Delete the playlist")}
+                    <Icon name="trash" size={16} /> {book ? t("Défaire le livre", "Ungroup the book") : t("Supprimer la playlist", "Delete the playlist")}
                   </button>
                 </Menu>
               </div>
@@ -435,9 +478,10 @@ function PlaylistPage({ p, all, onUpdate, onDelete, onAdd }: { p: Playlist; all:
                       key={id}
                       l={l}
                       index={i}
-                      current={id === p.current}
+                      current={book ? !!resume && id === resume.id : id === p.current}
+                      book={!!book}
                       onOpen={() => openLesson(id, { playlist: p.id })}
-                      onPlay={() => playPlaylist(p, id)}
+                      onPlay={() => (book ? readBook(book, id) : playPlaylist(p, id))}
                       onRemove={() => removeLesson(l)}
                       onDrop={saveOrder}
                     />
@@ -452,7 +496,26 @@ function PlaylistPage({ p, all, onUpdate, onDelete, onAdd }: { p: Playlist; all:
   );
 }
 
-function Row({ l, index, current, onOpen, onPlay, onRemove, onDrop }: { l: LessonSummary; index: number; current: boolean; onOpen(): void; onPlay(): void; onRemove(): void; onDrop(): void }) {
+function Row({
+  l,
+  index,
+  current,
+  book,
+  onOpen,
+  onPlay,
+  onRemove,
+  onDrop,
+}: {
+  l: LessonSummary;
+  index: number;
+  current: boolean;
+  /** chapitre d'un livre : on le lit, on ne l'écoute pas */
+  book: boolean;
+  onOpen(): void;
+  onPlay(): void;
+  onRemove(): void;
+  onDrop(): void;
+}) {
   const controls = useDragControls();
   const [dragging, setDragging] = useState(false);
   const progress = progressOf(l);
@@ -487,15 +550,18 @@ function Row({ l, index, current, onOpen, onPlay, onRemove, onDrop }: { l: Lesso
       <button className="pl-row-hit" onClick={onOpen} aria-label={t(`Ouvrir ${l.title}`, `Open ${l.title}`)} />
       <div className="pl-thumb">
         <Cover lesson={l} bare />
-        <button className="pl-thumb-play" onClick={onPlay} aria-label={t(`Écouter à partir de ${l.title}`, `Play from ${l.title}`)}
-          title={t("Écouter la playlist à partir d'ici", "Play the playlist from here")}
+        <button
+          className="pl-thumb-play"
+          onClick={onPlay}
+          aria-label={book ? t(`Lire à partir de ${l.title}`, `Read from ${l.title}`) : t(`Écouter à partir de ${l.title}`, `Play from ${l.title}`)}
+          title={book ? t("Lire le livre à partir d'ici", "Read the book from here") : t("Écouter la playlist à partir d'ici", "Play the playlist from here")}
         >
-          <Icon name="play" size={14} />
+          <Icon name={book ? "book" : "play"} size={14} />
         </button>
       </div>
       <div className="pl-row-body">
         <strong>{l.title}</strong>
-        <span>{current ? t(`En cours · ${subtitleOf(l)}`, `Now playing · ${subtitleOf(l)}`) : subtitleOf(l)}</span>
+        <span>{current ? (book ? t(`Reprise ici · ${subtitleOf(l, true)}`, `Resumes here · ${subtitleOf(l, true)}`) : t(`En cours · ${subtitleOf(l)}`, `Now playing · ${subtitleOf(l)}`)) : subtitleOf(l, book)}</span>
       </div>
       <div className="pl-row-end">
         {l.completed ? (

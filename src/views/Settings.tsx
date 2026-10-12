@@ -73,7 +73,7 @@ const groups = (): { title: string | null; tabs: Tab[] }[] => [
         icon: "settings",
         label: t("Général", "General"),
         lead: t("La langue de Lumen et sa lumière, de l'aube à la nuit.", "Lumen's language and its light, from dawn to night."),
-        keys: "langue interface francais anglais theme apparence clair sombre systeme language french english appearance light dark system",
+        keys: "langue interface francais anglais theme apparence clair sombre systeme bibliotheque presentation cartes grandes petites liste finder tri language french english appearance light dark system library view cards large small list sort",
       },
     ],
   },
@@ -492,6 +492,32 @@ function GeneralPane() {
         note={t("« Système » suit le Mac : l'aube le jour, une nuit chaude le soir.", "“System” follows your Mac: dawn by day, a warm night in the evening.")}
       >
         <ThemePicker value={settings.theme || "system"} onChange={(v) => void setSetting("theme", v)} />
+      </Section>
+      <Section
+        title={t("Bibliothèque", "Library")}
+        note={t(
+          "Grandes cartes avec un extrait, petites cartes pour en voir davantage, ou une liste comme dans le Finder, triée d'un clic sur le titre d'une colonne.",
+          "Large cards with an excerpt, small cards to see more at once, or a list like in Finder, sorted with a click on a column title.",
+        )}
+      >
+        <div className="set-card">
+          <div className="set-row">
+            <div className="grow">
+              <strong>{t("Présentation", "View")}</strong>
+            </div>
+            <Segmented
+              id="set-lib-view"
+              label={t("Présentation de la bibliothèque", "Library view")}
+              value={settings.library_view || "large"}
+              onChange={(v) => void setSetting("library_view", v)}
+              options={[
+                { value: "large", label: t("Grandes cartes", "Large cards") },
+                { value: "small", label: t("Petites cartes", "Small cards") },
+                { value: "list", label: t("Liste", "List") },
+              ]}
+            />
+          </div>
+        </div>
       </Section>
     </>
   );

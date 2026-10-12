@@ -27,6 +27,7 @@ function groups(): { title: string; rows: Row[] }[] {
         { keys: [[enter]], label: t("Terminer la page", "Finish the page") },
         { keys: pages, label: t("Page précédente ou suivante", "Previous or next page") },
         { keys: [["C"]], label: t("Discuter de la leçon", "Chat about the lesson") },
+        { keys: [["V"]], label: t("Fermer la vidéo, ou la faire revenir", "Close the video, or bring it back") },
         { keys: [[t("Échap", "Esc")]], label: t("Effacer la sélection, quitter le plein écran", "Clear the selection, leave full screen") },
       ],
     },

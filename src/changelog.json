@@ -2,6 +2,66 @@
   "_lisezmoi": "Nouveautés montrées après chaque mise à jour (components/News.tsx) et notes de publication. Ajouter ce qui change sous la version \"next\" au fil du travail ; « Publier une version » lui donne son numéro et sa date. Icônes : noms de components/Icon.tsx. Actions : \"tour\" (visite guidée), \"guide\", \"settings:<page>\" (profile, general, langs, reading, voice, discover, podcasts, ai, videos, backup, storage, lingq, about), \"import:<onglet>\" (text, link, file, media, podcast), \"view:<vue>\" (library, discover, playlists, chat, vocab, progress).",
   "releases": [
     {
+      "version": "1.1.0",
+      "date": "2026-10-12",
+      "title": { "fr": "Des livres entiers, une bibliothèque à votre goût", "en": "Whole books, a library the way you like it" },
+      "items": [
+        {
+          "icon": "book",
+          "title": { "fr": "Un livre, une seule carte", "en": "One book, one card" },
+          "body": {
+            "fr": "Un livre importé (EPUB, ou un long PDF) n'éparpille plus ses chapitres dans la bibliothèque : il y tient en une seule carte, avec sa vraie couverture. La toucher reprend la lecture là où vous en étiez, et la dernière page d'un chapitre mène au suivant. Ses chapitres forment aussi une playlist, pour les lire dans l'ordre ou en choisir un. Les livres EPUB déjà importés se rassemblent d'eux-mêmes.",
+            "en": "An imported book (EPUB, or a long PDF) no longer scatters its chapters across the library: it fits on a single card, with its real cover. Clicking it picks up the reading where you left off, and the last page of a chapter leads to the next. Its chapters also form a playlist, to read them in order or pick one. EPUB books you already imported gather themselves too."
+          },
+          "action": "import:file"
+        },
+        {
+          "icon": "layers",
+          "title": { "fr": "Les vrais chapitres du livre", "en": "The book's real chapters" },
+          "body": {
+            "fr": "Lumen suit désormais la table des matières du livre : de vrais chapitres, plus des dizaines de fichiers découpés par l'éditeur. Couverture, page de titre, table des matières et mentions légales sont décochées d'office, et un long chapitre se lit en parties égales.",
+            "en": "Lumen now follows the book's table of contents: real chapters, no longer dozens of files cut up by the publisher. Cover, title page, table of contents and legal notices are unchecked for you, and a long chapter reads in equal parts."
+          },
+          "action": "import:file"
+        },
+        {
+          "icon": "bigcards",
+          "title": { "fr": "La bibliothèque comme vous l'aimez", "en": "The library the way you like it" },
+          "body": {
+            "fr": "Trois présentations, d'un clic en haut de la bibliothèque : grandes cartes, petites cartes pour en voir davantage, ou une liste comme dans le Finder, triée par nom, genre, longueur, mots nouveaux, avancement ou date d'un clic sur le titre d'une colonne. Les livres s'y déplient pour montrer leurs chapitres.",
+            "en": "Three views, one click away at the top of the library: large cards, small cards to see more at once, or a list like in Finder, sorted by name, kind, length, new words, progress or date with a click on a column title. Books unfold there to show their chapters."
+          },
+          "action": "view:library"
+        },
+        {
+          "icon": "video",
+          "title": { "fr": "Fermer la vidéo, garder le son", "en": "Close the video, keep the sound" },
+          "body": {
+            "fr": "Dans une leçon vidéo, la croix en haut de l'image la referme : le son continue, la lanterne aussi, et le texte prend toute la place. Le bouton « Vidéo » de la barre du haut, la touche V ou le menu Leçon la font revenir. Lumen retient votre choix pour les leçons suivantes.",
+            "en": "In a video lesson, the cross at the top of the picture closes it: the sound goes on, so does the lantern, and the text gets all the room. The “Video” button in the top bar, the V key or the Lesson menu bring it back. Lumen remembers your choice for the next lessons."
+          }
+        },
+        {
+          "icon": "check",
+          "title": { "fr": "Ce qui est déjà dans votre bibliothèque", "en": "What's already in your library" },
+          "body": {
+            "fr": "Découvrir reconnaît mieux ce que vous avez déjà importé : les résultats de la recherche aussi portent « Dans la bibliothèque », une chanson trouvée par la recherche est reconnue dans les classements, et une leçon supprimée n'est plus signalée. Toucher la carte ouvre la leçon.",
+            "en": "Discover better recognizes what you've already imported: search results now show “In your library” too, a song found through search is recognized in the charts, and a deleted lesson is no longer flagged. Clicking the card opens the lesson."
+          },
+          "action": "view:discover"
+        },
+        {
+          "icon": "image",
+          "title": { "fr": "Les articles gardent leur image", "en": "Articles keep their picture" },
+          "body": {
+            "fr": "Un article tiré de Découvrir, de la recherche ou d'un lien garde sa photo pour couverture dans la bibliothèque, au lieu de l'œuvre générée.",
+            "en": "An article taken from Discover, from search or from a link keeps its photo as its cover in the library, instead of the generated artwork."
+          },
+          "action": "view:discover"
+        }
+      ]
+    },
+    {
       "version": "1.0.1",
       "date": "2026-10-11",
       "title": { "fr": "Des leçons plus claires", "en": "Clearer lessons" },

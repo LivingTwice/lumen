@@ -206,6 +206,13 @@ const MOCK_DICT: Record<string, [string, string, string, string, string]> = {
   carta: ["Nom commun", "ˈkaɾ.ta", "Lettre", "Noun", "Letter"],
 };
 
+/** Image gardée telle quelle dans le navigateur (adresse data:). */
+function dataUrl(data: Uint8Array): string {
+  let bin = "";
+  for (let i = 0; i < data.length; i += 0x8000) bin += String.fromCharCode(...data.subarray(i, i + 0x8000));
+  return `data:image/jpeg;base64,${btoa(bin)}`;
+}
+
 export function createMockApi(): Api {
   let db = load();
   const commit = () => save(db);
@@ -591,12 +598,12 @@ export function createMockApi(): Api {
     async playlistsList(lang) {
       return playlists()
         .filter((p) => p.lang === lang)
-        .map((p) => ({ ...p, lessons: [...p.lessons], current: p.current && p.lessons.includes(p.current) ? p.current : null }))
+        .map((p) => ({ ...p, kind: p.kind ?? "", lessons: [...p.lessons], current: p.current && p.lessons.includes(p.current) ? p.current : null }))
         .sort((a, b) => b.created_at - a.created_at || b.id - a.id);
     },
     async playlistCreate(lang, name, lessons) {
       const id = Math.max(0, ...playlists().map((p) => p.id)) + 1;
-      playlists().push({ id, lang, name: name.trim().replace(/\s+/g, " ").slice(0, 120) || t("Nouvelle playlist", "New playlist"), lessons: fill(lang, lessons), current: null, created_at: Date.now() / 1000 });
+      playlists().push({ id, lang, name: name.trim().replace(/\s+/g, " ").slice(0, 120) || t("Nouvelle playlist", "New playlist"), lessons: fill(lang, lessons), current: null, created_at: Date.now() / 1000, kind: "" });
       commit();
       return id;
     },
@@ -612,19 +619,40 @@ export function createMockApi(): Api {
       db.playlists = playlists().filter((p) => p.id !== id);
       commit();
     },
-    async lessonSetCover(id, data) {
-      const l = db.lessons.find((x) => x.id === id);
-      if (!l) throw t("Leçon introuvable", "Lesson not found");
-      // dans le navigateur, l'image est gardée telle quelle (adresse data:)
-      let url: string | null = null;
-      if (data) {
-        let bin = "";
-        for (let i = 0; i < data.length; i += 0x8000) bin += String.fromCharCode(...data.subarray(i, i + 0x8000));
-        url = `data:image/jpeg;base64,${btoa(bin)}`;
+    async bookCreate(book, cover) {
+      const name = book.title.trim().replace(/\s+/g, " ").slice(0, 120) || t("Nouvelle playlist", "New playlist");
+      const url = cover ? dataUrl(cover) : null;
+      const lessons: number[] = [];
+      for (const ch of book.chapters) {
+        if (!ch.text.trim()) continue;
+        const id = await this.lessonCreate({ lang: book.lang, title: ch.title, text: ch.text, kind: book.kind, source: book.source, collection: name });
+        const l = db.lessons.find((x) => x.id === id);
+        if (l) l.cover_path = url;
+        lessons.push(id);
       }
-      l.cover_path = url;
+      if (!lessons.length) throw t("Aucun chapitre lisible dans ce livre.", "No readable chapter in this book.");
+      const playlist = Math.max(0, ...playlists().map((p) => p.id)) + 1;
+      playlists().push({ id: playlist, lang: book.lang, name, lessons, current: null, created_at: Date.now() / 1000, kind: "book" });
+      commit();
+      return { playlist, lessons };
+    },
+    async lessonSetCover(id, data, _ext, also) {
+      if (!db.lessons.some((x) => x.id === id)) throw t("Leçon introuvable", "Lesson not found");
+      // dans le navigateur, l'image est gardée telle quelle (adresse data:)
+      const url = data ? dataUrl(data) : null;
+      for (const l of db.lessons) if (l.id === id || also?.includes(l.id)) l.cover_path = url;
       commit();
       return url;
+    },
+    async lessonCoverFetch(id, url, also) {
+      if (!/^https?:\/\//.test(url.trim())) return null;
+      // dans le navigateur, l'adresse de l'image sert telle quelle
+      for (const l of db.lessons) if (l.id === id || also?.includes(l.id)) l.cover_path = url.trim();
+      commit();
+      return url.trim();
+    },
+    async lessonLinks(lang) {
+      return db.lessons.filter((l) => l.lang === lang).map((l) => ({ id: l.id, source: l.source, title: l.title, collection: l.collection, kind: l.kind }));
     },
     async termSet(u: TermUpdate) {
       const term = normalize(u.term, u.lang);

@@ -9,6 +9,7 @@ import { grainTexture, youtubeId } from "../lib/covers";
 import { LEVELS, ago, cleanTitle, fits, isNew, levelName, levelRange, markSeen, openSource, seenAt, unitsLabel, useDiscover, useLevel } from "../lib/discover";
 import { t } from "../lib/i18n";
 import { useImports } from "../lib/imports";
+import { useLessonOf } from "../lib/known";
 import { inLang } from "../lib/langs";
 import { fromItem, jobOf, usePreview } from "../lib/preview";
 import { useSearch } from "../lib/search";
@@ -358,16 +359,29 @@ export function Discover({ lang }: { lang: LangCode }) {
     return () => window.clearTimeout(timer);
   }, [feed, intro]);
 
+  // déjà dans la bibliothèque : la leçon reliée, ou une leçon de même origine (même page,
+  // même vidéo, même chanson) importée autrement ; une leçon supprimée ne compte plus
+  const lessonOf = useLessonOf(lang);
+  const items = useMemo(
+    () =>
+      (feed?.items ?? []).map((it) => {
+        const song = it.shelf === "music" ? { artist: it.artist, title: it.track } : {};
+        const lesson = lessonOf({ url: it.url, page: it.page, lesson: it.lesson_id, ...song });
+        return lesson === it.lesson_id ? it : { ...it, lesson_id: lesson };
+      }),
+    [feed, lessonOf],
+  );
+
   // une lecture d'arrière-plan sans rien à relire ne s'affiche pas
   const working = (!!busy && busy.stage !== "") || !!feed?.refreshing;
   const autoOn = useApp((s) => s.settings.discover_auto) !== "0";
-  const shown = useMemo(() => (feed?.items ?? []).filter((it) => kind === "all" || it.kind === kind || (kind === "audio" && it.shelf === "music")), [feed, kind]);
+  const shown = useMemo(() => items.filter((it) => kind === "all" || it.kind === kind || (kind === "audio" && it.shelf === "music")), [items, kind]);
   const atLevel = useMemo(() => shown.filter((it) => it.shelf !== "music" && fits(it, level)), [shown, level]);
   // trouvailles qui répondent à la recherche en ligne
   const q = query.trim().toLowerCase();
   const local = useMemo(
-    () => (q ? (feed?.items ?? []).filter((it) => [it.title, it.source_name, it.artist, it.track].some((x) => x.toLowerCase().includes(q))).slice(0, 12) : []),
-    [feed, q],
+    () => (q ? items.filter((it) => [it.title, it.source_name, it.artist, it.track].some((x) => x.toLowerCase().includes(q))).slice(0, 12) : []),
+    [items, q],
   );
 
   // à la une : une nouveauté pour apprenants, en vidéo de préférence, pas encore importée

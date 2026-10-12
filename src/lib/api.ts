@@ -1,4 +1,4 @@
-import type { AppInfo, BackupInfo, BackupPlace, BackupRestored, BackupStatus, ChatEvent, ChatOptions, ChatPatch, ChatReply, ChatSummary, ChatThread, DictResult, DictStatus, DiscoverFeed, DiscoverReport, DownloadEvent, GeminiModels, GoalReached, GpuInfo, ImportEvent, LangCode, LessonSummary, LevelEstimate, LightenProgress, LightenReport, LinkInfo, LinkMedia, LingqEvent, LingqLang, LingqPlan, LingqReport, Lyrics, MediaStream, MediaUsage, ModelRow, NewLesson, OnlineCheck, OpenedLesson, Playlist, PlaylistPatch, PodcastRequest, Resynced, SearchPage, SearchPlatform, SongItem, Stats, Term, TermQuery, TextStats, WordAnswer, VoicedLesson } from "./types";
+import type { AppInfo, BackupInfo, BackupPlace, BackupRestored, BackupStatus, ChatEvent, CreatedBook, ChatOptions, ChatPatch, ChatReply, ChatSummary, ChatThread, DictResult, DictStatus, DiscoverFeed, DiscoverReport, DownloadEvent, GeminiModels, GoalReached, GpuInfo, ImportEvent, LangCode, LessonLink, LessonSummary, LevelEstimate, LightenProgress, LightenReport, LinkInfo, LinkMedia, LingqEvent, LingqLang, LingqPlan, LingqReport, Lyrics, MediaStream, MediaUsage, ModelRow, NewBook, NewLesson, OnlineCheck, OpenedLesson, Playlist, PlaylistPatch, PodcastRequest, Resynced, SearchPage, SearchPlatform, SongItem, Stats, Term, TermQuery, TextStats, WordAnswer, VoicedLesson } from "./types";
 
 export const isTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
@@ -36,12 +36,19 @@ export interface Api {
   /** supprime plusieurs leçons d'un coup (les mots appris restent) */
   lessonsDelete(ids: number[]): Promise<void>;
   /** Couverture (image déjà réduite) ; `null` la retire. Renvoie le chemin enregistré. */
-  lessonSetCover(id: number, data: Uint8Array | null, ext: string | null): Promise<string | null>;
+  /** `also` : autres leçons qui prennent la même image (les chapitres d'un livre) */
+  lessonSetCover(id: number, data: Uint8Array | null, ext: string | null, also?: number[]): Promise<string | null>;
+  /** Couverture téléchargée depuis une adresse (image d'un article) ; `null` si elle ne se télécharge pas. */
+  lessonCoverFetch(id: number, url: string, also?: number[]): Promise<string | null>;
+  /** Les leçons d'une langue, telles que Découvrir et la recherche les reconnaissent. */
+  lessonLinks(lang: LangCode): Promise<LessonLink[]>;
   playlistsList(lang: LangCode): Promise<Playlist[]>;
   /** crée une playlist (avec ses premières leçons) ; renvoie son identifiant */
   playlistCreate(lang: LangCode, name: string, lessons: number[]): Promise<number>;
   playlistUpdate(id: number, patch: PlaylistPatch): Promise<void>;
   playlistDelete(id: number): Promise<void>;
+  /** crée un livre : ses chapitres et sa playlist d'un seul geste, la couverture (JPEG réduit) partagée */
+  bookCreate(book: NewBook, cover: Uint8Array | null): Promise<CreatedBook>;
   termSet(update: TermUpdate): Promise<void>;
   termsMarkKnown(lang: LangCode, keys: string[], wordsRead: number): Promise<number>;
   termsList(query: TermQuery): Promise<{ items: Term[]; total: number }>;
@@ -166,11 +173,14 @@ async function createTauriApi(): Promise<Api> {
     lessonUpdate: (id, patch) => invoke("lesson_update", { id, patch }),
     lessonDelete: (id) => invoke("lesson_delete", { id }),
     lessonsDelete: (ids) => invoke("lessons_delete", { ids }),
-    lessonSetCover: (id, data, ext) => invoke("lesson_set_cover", { id, data: data ? Array.from(data) : null, ext }),
+    lessonSetCover: (id, data, ext, also) => invoke("lesson_set_cover", { id, data: data ? Array.from(data) : null, ext, also: also ?? null }),
+    lessonCoverFetch: (id, url, also) => invoke("lesson_cover_fetch", { id, url, also: also ?? null }),
+    lessonLinks: (lang) => invoke("lesson_links", { lang }),
     playlistsList: (lang) => invoke("playlists_list", { lang }),
     playlistCreate: (lang, name, lessons) => invoke("playlist_create", { lang, name, lessons }),
     playlistUpdate: (id, patch) => invoke("playlist_update", { id, patch }),
     playlistDelete: (id) => invoke("playlist_delete", { id }),
+    bookCreate: (book, cover) => invoke("book_create", { book, cover: cover ? Array.from(cover) : null }),
     termSet: (update) => invoke("term_set", { update }),
     termsMarkKnown: (lang, keys, wordsRead) => invoke("terms_mark_known", { lang, keys, wordsRead }),
     termsList: (query) => invoke("terms_list", { query }),

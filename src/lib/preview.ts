@@ -38,6 +38,8 @@ export interface Previewable {
   words: number;
   song?: { artist: string; title: string; album: string; lyrics: Lyrics | null; sample: string; video: boolean };
   discover?: DiscoverItem;
+  /** la leçon déjà tirée de cet élément, si on la connaît (Découvrir, recherche) */
+  lesson?: number | null;
 }
 
 export function fromHit(h: SearchHit): Previewable {
@@ -96,6 +98,7 @@ export function fromItem(it: DiscoverItem): Previewable {
     words: 0,
     song: song ? { artist: it.artist, title: it.track, album: "", lyrics: null, sample: "", video: true } : undefined,
     discover: it,
+    lesson: it.lesson_id,
   };
 }
 
@@ -146,11 +149,16 @@ export function mediaOf(p: Previewable): LinkMedia {
 }
 
 /** Ce que la file des imports doit faire de cet élément. `article` : le texte déjà lu. */
-export function jobOf(p: Previewable, lang: LangCode, extra: { article?: { title: string; text: string }; songUrl?: string; lyrics?: Lyrics | null } = {}): JobSpec {
+export function jobOf(
+  p: Previewable,
+  lang: LangCode,
+  extra: { article?: { title: string; text: string; image?: string }; songUrl?: string; lyrics?: Lyrics | null } = {},
+): JobSpec {
   const base = { key: p.key, lang, title: p.title, image: p.image, discoverId: p.discover?.id };
   if (p.kind === "text") {
+    // l'image de l'élément, sinon celle que la page de l'article annonce : la couverture de la leçon
     return extra.article
-      ? { ...base, article: { title: extra.article.title || p.title, text: extra.article.text, source: p.page || p.url, collection: p.collection } }
+      ? { ...base, image: p.image || extra.article.image || "", article: { title: extra.article.title || p.title, text: extra.article.text, source: p.page || p.url, collection: p.collection } }
       : { ...base, articleFrom: p.url };
   }
   if (p.song) {

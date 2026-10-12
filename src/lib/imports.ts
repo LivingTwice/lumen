@@ -145,12 +145,15 @@ async function run(job: Job): Promise<number[]> {
       ? patch(spec.key, { stage: e.stage, progress: MEASURED.includes(e.stage) ? 0 : null })
       : patch(spec.key, { progress: e.value });
   let article = spec.article;
+  // l'image de l'élément (Découvrir, recherche), sinon celle que la page annonce
+  let image = spec.image;
   if (!article && spec.articleFrom) {
     patch(spec.key, { stage: "page" });
     const info = await api().linkProbe(spec.articleFrom, () => {});
     if (!info.html) throw new Error(t("Aucun article lisible n'a été trouvé sur cette page.", "No readable article was found on this page."));
     const a = extractArticle(info.html, info.url);
     article = { title: spec.title || a.title, text: a.text, source: info.url, collection: "" };
+    image ||= info.image;
   }
   if (article) {
     patch(spec.key, { stage: "lesson" });
@@ -169,6 +172,8 @@ async function run(job: Job): Promise<number[]> {
         }),
       );
     }
+    // l'image devient la couverture de la leçon (et de ses parties) ; sans elle, l'œuvre générée
+    if (image) await api().lessonCoverFetch(ids[0], image, ids.slice(1)).catch(() => null);
     return ids;
   }
   if (spec.podcast) return [await api().podcastCreate(spec.lang, spec.podcast, onEvent)];

@@ -223,7 +223,21 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px 14px;
   margin-bottom: 18px;
+}
+.lib-tools {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-left: auto;
+}
+/* choix de la présentation : des icônes seules */
+.segmented button.seg-icon {
+  display: grid;
+  place-items: center;
+  padding: 0 9px;
 }
 
 /* « Voir plus » sous la grille d'une grande bibliothèque */
@@ -395,9 +409,466 @@
   opacity: 1;
 }
 
+/* ---------- petites cartes ---------- */
+
+.lesson-grid.small {
+  grid-template-columns: repeat(auto-fill, minmax(158px, 1fr));
+  gap: 16px 14px;
+}
+.lesson-card.small .lesson-body {
+  gap: 5px;
+  padding: 10px 12px 12px;
+}
+.lesson-card.small .lesson-title {
+  font-size: 15.5px;
+  line-height: 1.2;
+}
+.lesson-card.small .lesson-meta {
+  gap: 4px 6px;
+  padding-top: 2px;
+  font-size: 11.5px;
+}
+.lesson-card.small .new-dot::before {
+  margin-right: 4px;
+}
+.lesson-card.small .cover-kind {
+  left: 8px;
+  bottom: 7px;
+  height: 21px;
+  padding: 0 7px;
+  font-size: 10.5px;
+}
+.lesson-card.small:hover {
+  transform: translateY(-2px);
+}
+.lesson-card.small .lesson-menu {
+  top: 5px;
+  right: 5px;
+}
+.lesson-card.small .lesson-check {
+  top: 7px;
+  left: 7px;
+}
+
+/* ---------- couverture d'un livre : debout sur le reflet flou de sa couverture ---------- */
+
+.cover-blur {
+  position: absolute;
+  inset: -18%;
+  width: 136%;
+  height: 136%;
+  object-fit: cover;
+  filter: blur(22px) saturate(1.35) brightness(0.92);
+  opacity: 0;
+  transition: opacity 0.6s ease;
+}
+.cover-blur.on {
+  opacity: 0.95;
+}
+/* chapitre d'un livre : la couverture entière, sans être rognée */
+.cover.standing .cover-img {
+  object-fit: contain;
+  padding: 7% 0 9%;
+  filter: drop-shadow(0 8px 14px rgba(0, 0, 0, 0.35));
+}
+.book-3d {
+  position: absolute;
+  z-index: 1;
+  top: 9%;
+  left: 50%;
+  height: 76%;
+  aspect-ratio: 2 / 3;
+  translate: -50% 0;
+  border-radius: 2px 5px 5px 2px;
+  container-type: inline-size;
+  /* tranche des pages à droite, ombre portée sur le reflet */
+  box-shadow:
+    1px 0 0 rgba(255, 255, 255, 0.5),
+    3px 1px 0 -1px #f3ede2,
+    5px 2px 0 -2px #e2d9c9,
+    0 14px 26px rgba(0, 0, 0, 0.34),
+    0 3px 8px rgba(0, 0, 0, 0.22);
+  transition: translate 0.45s var(--ease-out), box-shadow 0.45s var(--ease-out), opacity 0.4s ease;
+}
+.book-3d.waiting {
+  opacity: 0;
+}
+.lesson-card:hover .book-3d {
+  translate: -50% -4px;
+  box-shadow:
+    1px 0 0 rgba(255, 255, 255, 0.5),
+    3px 1px 0 -1px #f3ede2,
+    5px 2px 0 -2px #e2d9c9,
+    0 20px 32px rgba(0, 0, 0, 0.32),
+    0 0 34px var(--light-soft);
+}
+.book-face,
+.book-jacket {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border-radius: inherit;
+  overflow: hidden;
+}
+.book-face {
+  object-fit: cover;
+}
+/* le dos du livre : un pli de lumière et d'ombre sur le bord gauche */
+.book-spine {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  background:
+    linear-gradient(90deg, rgba(0, 0, 0, 0.32) 0, rgba(255, 255, 255, 0.22) 2.5%, rgba(0, 0, 0, 0.12) 5.5%, transparent 11%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.12), transparent 22%);
+}
+/* sans couverture : une jaquette générée qui porte le titre */
+.book-jacket .cover-art {
+  transform: none !important;
+}
+.book-jacket::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, rgba(0, 0, 0, 0.42), transparent 55%);
+}
+.book-jacket-title {
+  position: absolute;
+  z-index: 1;
+  top: 12%;
+  left: 12%;
+  right: 10%;
+  font-family: var(--font-display);
+  font-size: 12.5cqw;
+  font-weight: 500;
+  line-height: 1.12;
+  color: #fff;
+  text-shadow: 0 1px 8px rgba(0, 0, 0, 0.35);
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-line-clamp: 5;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.book-jacket-title::after {
+  content: "";
+  display: block;
+  width: 26%;
+  height: 1px;
+  margin-top: 9cqw;
+  background: rgba(255, 255, 255, 0.7);
+}
+/* « 24 chapitres » : au-dessus de la zone qui ouvre le livre, mène à ses chapitres */
+.book-chapters {
+  position: relative;
+  z-index: 3;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 22px;
+  padding: 0 9px 0 7px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--chip);
+  color: var(--muted);
+  font-size: 11.5px;
+  font-weight: 560;
+  transition: background-color 0.2s ease, color 0.2s ease, box-shadow 0.25s ease;
+}
+.book-chapters:hover:not(:disabled) {
+  color: var(--text);
+  background: var(--light-veil);
+  box-shadow: inset 0 0 0 1px var(--light-soft);
+}
+
+/* ---------- liste, comme dans le Finder ---------- */
+
+.lib-list {
+  --lib-cols: 24px minmax(0, 1fr) 108px 96px 82px 118px 112px 34px;
+  container-type: inline-size;
+  position: relative;
+}
+.lib-head,
+.lib-row {
+  display: grid;
+  grid-template-columns: var(--lib-cols);
+  align-items: center;
+  column-gap: 12px;
+  padding: 0 8px;
+}
+.lib-head {
+  position: sticky;
+  top: 0;
+  z-index: 4;
+  height: 34px;
+  margin-bottom: 4px;
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--bg) 86%, transparent);
+  backdrop-filter: blur(14px) saturate(1.3);
+  -webkit-backdrop-filter: blur(14px) saturate(1.3);
+}
+.lib-sort {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  max-width: 100%;
+  height: 26px;
+  margin-left: -6px;
+  padding: 0 6px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 560;
+  white-space: nowrap;
+  transition: background-color 0.18s ease, color 0.18s ease;
+}
+.lib-sort:hover {
+  background: var(--chip);
+  color: var(--text);
+}
+.lib-sort.on {
+  color: var(--text);
+}
+.lib-arrow {
+  flex: none;
+  opacity: 0;
+  transition: opacity 0.18s ease, transform 0.25s var(--ease-out);
+}
+.lib-sort:hover .lib-arrow {
+  opacity: 0.45;
+}
+.lib-sort.on .lib-arrow {
+  opacity: 1;
+  color: var(--light-strong);
+}
+.lib-arrow.up {
+  transform: rotate(180deg);
+}
+.lib-row {
+  position: relative;
+  min-height: 52px;
+  border-radius: 10px;
+  transition: background-color 0.18s ease, box-shadow 0.25s ease;
+}
+/* rayures discrètes, une ligne sur deux */
+.lib-row.odd {
+  background: color-mix(in srgb, var(--chip) 55%, transparent);
+}
+.lib-row:hover,
+.lib-row.menu-open {
+  background: var(--chip-hover);
+}
+.lib-row.picked,
+.lib-row.picked:hover {
+  background: var(--light-veil);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--light) 60%, transparent), 0 0 18px var(--light-veil);
+}
+.lib-row > [role="cell"] {
+  min-width: 0;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+.c-lead {
+  position: relative;
+  z-index: 3;
+  display: grid;
+  place-items: center;
+}
+.lib-disclose {
+  width: 22px;
+  height: 22px;
+  border: 0;
+  border-radius: 6px;
+  display: grid;
+  place-items: center;
+  background: transparent;
+  color: var(--muted);
+  transition: background-color 0.18s ease, color 0.18s ease;
+}
+.lib-disclose .icon {
+  transition: transform 0.25s var(--ease-out);
+}
+.lib-disclose.open .icon {
+  transform: rotate(90deg);
+}
+.lib-disclose:hover {
+  background: var(--chip-hover);
+  color: var(--text);
+}
+.lib-check {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  color: transparent;
+  border: 1.5px solid var(--border-strong);
+  transition: background-color 0.2s ease, border-color 0.2s ease, color 0.15s ease, box-shadow 0.3s ease;
+}
+.lib-check.on {
+  color: var(--on-light);
+  border-color: transparent;
+  background: linear-gradient(135deg, var(--light), var(--light-strong));
+  box-shadow: 0 0 12px var(--light-soft);
+}
+.lib-row .c-name {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.lib-thumb {
+  flex: none;
+  width: 64px;
+}
+.lib-thumb .cover {
+  border-radius: 6px;
+}
+.lib-thumb .book-3d {
+  box-shadow: 1px 0 0 rgba(255, 255, 255, 0.5), 2px 1px 0 -0.5px #efe8dc, 0 4px 8px rgba(0, 0, 0, 0.3);
+}
+.lib-thumb .book-jacket-title {
+  display: none;
+}
+.lib-name {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.lib-name strong {
+  font-family: var(--font-display);
+  font-size: 16.5px;
+  font-weight: 500;
+  line-height: 1.2;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.lib-name span {
+  font-size: 12px;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.lib-row .c-kind {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+  overflow: hidden;
+}
+.lib-row .c-kind .icon {
+  flex: none;
+  opacity: 0.8;
+}
+.lib-row .c-len,
+.lib-row .c-date {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.lib-row .c-date.faint {
+  color: var(--faint);
+}
+.lib-row .done-pill {
+  margin-left: 0;
+  font-size: 12px;
+}
+.lib-progress {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.lib-progress .pl-row-progress {
+  width: 54px;
+}
+/* le menu « … » reste dans sa colonne, visible au survol */
+.lib-row .c-menu.lesson-menu {
+  position: relative;
+  top: auto;
+  right: auto;
+}
+.lib-row .c-menu .icon-btn {
+  width: 28px;
+  height: 28px;
+  background: transparent;
+  color: var(--muted);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+.lib-row .c-menu .icon-btn:hover {
+  background: var(--chip-hover);
+  color: var(--text);
+}
+.lib-row:hover .lesson-menu,
+.lib-row.menu-open .lesson-menu {
+  opacity: 1;
+}
+/* chapitres d'un livre déplié : en retrait, un numéro à la place de la vignette */
+.lib-chapters {
+  overflow: hidden;
+}
+.lib-row.chapter {
+  min-height: 40px;
+}
+.lib-row.chapter .c-name {
+  padding-left: 22px;
+}
+.lib-row.chapter .lib-name strong {
+  font-family: var(--font-ui);
+  font-size: 13.5px;
+  font-weight: 520;
+}
+.lib-row.chapter.hit .lib-name strong {
+  color: color-mix(in srgb, var(--light-strong) 60%, var(--text));
+}
+.lib-index {
+  flex: none;
+  width: 30px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  border-radius: 6px;
+  background: var(--chip);
+  font-size: 11.5px;
+  color: var(--muted);
+}
+/* fenêtre étroite : les colonnes les moins utiles s'effacent (la requête vise la liste,
+   seuls ses enfants peuvent en changer) */
+@container (max-width: 780px) {
+  .lib-head,
+  .lib-row {
+    grid-template-columns: 24px minmax(0, 1fr) 90px 74px 112px 34px;
+  }
+  .lib-head .c-kind,
+  .lib-head .c-date,
+  .lib-row .c-kind,
+  .lib-row .c-date {
+    display: none;
+  }
+}
+@container (max-width: 560px) {
+  .lib-head,
+  .lib-row {
+    grid-template-columns: 24px minmax(0, 1fr) 100px 34px;
+  }
+  .lib-head .c-len,
+  .lib-head .c-new,
+  .lib-row .c-len,
+  .lib-row .c-new {
+    display: none;
+  }
+}
+
 /* ---------- sélection de plusieurs leçons ---------- */
 
-.lesson-grid.selecting {
+.lib-shelf.selecting {
   -webkit-user-select: none;
   user-select: none;
   /* la barre de sélection ne cache jamais la dernière rangée */
@@ -543,7 +1014,8 @@
   width: 78px;
   height: 78px;
 }
-.pl-big > .cover {
+.pl-big > .cover,
+.book-big .cover {
   border-radius: 18px;
   box-shadow: var(--shadow-m);
 }
@@ -1192,6 +1664,49 @@
 }
 .chapter-item input {
   accent-color: var(--accent);
+}
+.chapter-title {
+  flex: 1;
+  min-width: 0;
+}
+/* pages de garde, table des matières : décochées d'office, plus discrètes */
+.chapter-item.extra .chapter-title {
+  color: var(--muted);
+}
+.chapter-tag {
+  flex: none;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--chip);
+  color: var(--muted);
+  font-size: 11px;
+}
+/* en-tête du livre : couverture et titre */
+.book-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+}
+.book-head .grow {
+  flex: 1;
+  min-width: 0;
+}
+.book-thumb {
+  flex: none;
+  width: 68px;
+  aspect-ratio: 2 / 3;
+  border-radius: 4px 7px 7px 4px;
+  overflow: hidden;
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+  background: var(--chip);
+  box-shadow: inset 3px 0 0 rgba(0, 0, 0, 0.12), var(--shadow-s);
+}
+.book-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
 }
 
 /* ---------- import d'un lien ---------- */

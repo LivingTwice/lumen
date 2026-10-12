@@ -85,12 +85,15 @@ export async function prepareCover(blob: Blob): Promise<Uint8Array> {
   }
 }
 
-/** Choisit une image et l'enregistre comme couverture. Renvoie faux si annulé. */
-export async function chooseCover(lessonId: number): Promise<boolean> {
+/**
+ * Choisit une image et l'enregistre comme couverture (`also` : autres leçons qui la
+ * prennent aussi, les chapitres d'un livre). Renvoie faux si annulé.
+ */
+export async function chooseCover(lessonId: number, also?: number[]): Promise<boolean> {
   const blob = await pickCoverImage();
   if (!blob) return false;
   const bytes = await prepareCover(blob);
-  await api().lessonSetCover(lessonId, bytes, "jpg");
+  await api().lessonSetCover(lessonId, bytes, "jpg", also);
   return true;
 }
 

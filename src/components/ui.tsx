@@ -17,7 +17,8 @@ export function Segmented<T extends string>({
   label,
 }: {
   value: T;
-  options: { value: T; label: ReactNode }[];
+  /** `title` : le nom d'une option qui n'est qu'une icône (bulle d'aide, lecteurs d'écran) */
+  options: { value: T; label: ReactNode; title?: string }[];
   onChange(v: T): void;
   id: string;
   label?: string;
@@ -29,7 +30,9 @@ export function Segmented<T extends string>({
           key={o.value}
           role="radio"
           aria-checked={o.value === value}
-          className={o.value === value ? "on" : ""}
+          aria-label={o.title}
+          title={o.title}
+          className={`${o.value === value ? "on" : ""} ${o.title ? "seg-icon" : ""}`}
           onClick={() => onChange(o.value)}
         >
           {o.value === value && (

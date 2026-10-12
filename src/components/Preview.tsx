@@ -6,6 +6,7 @@ import { ago, levelRange, openSource, useDiscover } from "../lib/discover";
 import { count, formatNumber, t } from "../lib/i18n";
 import { extractArticle, firstWords, wordCount } from "../lib/importers";
 import { stageText, useImports, useJob } from "../lib/imports";
+import { useLessonOf } from "../lib/known";
 import { LANGS, inLang } from "../lib/langs";
 import { isWindows } from "../lib/platform";
 import { jobOf, usePreview, type Previewable } from "../lib/preview";
@@ -440,7 +441,7 @@ function PreviewPanel({ item, onClose }: { item: Previewable; onClose(): void })
   }, [item, lyrics]);
 
   // article : le texte de la page
-  const [article, setArticle] = useState<Load<{ title: string; text: string }>>({ state: "loading" });
+  const [article, setArticle] = useState<Load<{ title: string; text: string; image: string }>>({ state: "loading" });
   const [whole, setWhole] = useState(false);
   useEffect(() => {
     if (item.kind !== "text") return;
@@ -450,7 +451,7 @@ function PreviewPanel({ item, onClose }: { item: Previewable; onClose(): void })
       .then((info) => {
         if (!info.html) throw t("Aucun article lisible n'a été trouvé sur cette page.", "No readable article was found on this page.");
         const a = extractArticle(info.html, info.url);
-        if (alive) setArticle({ state: "ready", value: { title: item.title || a.title, text: a.text } });
+        if (alive) setArticle({ state: "ready", value: { title: item.title || a.title, text: a.text, image: info.image } });
       })
       .catch((e) => alive && setArticle({ state: "error", error: errorText(e) }));
     return () => {
@@ -480,7 +481,9 @@ function PreviewPanel({ item, onClose }: { item: Previewable; onClose(): void })
   const stream = source.state === "ready" ? source.value : null;
   const spoken = stream?.language && stream.language !== lang && LANGS.some((l) => l.code === stream.language) ? stream.language : "";
   const other = spoken || (item.inLang === false ? item.otherLang : "");
-  const lesson = item.discover?.lesson_id ?? (job?.status === "done" ? job.lessonId : undefined);
+  // déjà dans la bibliothèque (même vidéo, même page, même chanson), ou tout juste préparée
+  const lessonOf = useLessonOf(lang);
+  const lesson = lessonOf({ url: item.url, page: item.page, artist: item.song?.artist, title: item.song?.title, lesson: item.lesson ?? item.discover?.lesson_id }) ?? (job?.status === "done" ? job.lessonId : undefined);
   const synced = !!lyrics?.synced;
   const description = stream?.description || item.summary;
   const label = platformLabel(item);
@@ -496,7 +499,7 @@ function PreviewPanel({ item, onClose }: { item: Previewable; onClose(): void })
     setAsked(true);
     enqueue(
       jobOf(item, lang, {
-        article: article.state === "ready" ? { title: article.value.title, text: chosenText } : undefined,
+        article: article.state === "ready" ? { title: article.value.title, text: chosenText, image: article.value.image } : undefined,
         songUrl: resolvedSong.current,
         lyrics: lyrics ?? null,
       }),
@@ -718,7 +721,7 @@ function PreviewPanel({ item, onClose }: { item: Previewable; onClose(): void })
             {needsAsr && !lesson && (!job || job.status === "model") && <TranscriberPrompt />}
             {action}
             {!lesson && !item.song && !job && <p className="pv-hint">{whatHappens(item, synced)}</p>}
-            {asked && job?.status === "done" && !item.discover?.lesson_id && <p className="pv-hint">{t("La leçon est prête dans votre bibliothèque.", "The lesson is ready in your library.")}</p>}
+            {asked && job?.status === "done" && <p className="pv-hint">{t("La leçon est prête dans votre bibliothèque.", "The lesson is ready in your library.")}</p>}
             <div className="pv-links">
               {item.page && (
                 <button className="btn ghost sm" onClick={() => void openSource(item.page)}>

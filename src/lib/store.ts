@@ -41,6 +41,12 @@ export const DEFAULTS: Record<string, string> = {
   // la page tourne quand l'audio ou la voix passe à la suivante ("0" : elle reste où l'on lit)
   auto_turn: "1",
   reader_sidebar: "1",
+  // la vidéo d'une leçon vidéo au-dessus du texte ("0" : fermée, le son continue)
+  video_show: "1",
+  // bibliothèque : « large » (grandes cartes), « small » (petites cartes) ou « list » (liste du
+  // Finder) ; tri de la liste, colonne et sens (« date:desc » : la plus récemment lue d'abord)
+  library_view: "large",
+  library_sort: "date:desc",
   tts_voice: "0",
   tts_rate: "0.95",
   llm_model: "qwen3.5-2b",

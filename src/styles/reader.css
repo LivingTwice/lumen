@@ -1220,6 +1220,23 @@ span.player-voice .icon-btn {
 
 /* ---------- scène vidéo ---------- */
 
+/* enveloppe qui se replie quand on ferme la vidéo (hauteur animée par motion) */
+.video-shell {
+  flex-shrink: 0;
+}
+/* plein écran : la scène occupe la colonne comme si l'enveloppe n'existait pas */
+.reader.cinema .video-shell {
+  display: contents;
+}
+/* vidéo fermée : le bouton qui la fait revenir, dans la barre du haut */
+.video-back {
+  display: inline-flex;
+  flex-shrink: 0;
+}
+.video-back .btn {
+  gap: 6px;
+}
+
 .video-stage {
   flex-shrink: 0;
   padding: 0 28px 10px;

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { api, errorText } from "../lib/api";
-import { lessonsOf, plural } from "../lib/playlists";
+import { isBook, lessonsOf, plural } from "../lib/playlists";
 import { useApp } from "../lib/store";
 import type { LessonSummary, Playlist } from "../lib/types";
 import { PlaylistCover } from "./Cover";
@@ -24,7 +24,9 @@ export function AddToPlaylist({ lesson, all, onClose }: { lesson: LessonSummary 
     setLists(null);
     api()
       .playlistsList(lesson.lang)
-      .then((ls) => {
+      .then((all) => {
+        // un livre garde ses chapitres : on n'y ajoute pas d'autres leçons
+        const ls = all.filter((p) => !isBook(p));
         setLists(ls);
         // sans playlist, on commence par en nommer une
         if (!ls.length) window.setTimeout(() => input.current?.focus(), 120);
@@ -50,7 +52,7 @@ export function AddToPlaylist({ lesson, all, onClose }: { lesson: LessonSummary 
       const n = name.trim();
       const id = await api().playlistCreate(shown.lang, n, [shown.id]);
       setName("");
-      const ls = await api().playlistsList(shown.lang);
+      const ls = (await api().playlistsList(shown.lang)).filter((p) => !isBook(p));
       setLists(ls);
       const made = ls.find((p) => p.id === id)?.name ?? n;
       toast(t(`Playlist « ${made} » créée`, `Playlist “${made}” created`), "light");

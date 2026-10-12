@@ -64,7 +64,11 @@ export function Sidebar() {
   useEffect(() => {
     api()
       .lessonsList(lang)
-      .then((l) => setRecent(l.filter((x) => x.opened_at).slice(0, 4)))
+      .then((l) => {
+        // un livre n'y figure qu'une fois, sous son titre (pas « Chapitre 3 »)
+        const books = new Set<string>();
+        setRecent(l.filter((x) => x.opened_at && (x.kind !== "book" || !x.collection || (!books.has(x.collection) && !!books.add(x.collection)))).slice(0, 4));
+      })
       .catch(() => {});
   }, [lang, libraryVersion, lessonId]);
 
@@ -210,8 +214,8 @@ export function Sidebar() {
           <div className="side-section">{t("Récemment ouvert", "Recently opened")}</div>
           <div className="side-recent">
             {recent.map((r) => (
-              <button key={r.id} onClick={() => openLesson(r.id)} title={r.title}>
-                {r.title}
+              <button key={r.id} onClick={() => openLesson(r.id)} title={r.kind === "book" && r.collection ? `${r.collection} · ${r.title}` : r.title}>
+                {r.kind === "book" && r.collection ? r.collection : r.title}
               </button>
             ))}
           </div>
