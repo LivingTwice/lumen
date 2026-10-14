@@ -5,6 +5,7 @@ import { Guide } from "./components/Guide";
 import { News, useNewsOnUpdate } from "./components/News";
 import { Tour } from "./components/Tour";
 import { Shortcuts } from "./components/Shortcuts";
+import { MobileNav, useCompact } from "./components/MobileNav";
 import { Sidebar } from "./components/Sidebar";
 import { WindowControls } from "./components/WindowControls";
 import { Orb, Toasts } from "./components/ui";
@@ -82,6 +83,11 @@ export function App() {
   const ui = useApp((s) => s.settings.ui_lang) as UiLang;
   if (ui) setUiLang(ui);
   const [failed, setFailed] = useState<string | null>(null);
+  // iPhone : navigation en bas de l'écran au lieu de la barre latérale
+  const compact = useCompact();
+  useEffect(() => {
+    document.documentElement.classList.toggle("compact", compact);
+  }, [compact]);
   // barre latérale repliée dans une leçon (réglage reader_sidebar), visible partout ailleurs
   const sideHidden = useApp((s) => s.view === "reader" && s.settings.reader_sidebar === "0");
   // pendant le repli, le contenu est rogné ; ensuite les menus peuvent déborder
@@ -166,10 +172,12 @@ export function App() {
 
   // changer de langue remonte toute l'interface : chaque texte se recalcule
   return (
-    <div key={ui} className={`app ${sideHidden ? "side-hidden" : ""}`}>
-      <div className={`sidebar-shell ${sideHidden || sliding ? "clip" : ""}`} inert={sideHidden}>
-        <Sidebar />
-      </div>
+    <div key={ui} className={`app ${sideHidden && !compact ? "side-hidden" : ""} ${compact ? "compact" : ""}`}>
+      {!compact && (
+        <div className={`sidebar-shell ${sideHidden || sliding ? "clip" : ""}`} inert={sideHidden}>
+          <Sidebar />
+        </div>
+      )}
       <main className="main">
         <AnimatePresence mode="wait" initial={false}>
           <motion.div
@@ -191,6 +199,7 @@ export function App() {
           </motion.div>
         </AnimatePresence>
       </main>
+      {compact && <MobileNav />}
       <ImportSheet />
       <Preview />
       <Guide />

@@ -8,6 +8,7 @@ import { LANGS, STARTERS, bundledDict } from "./langs";
 import { RUN_ON_WORDS, longestRun, normalize, tokenize } from "./tokenize";
 import { roughEstimate } from "./level";
 import type {
+  ChatGptStatus,
   BackupCounts,
   BackupInfo,
   BackupPlace,
@@ -80,6 +81,11 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 let lingqCancelled = false;
 /** réponses du chat en cours (identifiant de conversation → arrêt demandé) */
 const chatStops = new Map<number, boolean>();
+/** Connexion simulée à ChatGPT (Sign in with ChatGPT). */
+const gpt: { status: ChatGptStatus; cancel: boolean } = {
+  status: { signed_in: false, email: "", plan: false, expired: false, requests_today: 0, paused_minutes: null, manage_url: "https://chatgpt.com/#settings/Usage" },
+  cancel: false,
+};
 const STARTERS_MOCK =
   "Every morning, Martha climbed the narrow stairs of the old lighthouse. From the top, the sea looked endless and calm.\n\nOne day, she found a letter hidden between two stones. The paper was damp, but the words could still be read.";
 
@@ -265,7 +271,8 @@ export function createMockApi(): Api {
     { id: "qwen3.5-0.8b", kind: "llm", name: "Qwen3.5 0.8B", get detail() { return t("Très rapide, pour les Mac avec 8 Go de mémoire", "Very fast, for Macs with 8 GB of memory"); }, size: 533e6, url: "", file: "", ram_gb: 8 },
     { id: "qwen3.5-2b", kind: "llm", name: "Qwen3.5 2B", get detail() { return t("L'équilibre idéal entre qualité et vitesse", "The ideal balance between quality and speed"); }, size: 1281e6, url: "", file: "", ram_gb: 8 },
     { id: "qwen3.5-4b", kind: "llm", name: "Qwen3.5 4B", get detail() { return t("Les traductions les plus fines, à partir de 16 Go", "The finest translations, 16 GB of memory or more"); }, size: 2741e6, url: "", file: "", ram_gb: 16 },
-    { id: "qwen3-asr-1.7b", kind: "asrtext", name: "Qwen3-ASR 1.7B", get detail() { return t("Texte des transcriptions plus juste que Whisper, sans phrase sautée, dans 23 langues ; Whisper garde le minutage des mots", "More accurate transcripts than Whisper, with no skipped sentences, in 23 languages; Whisper still times the words"); }, size: 2520744288, url: "", file: "", ram_gb: 16 },
+    { id: "qwen3-asr-1.7b", kind: "asrtext", name: "Qwen3-ASR 1.7B", get detail() { return t("Texte des transcriptions plus juste que Whisper, sans phrase sautée, dans 15 langues ; Whisper garde le minutage des mots", "More accurate transcripts than Whisper, with no skipped sentences, in 15 languages; Whisper still times the words"); }, size: 2520744288, url: "", file: "", ram_gb: 16 },
+    { id: "parakeet-v3", kind: "asrtext", name: "Parakeet V3", get detail() { return t("Texte des transcriptions plus juste que Whisper et bien ponctué, rapide et léger, dans 18 langues européennes ; Whisper garde le minutage des mots", "More accurate, well-punctuated transcripts than Whisper, fast and light, in 18 European languages; Whisper still times the words"); }, size: 1038682448, url: "", file: "", ram_gb: 8 },
     { id: "whisper-small", kind: "asr", name: "Whisper Small", get detail() { return t("Transcription légère et rapide", "Light and fast transcription"); }, size: 190e6, url: "", file: "", ram_gb: 8 },
     { id: "whisper-turbo", kind: "asr", name: "Whisper Large v3 Turbo", get detail() { return t("Transcription et minutage des mots, très précis, 99 langues", "Transcription and word timing, very precise, 99 languages"); }, size: 574e6, url: "", file: "", ram_gb: 8 },
     { id: "supertonic-3", kind: "tts", name: "Supertonic 3", get detail() { return t("Voix naturelle pour les mots, les expressions et l'audio des leçons, dans les 31 langues", "Natural voice for words, phrases and lesson audio, in all 31 languages"); }, size: 149e6, url: "", file: "", ram_gb: 8 },
@@ -595,15 +602,20 @@ export function createMockApi(): Api {
       }
       commit();
     },
+    async lessonsSetCompleted(ids, completed) {
+      const marked = new Set(ids);
+      for (const l of db.lessons) if (marked.has(l.id)) l.completed = completed;
+      commit();
+    },
     async playlistsList(lang) {
       return playlists()
         .filter((p) => p.lang === lang)
-        .map((p) => ({ ...p, kind: p.kind ?? "", lessons: [...p.lessons], current: p.current && p.lessons.includes(p.current) ? p.current : null }))
+        .map((p) => ({ ...p, kind: p.kind ?? "", looping: !!p.looping, lessons: [...p.lessons], current: p.current && p.lessons.includes(p.current) ? p.current : null }))
         .sort((a, b) => b.created_at - a.created_at || b.id - a.id);
     },
     async playlistCreate(lang, name, lessons) {
       const id = Math.max(0, ...playlists().map((p) => p.id)) + 1;
-      playlists().push({ id, lang, name: name.trim().replace(/\s+/g, " ").slice(0, 120) || t("Nouvelle playlist", "New playlist"), lessons: fill(lang, lessons), current: null, created_at: Date.now() / 1000, kind: "" });
+      playlists().push({ id, lang, name: name.trim().replace(/\s+/g, " ").slice(0, 120) || t("Nouvelle playlist", "New playlist"), lessons: fill(lang, lessons), current: null, created_at: Date.now() / 1000, kind: "", looping: false });
       commit();
       return id;
     },
@@ -613,6 +625,7 @@ export function createMockApi(): Api {
       if (patch.name !== undefined) p.name = patch.name.trim().replace(/\s+/g, " ").slice(0, 120) || t("Nouvelle playlist", "New playlist");
       if (patch.lessons) p.lessons = fill(p.lang, patch.lessons);
       if (patch.current !== undefined) p.current = patch.current > 0 ? patch.current : null;
+      if (patch.looping !== undefined) p.looping = patch.looping;
       commit();
     },
     async playlistDelete(id) {
@@ -632,7 +645,7 @@ export function createMockApi(): Api {
       }
       if (!lessons.length) throw t("Aucun chapitre lisible dans ce livre.", "No readable chapter in this book.");
       const playlist = Math.max(0, ...playlists().map((p) => p.id)) + 1;
-      playlists().push({ id: playlist, lang: book.lang, name, lessons, current: null, created_at: Date.now() / 1000, kind: "book" });
+      playlists().push({ id: playlist, lang: book.lang, name, lessons, current: null, created_at: Date.now() / 1000, kind: "book", looping: false });
       commit();
       return { playlist, lessons };
     },
@@ -960,7 +973,9 @@ export function createMockApi(): Api {
       commit();
       onEvent({ type: "done" });
     },
-    async modelCancel() {},
+    async modelCancel(id) {
+      if (id === "chatgpt") gpt.cancel = true;
+    },
     async modelDelete(id) {
       db.installed = db.installed.filter((x) => x !== id);
       commit();
@@ -1325,6 +1340,12 @@ export function createMockApi(): Api {
     },
     async onlineCheck(provider, key, url, model) {
       await sleep(800);
+      if (provider === "chatgpt") {
+        if (!gpt.status.signed_in) throw t("Connectez-vous à ChatGPT dans Réglages › IA.", "Sign in to ChatGPT in Settings › AI.");
+        const models = ["gpt-6.1-sol", "gpt-6.1-mini"];
+        gpt.status.requests_today += 1;
+        return { models, model: model && models.includes(model) ? model : "gpt-6.1-mini", ms: 910 };
+      }
       if (provider === "custom") {
         if (!/^https?:\/\/[^/]+/.test(url ?? "")) throw t("Cette adresse n'est pas valable. Exemple : http://localhost:11434/v1 pour Ollama.", "This address isn't valid. Example: http://localhost:11434/v1 for Ollama.");
         const models = ["llama3.2", "qwen3:8b", "gemma3:12b"];
@@ -1360,6 +1381,23 @@ export function createMockApi(): Api {
       }
       const models = lists[provider] ?? [];
       return { models, model: model && models.includes(model) ? model : picks[provider] ?? models[0], ms: 640 };
+    },
+    async chatgptStatus() {
+      return { ...gpt.status };
+    },
+    async chatgptSignIn() {
+      // le navigateur s'ouvre ; l'apprenant accepte au bout de quelques secondes
+      gpt.cancel = false;
+      for (let i = 0; i < 25; i++) {
+        await sleep(100);
+        if (gpt.cancel) throw "annulé";
+      }
+      gpt.status = { ...gpt.status, signed_in: true, email: "lea@example.com", plan: true, expired: false };
+      return { ...gpt.status };
+    },
+    async chatgptSignOut() {
+      gpt.status = { ...gpt.status, signed_in: false, email: "", plan: false, expired: false, paused_minutes: null };
+      return { ...gpt.status };
     },
     async podcastCreate(lang, request, onEvent) {
       if (!db.settings.gemini_key) throw t("Ajoutez d'abord votre clé Gemini (Réglages › Podcasts).", "First add your Gemini key (Settings › Podcasts).");

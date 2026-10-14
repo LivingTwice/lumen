@@ -181,6 +181,12 @@ pub async fn lesson_update(state: State<'_, AppState>, id: i64, patch: LessonPat
     db::lesson_update(&state.db.lock(), id, &patch).map_err(err)
 }
 
+/// Marque des leçons lues ou non lues d'un coup (playlist entière, sélection).
+#[tauri::command]
+pub async fn lessons_set_completed(state: State<'_, AppState>, ids: Vec<i64>, completed: bool) -> R<()> {
+    db::lessons_set_completed(&mut state.db.lock(), &ids, completed).map_err(err)
+}
+
 #[tauri::command]
 pub async fn lesson_delete(state: State<'_, AppState>, id: i64) -> R<()> {
     lessons_delete(state, vec![id]).await
@@ -883,8 +889,9 @@ pub async fn model_delete(state: State<'_, AppState>, id: String) -> R<()> {
     } else if p.exists() {
         std::fs::remove_file(&p).map_err(err)?;
     }
-    if m.kind == "tts" {
-        crate::voice::remove_engine(&state.data_dir);
+    // le moteur sherpa-onnx part avec le dernier modèle qui s'en sert (voix, Parakeet)
+    if m.engine.is_some() && !models::CATALOG.iter().any(|o| o.engine.is_some() && models::path_of(&state.data_dir, o).exists()) {
+        crate::sherpa::remove(&state.data_dir);
     }
     Ok(())
 }
@@ -998,15 +1005,30 @@ pub async fn read_file(path: String) -> R<Response> {
     Ok(Response::new(bytes))
 }
 
-/// Qwen3-ASR (modèle et partie audio), s'il est installé et connaît la langue.
-fn text_model(state: &AppState, lang: &str) -> Option<(PathBuf, PathBuf)> {
-    crate::asr::language_name(lang)?;
-    let m = models::CATALOG.iter().find(|m| m.kind == "asrtext" && models::installed(&state.data_dir, m))?;
-    Some((models::path_of(&state.data_dir, m), models::companion_path(&state.data_dir, m)?))
+/// Qui écrit le texte d'une transcription dans cette langue : Qwen3-ASR ou
+/// Parakeet, installé et qui y fait au moins aussi bien que Whisper seul
+/// (`asr::writes`, `parakeet::knows`) ; les deux, celui qui y fait le mieux
+/// (`parakeet::before_qwen`). Aucun : Whisper écrit seul. Miroir : `lib/writers.ts`.
+fn text_model(state: &AppState, lang: &str) -> Option<media::Writer> {
+    let dir = &state.data_dir;
+    let ready = |m: &&models::ModelInfo| models::installed(dir, m);
+    let qwen = crate::asr::writes(lang)
+        .then(|| models::CATALOG.iter().filter(|m| m.kind == "asrtext" && m.engine.is_none()).find(ready))
+        .flatten()
+        .and_then(|m| Some(media::Writer::Qwen { model: models::path_of(dir, m), mmproj: models::companion_path(dir, m)? }));
+    let parakeet = crate::parakeet::knows(lang)
+        .then(|| models::CATALOG.iter().filter(|m| m.engine == Some(crate::sherpa::Tool::Asr)).find(ready))
+        .flatten()
+        .map(|m| media::Writer::Parakeet { data_dir: dir.clone(), model: models::path_of(dir, m) });
+    if crate::parakeet::before_qwen(lang) {
+        parakeet.or(qwen)
+    } else {
+        qwen.or(parakeet)
+    }
 }
 
-/// Transcrit un son pour en faire une leçon (Whisper, et Qwen3-ASR s'il est
-/// installé et connaît la langue) : voir `media::lesson_transcript`.
+/// Transcrit un son pour en faire une leçon (Whisper, et Qwen3-ASR ou Parakeet
+/// s'il est installé et convient à la langue) : voir `media::lesson_transcript`.
 async fn transcribe_media(
     state: &AppState,
     media: &std::path::Path,
@@ -1493,6 +1515,44 @@ pub async fn media_lighten(state: State<'_, AppState>, on_event: Channel<compres
 #[tauri::command]
 pub async fn online_check(provider: String, key: String, url: Option<String>, model: Option<String>) -> R<online::Check> {
     online::check(&provider, &key, url.as_deref().unwrap_or(""), model.as_deref().unwrap_or("")).await.map_err(err)
+}
+
+// ---------- Sign in with ChatGPT ----------
+
+/// Connexion à ChatGPT de cet appareil : compte, droit d'utiliser le forfait, demandes du jour.
+#[tauri::command]
+pub fn chatgpt_status() -> crate::chatgpt::Status {
+    crate::chatgpt::status()
+}
+
+/// Connexion dans le navigateur du système ; attend son retour (dix minutes au
+/// plus). Annulable avec `model_cancel("chatgpt")`.
+#[tauri::command]
+pub async fn chatgpt_sign_in(app: tauri::AppHandle, state: State<'_, AppState>) -> R<crate::chatgpt::Status> {
+    use tauri_plugin_opener::OpenerExt;
+    let cancel = Arc::new(AtomicBool::new(false));
+    state.downloads.lock().insert("chatgpt".into(), cancel.clone());
+    let open = |url: &str| app.opener().open_url(url, None::<&str>).map_err(|e| anyhow::anyhow!(e.to_string()));
+    // retour du navigateur : Lumen repasse devant (Windows le permet ; macOS, depuis
+    // la version 14, peut laisser le navigateur devant, sa page dit alors de revenir)
+    let back = || {
+        #[cfg(desktop)]
+        {
+            use tauri::Manager;
+            if let Some(w) = app.get_webview_window("main") {
+                let _ = w.unminimize();
+                let _ = w.set_focus();
+            }
+        }
+    };
+    let out = crate::chatgpt::sign_in(open, back, cancel).await;
+    state.downloads.lock().remove("chatgpt");
+    out.map_err(err)
+}
+
+#[tauri::command]
+pub async fn chatgpt_sign_out() -> R<crate::chatgpt::Status> {
+    crate::chatgpt::sign_out().await.map_err(err)
 }
 
 // ---------- podcasts sur mesure (Gemini) ----------

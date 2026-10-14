@@ -22,7 +22,8 @@ pub struct Companion {
 pub struct ModelInfo {
     pub id: &'static str,
     /// "llm" (traduction, explications), "asr" (transcription et minutage des
-    /// mots), "asrtext" (texte des transcriptions, plus juste) ou "tts" (voix)
+    /// mots), "asrtext" (texte des transcriptions, plus juste : Qwen3-ASR,
+    /// Parakeet) ou "tts" (voix)
     pub kind: &'static str,
     pub name: &'static str,
     pub detail: &'static str,
@@ -37,6 +38,10 @@ pub struct ModelInfo {
     /// second fichier, compris dans `size`
     #[serde(skip)]
     pub companion: Option<Companion>,
+    /// outil du moteur sherpa-onnx qui fait tourner le modèle (voix, Parakeet),
+    /// téléchargé avec lui et compté dans `size`
+    #[serde(skip)]
+    pub engine: Option<crate::sherpa::Tool>,
 }
 
 pub const CATALOG: &[ModelInfo] = &[
@@ -51,6 +56,7 @@ pub const CATALOG: &[ModelInfo] = &[
         file: "Qwen3.5-0.8B-Q4_K_M.gguf",
         ram_gb: 8,
         companion: None,
+        engine: None,
     },
     ModelInfo {
         id: "qwen3.5-2b",
@@ -63,6 +69,7 @@ pub const CATALOG: &[ModelInfo] = &[
         file: "Qwen3.5-2B-Q4_K_M.gguf",
         ram_gb: 8,
         companion: None,
+        engine: None,
     },
     ModelInfo {
         id: "qwen3.5-4b",
@@ -75,6 +82,7 @@ pub const CATALOG: &[ModelInfo] = &[
         file: "Qwen3.5-4B-Q4_K_M.gguf",
         ram_gb: 16,
         companion: None,
+        engine: None,
     },
     ModelInfo {
         id: "whisper-small",
@@ -87,6 +95,7 @@ pub const CATALOG: &[ModelInfo] = &[
         file: "ggml-small-q5_1.bin",
         ram_gb: 8,
         companion: None,
+        engine: None,
     },
     ModelInfo {
         id: "whisper-turbo",
@@ -99,13 +108,14 @@ pub const CATALOG: &[ModelInfo] = &[
         file: "ggml-large-v3-turbo-q5_0.bin",
         ram_gb: 8,
         companion: None,
+        engine: None,
     },
     ModelInfo {
         id: "qwen3-asr-1.7b",
         kind: "asrtext",
         name: "Qwen3-ASR 1.7B",
-        detail: "Texte des transcriptions plus juste que Whisper, sans phrase sautée, dans 23 langues ; Whisper garde le minutage des mots",
-        detail_en: "More accurate transcripts than Whisper, with no skipped sentences, in 23 languages; Whisper still times the words",
+        detail: "Texte des transcriptions plus juste que Whisper, sans phrase sautée, dans 15 langues ; Whisper garde le minutage des mots",
+        detail_en: "More accurate transcripts than Whisper, with no skipped sentences, in 15 languages; Whisper still times the words",
         // modèle (2 165 Mo) + partie audio (356 Mo), téléchargés ensemble
         size: 2_165_034_944 + 355_709_344,
         url: "https://huggingface.co/ggml-org/Qwen3-ASR-1.7B-GGUF/resolve/main/Qwen3-ASR-1.7B-Q8_0.gguf",
@@ -116,6 +126,21 @@ pub const CATALOG: &[ModelInfo] = &[
             file: "mmproj-Qwen3-ASR-1.7B-Q8_0.gguf",
             size: 355_709_344,
         }),
+        engine: None,
+    },
+    ModelInfo {
+        id: "parakeet-v3",
+        kind: "asrtext",
+        name: "Parakeet V3",
+        detail: "Texte des transcriptions plus juste que Whisper et bien ponctué, rapide et léger, dans 18 langues européennes ; Whisper garde le minutage des mots",
+        detail_en: "More accurate, well-punctuated transcripts than Whisper, fast and light, in 18 European languages; Whisper still times the words",
+        // modèle compressé par Lumen (tools/build_parakeet.py, 1 018 Mo) + moteur sherpa-onnx (20,3 Mo)
+        size: 1_018_368_000 + crate::sherpa::SIZE,
+        url: "https://github.com/LivingTwice/lumen/releases/download/parakeet-1/parakeet-tdt-0.6b-v3-q8.tar",
+        file: "parakeet-tdt-0.6b-v3-q8",
+        ram_gb: 8,
+        companion: None,
+        engine: Some(crate::sherpa::Tool::Asr),
     },
     ModelInfo {
         id: "supertonic-3",
@@ -124,11 +149,12 @@ pub const CATALOG: &[ModelInfo] = &[
         detail: "Voix naturelle pour les mots, les expressions et l'audio des leçons, dans les 31 langues",
         detail_en: "Natural voice for words, phrases and lesson audio, in all 31 languages",
         // modèle (128,8 Mo) + moteur sherpa-onnx (20,3 Mo), téléchargés ensemble
-        size: 128_774_318 + crate::voice::ENGINE_SIZE,
+        size: 128_774_318 + crate::sherpa::SIZE,
         url: "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/sherpa-onnx-supertonic-3-tts-int8-2026-05-11.tar.bz2",
         file: "sherpa-onnx-supertonic-3-tts-int8-2026-05-11",
         ram_gb: 8,
         companion: None,
+        engine: Some(crate::sherpa::Tool::Tts),
     },
 ];
 
@@ -149,8 +175,10 @@ pub fn part_of(data_dir: &Path, m: &ModelInfo) -> PathBuf {
     path_of(data_dir, m).with_extension("part")
 }
 
+/// Archive à décompresser dans un dossier : .tar.bz2, ou .tar seul (Parakeet :
+/// ses poids ne gagnent que 6 % à la compression, autant ne pas attendre).
 fn is_archive(m: &ModelInfo) -> bool {
-    m.url.ends_with(".tar.bz2")
+    m.url.ends_with(".tar.bz2") || m.url.ends_with(".tar")
 }
 
 /// Chemin du second fichier d'un modèle, s'il en a un.
@@ -160,8 +188,8 @@ pub fn companion_path(data_dir: &Path, m: &ModelInfo) -> Option<PathBuf> {
 
 pub fn installed(data_dir: &Path, m: &ModelInfo) -> bool {
     let p = path_of(data_dir, m);
-    if m.kind == "tts" {
-        return p.is_dir() && crate::voice::engine_ready(data_dir);
+    if let Some(tool) = m.engine {
+        return p.is_dir() && crate::sherpa::ready(data_dir, tool);
     }
     p.exists() && companion_path(data_dir, m).is_none_or(|c| c.exists())
 }
@@ -185,14 +213,14 @@ pub async fn download(
         on_event(DownloadEvent::Done);
         return Ok(());
     }
-    // la voix a besoin de son moteur : téléchargé d'abord, compté dans la progression
+    // la voix et Parakeet ont besoin du moteur : téléchargé d'abord, compté dans la progression
     let mut base = 0u64;
-    if m.kind == "tts" {
-        crate::voice::ensure_engine(data_dir, cancel.clone(), |received, _| {
+    if let Some(tool) = m.engine {
+        crate::sherpa::ensure(data_dir, tool, cancel.clone(), |received, _| {
             on_event(DownloadEvent::Progress { received, total: m.size, speed: 0.0 });
         })
         .await?;
-        base = crate::voice::ENGINE_SIZE;
+        base = crate::sherpa::SIZE;
     }
     // second fichier d'abord (le plus petit), compté dans la progression
     if let (Some(c), Some(cpath)) = (&m.companion, companion_path(data_dir, m)) {
@@ -300,13 +328,14 @@ async fn extract_archive(archive: &Path, dir: &Path, final_path: &Path) -> Resul
     let tmp = dir.join(".extraction");
     let _ = tokio::fs::remove_dir_all(&tmp).await;
     tokio::fs::create_dir_all(&tmp).await?;
+    // compressée ou non : tar s'en aperçoit seul
     #[cfg(not(windows))]
-    let ok = tokio::process::Command::new("tar").arg("-xjf").arg(archive).arg("-C").arg(&tmp).output().await?.status.success();
+    let ok = tokio::process::Command::new("tar").arg("-xf").arg(archive).arg("-C").arg(&tmp).output().await?.status.success();
     // Windows : décompressé ici (le tar de Windows 10 ne lit pas toujours le bzip2)
     #[cfg(windows)]
     let ok = {
         let (from, to) = (archive.to_path_buf(), tmp.clone());
-        tokio::task::spawn_blocking(move || unpack_tar_bz2(&from, &to, None)).await?.is_ok()
+        tokio::task::spawn_blocking(move || unpack_tar(&from, &to, None)).await?.is_ok()
     };
     if !ok {
         let _ = tokio::fs::remove_dir_all(&tmp).await;
@@ -322,14 +351,18 @@ async fn extract_archive(archive: &Path, dir: &Path, final_path: &Path) -> Resul
     Ok(())
 }
 
-/// Décompresse une archive .tar.bz2 dans `dest` (`only` : seulement ces chemins
-/// de l'archive). Sous Windows, à la place de `tar` ; les chemins qui sortiraient
-/// de `dest` sont refusés par la bibliothèque.
+/// Décompresse une archive .tar.bz2 ou .tar dans `dest` (`only` : seulement ces
+/// chemins de l'archive). Sous Windows, à la place de `tar` ; les chemins qui
+/// sortiraient de `dest` sont refusés par la bibliothèque.
 #[cfg(any(windows, test))]
-pub(crate) fn unpack_tar_bz2(archive: &Path, dest: &Path, only: Option<&[String]>) -> Result<()> {
+pub(crate) fn unpack_tar(archive: &Path, dest: &Path, only: Option<&[String]>) -> Result<()> {
+    use std::io::{BufRead, Read};
     std::fs::create_dir_all(dest)?;
-    let file = std::fs::File::open(archive)?;
-    let mut tar = tar::Archive::new(bzip2::read::BzDecoder::new(std::io::BufReader::new(file)));
+    let mut reader = std::io::BufReader::new(std::fs::File::open(archive)?);
+    // bzip2 se reconnaît à ses premiers octets (« BZh »)
+    let bz = reader.fill_buf()?.starts_with(b"BZh");
+    let stream: Box<dyn Read> = if bz { Box::new(bzip2::read::BzDecoder::new(reader)) } else { Box::new(reader) };
+    let mut tar = tar::Archive::new(stream);
     let mut found = 0;
     for entry in tar.entries()? {
         let mut entry = entry?;
@@ -354,11 +387,13 @@ pub(crate) fn unpack_tar_bz2(archive: &Path, dest: &Path, only: Option<&[String]
 mod tests {
     use super::*;
 
-    /// Archive .tar.bz2 de deux fichiers, comme celles des modèles et du moteur de voix.
-    fn archive(dir: &Path) -> PathBuf {
-        let path = dir.join("a.tar.bz2");
-        let enc = bzip2::write::BzEncoder::new(std::fs::File::create(&path).unwrap(), bzip2::Compression::default());
-        let mut b = tar::Builder::new(enc);
+    /// Archive de trois fichiers, comme celles des modèles et du moteur sherpa-onnx :
+    /// .tar.bz2, ou .tar seul (Parakeet).
+    fn archive(dir: &Path, bz: bool) -> PathBuf {
+        let path = dir.join(if bz { "a.tar.bz2" } else { "a.tar" });
+        let file = std::fs::File::create(&path).unwrap();
+        let out: Box<dyn std::io::Write> = if bz { Box::new(bzip2::write::BzEncoder::new(file, bzip2::Compression::default())) } else { Box::new(file) };
+        let mut b = tar::Builder::new(out);
         for (name, body) in [("moteur/bin/outil.exe", "outil"), ("moteur/lib/biblio.dll", "biblio"), ("moteur/LISEZMOI", "rien")] {
             let mut h = tar::Header::new_gnu();
             h.set_size(body.len() as u64);
@@ -366,29 +401,34 @@ mod tests {
             h.set_cksum();
             b.append_data(&mut h, name, body.as_bytes()).unwrap();
         }
-        b.into_inner().unwrap().finish().unwrap();
+        b.into_inner().unwrap().flush().unwrap();
         path
     }
 
     #[test]
-    fn unpacks_tar_bz2_like_tar() {
+    fn unpacks_tar_like_tar() {
         let dir = std::env::temp_dir().join(format!("lumen-untar-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
-        let a = archive(&dir);
-        // tout, comme `tar -xjf`
-        let all = dir.join("tout");
-        unpack_tar_bz2(&a, &all, None).unwrap();
-        assert_eq!(std::fs::read_to_string(all.join("moteur/lib/biblio.dll")).unwrap(), "biblio");
-        assert!(all.join("moteur/LISEZMOI").exists());
-        // seulement l'outil et sa bibliothèque, comme pour le moteur de voix
-        let some = dir.join("choix");
-        let wanted = vec!["moteur/bin/outil.exe".to_string(), "moteur/lib/biblio.dll".to_string()];
-        unpack_tar_bz2(&a, &some, Some(&wanted)).unwrap();
-        assert!(some.join("moteur/bin/outil.exe").exists());
-        assert!(!some.join("moteur/LISEZMOI").exists());
-        // rien de ce qu'on cherche : erreur
-        assert!(unpack_tar_bz2(&a, &dir.join("vide"), Some(&["autre".to_string()])).is_err());
+        for bz in [true, false] {
+            let a = archive(&dir, bz);
+            // tout, comme `tar -xf`
+            let all = dir.join("tout");
+            unpack_tar(&a, &all, None).unwrap();
+            assert_eq!(std::fs::read_to_string(all.join("moteur/lib/biblio.dll")).unwrap(), "biblio");
+            assert!(all.join("moteur/LISEZMOI").exists());
+            // seulement l'outil et sa bibliothèque, comme pour le moteur
+            let some = dir.join("choix");
+            let wanted = vec!["moteur/bin/outil.exe".to_string(), "moteur/lib/biblio.dll".to_string()];
+            unpack_tar(&a, &some, Some(&wanted)).unwrap();
+            assert!(some.join("moteur/bin/outil.exe").exists());
+            assert!(!some.join("moteur/LISEZMOI").exists());
+            // rien de ce qu'on cherche : erreur
+            assert!(unpack_tar(&a, &dir.join("vide"), Some(&["autre".to_string()])).is_err());
+            for d in ["tout", "choix", "vide"] {
+                let _ = std::fs::remove_dir_all(dir.join(d));
+            }
+        }
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

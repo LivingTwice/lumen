@@ -1,21 +1,14 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Permissions de la fenêtre principale",
+  "description": "Permissions de la fenêtre principale (Mac, Windows, iPhone et iPad)",
   "windows": [
     "main"
   ],
   "permissions": [
     "core:default",
-    "core:window:allow-start-dragging",
     "core:window:allow-set-theme",
-    "core:window:allow-set-fullscreen",
-    "core:window:allow-minimize",
-    "core:window:allow-toggle-maximize",
-    "core:window:allow-close",
     "dialog:default",
-    "opener:default",
-    "updater:default",
-    "process:default"
+    "opener:default"
   ]
 }

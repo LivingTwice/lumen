@@ -48,6 +48,8 @@ pub enum Dialect {
     OpenRouter,
     /// serveur compatible choisi par l'apprenant
     Other,
+    /// forfait ChatGPT de l'apprenant (Sign in with ChatGPT) : API Responses, voir `chatgpt.rs`
+    ChatGpt,
 }
 
 #[derive(Debug)]
@@ -62,7 +64,7 @@ pub struct Provider {
     pub fallback: &'static str,
 }
 
-pub const PROVIDERS: [Provider; 8] = [
+pub const PROVIDERS: [Provider; 9] = [
     Provider { id: "deepseek", name: "DeepSeek", base: "https://api.deepseek.com", dialect: Dialect::DeepSeek, key_setting: "online_key_deepseek", fallback: "deepseek-flash" },
     Provider {
         id: "gemini",
@@ -82,6 +84,8 @@ pub const PROVIDERS: [Provider; 8] = [
     },
     Provider { id: "mistral", name: "Mistral", base: "https://api.mistral.ai/v1", dialect: Dialect::Mistral, key_setting: "online_key_mistral", fallback: "mistral-small-latest" },
     Provider { id: "openai", name: "OpenAI", base: "https://api.openai.com/v1", dialect: Dialect::OpenAi, key_setting: "online_key_openai", fallback: "gpt-5-mini" },
+    // pas de clé : la connexion au compte (jetons dans chatgpt.json, hors de la base)
+    Provider { id: "chatgpt", name: "ChatGPT", base: "https://api.openai.com/v1", dialect: Dialect::ChatGpt, key_setting: "", fallback: "" },
     Provider { id: "anthropic", name: "Claude", base: "https://api.anthropic.com/v1", dialect: Dialect::Anthropic, key_setting: "online_key_anthropic", fallback: "claude-haiku-4-5" },
     Provider { id: "openrouter", name: "OpenRouter", base: "https://openrouter.ai/api/v1", dialect: Dialect::OpenRouter, key_setting: "online_key_openrouter", fallback: "deepseek/deepseek-chat" },
     // l'adresse est celle que l'apprenant indique (`online_url`)
@@ -154,7 +158,18 @@ pub fn config_from(get: impl Fn(&str) -> Option<String>, role: Role) -> Option<R
     }
     let p = set("online_provider").and_then(|id| find(&id)).unwrap_or(&PROVIDERS[0]);
     let custom = p.dialect == Dialect::Other;
-    let key = set(p.key_setting).unwrap_or_default();
+    // ChatGPT : pas de clé, la connexion au compte
+    if p.dialect == Dialect::ChatGpt && !crate::chatgpt::signed_in() {
+        let st = crate::chatgpt::status();
+        return Some(Err(if st.signed_in && !st.plan {
+            t("Votre compte ChatGPT n'a pas accordé l'usage de son forfait à Lumen. Reconnectez-vous dans Réglages › IA (abonnement Plus ou Pro).", "Your ChatGPT account didn't let Lumen use its plan. Sign in again in Settings › AI (Plus or Pro subscription).").into()
+        } else if st.signed_in {
+            t("La connexion de Lumen à ChatGPT a expiré. Reconnectez-vous dans Réglages › IA.", "Lumen's connection to ChatGPT has expired. Sign in again in Settings › AI.").into()
+        } else {
+            t("Connectez-vous à ChatGPT dans Réglages › IA.", "Sign in to ChatGPT in Settings › AI.").into()
+        }));
+    }
+    let key = if p.key_setting.is_empty() { String::new() } else { set(p.key_setting).unwrap_or_default() };
     let (base, name) = if custom {
         match set("online_url").as_deref().and_then(normalize_url) {
             Some(u) => (u.clone(), host_of(&u)),
@@ -164,7 +179,7 @@ pub fn config_from(get: impl Fn(&str) -> Option<String>, role: Role) -> Option<R
         (p.base.to_string(), p.name.to_string())
     };
     // un serveur sur ce Mac (Ollama, LM Studio) n'a souvent pas de clé
-    if key.is_empty() && !custom {
+    if key.is_empty() && !custom && p.dialect != Dialect::ChatGpt {
         return Some(Err(tr!("Ajoutez votre clé {name} dans Réglages › IA.", "Add your {name} key in Settings › AI.")));
     }
     let model = set(&format!("online_model_{}", p.id)).unwrap_or_else(|| p.fallback.to_string());
@@ -369,7 +384,7 @@ pub fn halter<'a>(engine: &'a Engine, p: &'a Priority) -> impl Fn() -> Result<bo
 }
 
 /// Attend `fut` en surveillant l'arrêt (`None` : arrêtée par l'apprenant).
-async fn until<F: Future>(fut: F, halted: &impl Fn() -> Result<bool>) -> Result<Option<F::Output>> {
+pub(crate) async fn until<F: Future>(fut: F, halted: &impl Fn() -> Result<bool>) -> Result<Option<F::Output>> {
     // vérifié à chaque appel : les morceaux d'une réponse arrivent souvent sans pause
     if halted()? {
         return Ok(None);
@@ -392,7 +407,7 @@ async fn until<F: Future>(fut: F, halted: &impl Fn() -> Result<bool>) -> Result<
 /// Fournisseur injoignable (pas de connexion, délai dépassé) : la traduction
 /// peut alors se replier sur le modèle de ce Mac.
 #[derive(Debug)]
-pub struct Unreachable(String);
+pub struct Unreachable(pub(crate) String);
 
 impl std::fmt::Display for Unreachable {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -450,10 +465,11 @@ fn api_error(cfg: &Config, status: u16, body: &str) -> anyhow::Error {
     let name = &cfg.name;
     let model = &cfg.model;
     let msg = message_of(body);
+    let here = crate::i18n::this_device();
     anyhow!(if credit_out(body) || status == 402 {
         tr!(
-            "Le crédit de votre compte {name} est épuisé. Rechargez-le sur le site de {name}, ou passez à l'IA de ce Mac (Réglages › IA).",
-            "Your {name} account has run out of credit. Top it up on the {name} website, or switch to this Mac's AI (Settings › AI)."
+            "Le crédit de votre compte {name} est épuisé. Rechargez-le sur le site de {name}, ou passez à l'IA de {here} (Réglages › IA).",
+            "Your {name} account has run out of credit. Top it up on the {name} website, or switch to {here}'s AI (Settings › AI)."
         )
     } else if status == 401 || status == 403 || key_refused(body) {
         if msg.contains("location is not supported") {
@@ -519,6 +535,10 @@ fn parse_line(line: &str) -> Option<Delta> {
 /// Génération complète : réflexion facultative puis réponse, au fil de l'eau
 /// (même forme que `Engine::run`).
 pub async fn run(cfg: &Config, ask: Ask<'_>, halted: impl Fn() -> Result<bool>, mut on_piece: impl FnMut(Piece) -> bool) -> Result<Output> {
+    // le forfait ChatGPT parle un autre format (API Responses) et a son propre rythme
+    if cfg.provider.dialect == Dialect::ChatGpt {
+        return crate::chatgpt::run(cfg, ask, halted, on_piece).await;
+    }
     let c = client()?;
     let d = cfg.provider.dialect;
     let wait = queue_wait(d, ask.exact);
@@ -694,7 +714,7 @@ fn version<'a>(name: &'a str, prefix: &str) -> Option<((u32, u32), &'a str)> {
 }
 
 /// Le plus récent des modèles « <préfixe><version>-<suite> » (sans date ni aperçu).
-fn newest(ids: &[String], prefix: &str, tail: &str) -> Option<String> {
+pub(crate) fn newest(ids: &[String], prefix: &str, tail: &str) -> Option<String> {
     ids.iter().filter_map(|id| version(id, prefix).filter(|(_, t)| *t == tail).map(|(v, _)| (v, id))).max().map(|(_, id)| id.clone())
 }
 
@@ -722,7 +742,7 @@ fn pick(p: &Provider, ids: &[String]) -> Option<String> {
         Dialect::Mistral => first_of(&["mistral-small-latest", "mistral-medium-latest", "mistral-large-latest"]),
         Dialect::OpenRouter => first_of(&["deepseek/deepseek-flash", "deepseek/deepseek-chat", "google/gemini-2.5-flash"]),
         Dialect::Nvidia => first_of(&NVIDIA_PICKS),
-        Dialect::Other => None,
+        Dialect::Other | Dialect::ChatGpt => None,
     };
     chosen.or_else(|| ids.first().cloned())
 }
@@ -788,6 +808,9 @@ async fn open_models(c: &reqwest::Client, cfg: &Config, ids: Vec<String>, wait: 
 /// modèle retenu (le compte a du crédit, le modèle répond, et combien de temps il met).
 pub async fn check(provider: &str, key: &str, url: &str, model: &str) -> Result<Check> {
     let p = find(provider).ok_or_else(|| anyhow!(t("Fournisseur inconnu.", "Unknown provider.")))?;
+    if p.dialect == Dialect::ChatGpt {
+        return crate::chatgpt::check(model).await;
+    }
     let key = key.trim().to_string();
     let (base, name) = if p.dialect == Dialect::Other {
         let u = normalize_url(url).ok_or_else(|| {

@@ -100,6 +100,8 @@ export interface Playlist {
   created_at: number;
   /** « book » : les chapitres d'un livre importé ; vide : une playlist faite à la main */
   kind: string;
+  /** en boucle : après la dernière leçon, l'écoute reprend à la première */
+  looping: boolean;
 }
 
 /** Un chapitre (ou une partie d'un long chapitre) d'un livre importé. */
@@ -130,6 +132,7 @@ export interface PlaylistPatch {
   lessons?: number[];
   /** 0 : la playlist repart du début */
   current?: number;
+  looping?: boolean;
 }
 
 export interface OpenedLesson {
@@ -252,7 +255,7 @@ export interface GpuInfo {
 
 export interface ModelRow {
   id: string;
-  /** asr : Whisper (transcription et minutage des mots) ; asrtext : Qwen3-ASR (texte plus juste) */
+  /** asr : Whisper (transcription et minutage des mots) ; asrtext : Qwen3-ASR ou Parakeet (texte plus juste) */
   kind: "llm" | "asr" | "asrtext" | "tts";
   name: string;
   detail: string;
@@ -579,6 +582,21 @@ export interface OnlineCheck {
   model: string;
   /** temps d'une petite réponse, en millisecondes */
   ms: number;
+}
+
+/** Connexion à ChatGPT de cet appareil (miroir de `chatgpt::Status`). */
+export interface ChatGptStatus {
+  signed_in: boolean;
+  email: string;
+  /** le forfait peut servir (abonnement Plus ou Pro, permission accordée) */
+  plan: boolean;
+  /** connexion à refaire (renouvellement refusé, accès retiré dans ChatGPT) */
+  expired: boolean;
+  requests_today: number;
+  /** limite du forfait atteinte : traductions sur l'appareil pendant encore… (minutes) */
+  paused_minutes: number | null;
+  /** réglages d'utilisation de ChatGPT */
+  manage_url: string;
 }
 
 /** Niveau estimé d'après les mots connus regroupés par lemme (miroir de `level::Estimate`). */

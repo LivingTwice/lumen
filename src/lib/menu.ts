@@ -27,6 +27,8 @@ export interface LessonMenu {
   video: boolean;
   /** panneau du mot flottant (sinon à droite) */
   float: boolean;
+  /** playlist suivie en boucle ; null : pas de playlist (ou un livre) */
+  loop: boolean | null;
 }
 
 /** Actions du lecteur, appelées par le menu Leçon. */
@@ -47,6 +49,8 @@ export interface LessonActions {
   remove(): void;
   /** panneau du mot : à droite ou flottant */
   panel(): void;
+  /** playlist suivie : en boucle ou non */
+  loop(): void;
 }
 
 interface MenuState {
@@ -75,9 +79,9 @@ export function useLessonMenu(flags: LessonMenu | null, actions: LessonActions) 
   useEffect(() => {
     lessonActions = actions;
   });
-  const key = flags ? [flags.media, flags.video, flags.float].map(Number).join("") : "";
+  const key = flags ? [flags.media, flags.video, flags.float].map(Number).join("") + (flags.loop === null ? "-" : Number(flags.loop)) : "";
   useEffect(() => {
-    useMenu.setState({ lesson: key ? { media: key[0] === "1", video: key[1] === "1", float: key[2] === "1" } : null });
+    useMenu.setState({ lesson: key ? { media: key[0] === "1", video: key[1] === "1", float: key[2] === "1", loop: key[3] === "-" ? null : key[3] === "1" } : null });
   }, [key]);
   useEffect(
     () => () => {
@@ -173,18 +177,18 @@ async function revealData() {
 async function switchLang(code: LangCode) {
   const app = useApp.getState();
   if (app.lang() === code) return;
-  await app.setSetting("lang", code);
-  await app.refreshKnown();
   const v = app.view;
   // une leçon, une conversation ou une playlist d'une autre langue n'ont plus leur place
+  // (on quitte la leçon avant : la lecture en cours change avec la langue)
   app.go(v === "reader" || v === "chat" || v === "playlists" ? "library" : v);
+  await app.setSetting("lang", code);
+  await app.refreshKnown();
 }
 
-/** Rouvre la leçon en cours (celle du dernier lancement, s'il le faut). */
+/** Rouvre la lecture en cours de la langue étudiée. */
 function resumeLesson() {
   const a = useApp.getState();
-  const id = a.lessonId ?? Number(a.settings.last_lesson);
-  if (id) a.openLesson(id);
+  if (a.lessonId) a.openLesson(a.lessonId);
 }
 
 function toggleSidebar() {
@@ -261,7 +265,7 @@ function snapshot() {
     calm: !app.ready || !s.onboarded || app.replay || app.tour !== null,
     view: app.view,
     lesson: app.view === "reader" ? m.lesson : null,
-    resume: app.view !== "reader" && !!(app.lessonId ?? s.last_lesson),
+    resume: app.view !== "reader" && !!app.lessonId,
     lang: app.lang(),
     langs: app.langs(),
     look: Object.fromEntries(LOOK_KEYS.map((k) => [k, get(k)])) as Record<(typeof LOOK_KEYS)[number], string>,
@@ -501,6 +505,7 @@ function lessonMenu(s: Snap): SubmenuOptions {
     act(t("Regarder en plein écran", "Watch Full Screen"), onLesson((a) => a.cinema()), { on: on && !!l?.video }),
     sep,
     act(t("Ajouter à une playlist…", "Add to a Playlist…"), onLesson((a) => a.playlist()), { on }),
+    pick(t("Lire la playlist en boucle", "Loop Playlist"), !!l?.loop, onLesson((a) => a.loop()), { on: on && l?.loop != null }),
     act(t("Choisir une couverture…", "Choose a Cover…"), onLesson((a) => a.cover()), { on }),
     sep,
     act(t("Supprimer la leçon…", "Delete Lesson…"), onLesson((a) => a.remove()), { on }),

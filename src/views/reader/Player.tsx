@@ -22,6 +22,8 @@ export interface PlayerHandle {
   skip(secs: number): void;
   /** oublie la position mémorisée (leçon terminée : la prochaine lecture repart du début) */
   forget(): void;
+  /** repart du tout début et lit (playlist d'une seule leçon, en boucle) */
+  restart(): void;
 }
 
 export interface PlaybackState {
@@ -576,6 +578,12 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player({ lesson, 
         posRef.current = 0;
         savedPos.current = 0;
         resumeRef.current = -1;
+      },
+      restart() {
+        if (hasMedia) {
+          seekTo(0);
+          playMedia();
+        } else speakFrom(0);
       },
     }),
     // eslint-disable-next-line react-hooks/exhaustive-deps

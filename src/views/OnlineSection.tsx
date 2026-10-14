@@ -1,11 +1,12 @@
 import { AnimatePresence, motion } from "motion/react";
 import { useState } from "react";
+import { createPortal } from "react-dom";
 import { Icon, type IconName } from "../components/Icon";
-import { Orb, Switch } from "../components/ui";
+import { Orb, Sheet, Switch } from "../components/ui";
 import { api, errorText } from "../lib/api";
 import { openSource } from "../lib/discover";
 import { t } from "../lib/i18n";
-import { latency, onlineProviders, useOnline, type OnlineProvider } from "../lib/online";
+import { latency, onlineProviders, useChatGpt, useOnline, type OnlineProvider } from "../lib/online";
 import { useApp } from "../lib/store";
 import type { OnlineCheck } from "../lib/types";
 
@@ -259,6 +260,232 @@ function OnlineKey({ provider: p }: { provider: OnlineProvider }) {
   );
 }
 
+/** Sign in with ChatGPT : connexion dans le navigateur, forfait, modèle, rythme des demandes. */
+function ChatGptAccount() {
+  const { status, set } = useChatGpt();
+  const settings = useApp((s) => s.settings);
+  const setSetting = useApp((s) => s.setSetting);
+  const model = settings.online_model_chatgpt ?? "";
+  const models = savedModels(settings.online_models_chatgpt);
+  const [busy, setBusy] = useState<"in" | "out" | "check" | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [done, setDone] = useState<OnlineCheck | null>(null);
+  const [welcome, setWelcome] = useState(false);
+  const ready = !!status?.signed_in && status.plan && !status.expired;
+
+  const check = async (wanted = model, previous?: string) => {
+    setBusy("check");
+    setError(null);
+    setDone(null);
+    try {
+      const r = await api().onlineCheck("chatgpt", "", undefined, wanted || undefined);
+      void setSetting("online_model_chatgpt", r.model);
+      void setSetting("online_models_chatgpt", JSON.stringify(r.models));
+      setDone(r);
+    } catch (e) {
+      if (previous) {
+        void setSetting("online_model_chatgpt", previous);
+        setError(`${errorText(e)} ${t(`Lumen garde ${previous}.`, `Lumen keeps ${previous}.`)}`);
+      } else setError(errorText(e));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const signIn = async () => {
+    setBusy("in");
+    setError(null);
+    setDone(null);
+    try {
+      const s = await api().chatgptSignIn();
+      set(s);
+      setBusy(null);
+      if (!s.plan) {
+        setError(t(
+          "Connecté, mais ce compte n'a pas accordé l'usage de son forfait : il faut un abonnement Plus ou Pro, et accepter « Utiliser votre forfait » dans la fenêtre de ChatGPT.",
+          "Signed in, but this account didn't grant use of its plan: it takes a Plus or Pro subscription, and accepting “Use your plan” in ChatGPT's window.",
+        ));
+        return;
+      }
+      // une seule fois : ce que cela veut dire pour le forfait
+      if (settings.online_chatgpt_welcomed !== "1") setWelcome(true);
+      await check();
+    } catch (e) {
+      const m = errorText(e);
+      if (m !== "annulé") setError(m);
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const signOut = async () => {
+    setBusy("out");
+    setError(null);
+    setDone(null);
+    try {
+      set(await api().chatgptSignOut());
+    } catch (e) {
+      setError(errorText(e));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const choose = (m: string) => {
+    if (!m || m === model) return;
+    void setSetting("online_model_chatgpt", m);
+    void check(m, model || undefined);
+  };
+  const options = model && !models.includes(model) ? [model, ...models] : models;
+  const manage = (e: React.MouseEvent) => {
+    e.preventDefault();
+    void openSource(status?.manage_url || "https://chatgpt.com/#settings/Usage");
+  };
+
+  return (
+    <div className="gemini-key online-key chatgpt-account">
+      {!status?.signed_in || status.expired ? (
+        <div className="key-row">
+          <span className="grow muted">
+            {status?.expired
+              ? t(`La connexion de ${status.email || "votre compte"} a expiré.`, `The connection of ${status.email || "your account"} has expired.`)
+              : t("Ouvrez ChatGPT dans le navigateur, acceptez, et revenez : aucune clé à copier.", "Open ChatGPT in the browser, accept, and come back: no key to copy.")}
+          </span>
+          {busy === "in" ? (
+            <button className="btn sm ghost" onClick={() => void api().modelCancel("chatgpt")}>
+              {t("Annuler", "Cancel")}
+            </button>
+          ) : (
+            <button className="btn sm primary" disabled={!!busy} onClick={() => void signIn()}>
+              {status?.expired ? t("Se reconnecter", "Sign in again") : t("Continuer avec ChatGPT", "Continue with ChatGPT")}
+            </button>
+          )}
+        </div>
+      ) : (
+        <div className="key-row">
+          <span className="grow">
+            <strong>{status.email || t("Compte ChatGPT", "ChatGPT account")}</strong>
+            {/* deux lignes (`.set-row .grow`) : le compte, puis ce qu'il permet */}
+            <span className="muted">{status.plan ? t("Votre forfait sert à Lumen", "Your plan powers Lumen") : t("Forfait non accordé", "Plan not granted")}</span>
+          </span>
+          <button className="btn sm ghost" disabled={!!busy} onClick={() => void signOut()}>
+            {t("Se déconnecter", "Sign out")}
+          </button>
+        </div>
+      )}
+
+      <AnimatePresence initial={false}>
+        {busy === "in" && (
+          <motion.div key="in" className="key-note" {...enter}>
+            <Orb size={16} />
+            <span>{t("Terminez la connexion dans votre navigateur…", "Finish signing in in your browser…")}</span>
+          </motion.div>
+        )}
+        {busy === "check" && (
+          <motion.div key="check" className="key-note" {...enter}>
+            <Orb size={16} />
+            <span>{t("Lumen pose une petite question à ChatGPT…", "Lumen is asking ChatGPT a little question…")}</span>
+          </motion.div>
+        )}
+        {error && (
+          <motion.div key="err" className="key-note error" {...enter}>
+            <Icon name="ban" size={15} />
+            <span>{error}</span>
+          </motion.div>
+        )}
+        {done && (
+          <motion.div key="ok" className="key-note ok" {...enter}>
+            <span className="key-check">
+              <Icon name="check" size={13} stroke={2.4} />
+            </span>
+            <span>{t(`Prêt. ${done.model} a répondu en ${latency(done.ms)}.`, `Ready. ${done.model} answered in ${latency(done.ms)}.`)}</span>
+          </motion.div>
+        )}
+        {ready && status?.paused_minutes != null && (
+          <motion.div key="pause" className="key-note error" {...enter}>
+            <Icon name="clock" size={15} />
+            <span>
+              {t(
+                `Limite de votre forfait atteinte : Lumen traduit avec l'IA de ce Mac pendant encore ${status.paused_minutes} min.`,
+                `Your plan's limit is reached: Lumen translates with this Mac's AI for ${status.paused_minutes} more min.`,
+              )}
+            </span>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {ready && options.length > 0 && (
+        <div className="online-model">
+          <span>{t("Modèle", "Model")}</span>
+          <select className="select" value={model} onChange={(e) => choose(e.target.value)} aria-label={t("Modèle", "Model")} disabled={!!busy}>
+            {options.map((m) => (
+              <option key={m} value={m}>
+                {m}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
+
+      <span className="import-hint">
+        {ready && (
+          <>
+            {status.requests_today > 0 && (
+              <>
+                {t(`${status.requests_today} demande${status.requests_today > 1 ? "s" : ""} à ChatGPT aujourd'hui. `, `${status.requests_today} request${status.requests_today > 1 ? "s" : ""} to ChatGPT today. `)}
+              </>
+            )}
+            <a className="link" href={status.manage_url} onClick={manage}>
+              {t("Gérer l'utilisation", "Manage usage")} <Icon name="external" size={12} stroke={2} />
+            </a>
+            {t(" : ce que Lumen consomme, et la limite que vous lui laissez. ", ": what Lumen uses, and the limit you allow it. ")}
+          </>
+        )}
+        {t(
+          "Lumen va doucement : un mot touché ne part qu'au bout d'un tiers de seconde, et si vous en touchez plusieurs à la suite, seul celui où vous vous arrêtez est envoyé. Au plus 30 traductions par minute, chacune gardée : un mot déjà traduit ne repart pas.",
+          "Lumen takes it easy: a tapped word only goes out after a third of a second, and if you tap several in a row, only the one you stop on is sent. At most 30 translations a minute, each one kept: a word already translated isn't sent again.",
+        )}
+      </span>
+
+      {/* dans le document : la page des Réglages garde un filtre de son entrée, qui
+          calerait la fenêtre sur la page déroulée et non sur l'écran */}
+      {createPortal(
+        <Sheet
+          open={welcome}
+          onClose={() => {
+            setWelcome(false);
+            void setSetting("online_chatgpt_welcomed", "1");
+          }}
+          title={t("Vous utilisez votre forfait ChatGPT", "You're using your ChatGPT plan")}
+          width={460}
+          footer={
+            <button
+              className="btn primary"
+              onClick={() => {
+                setWelcome(false);
+                void setSetting("online_chatgpt_welcomed", "1");
+              }}
+            >
+              {t("Compris", "Got it")}
+            </button>
+          }
+        >
+          <p>
+            {t(
+              "Le sens des mots, la traduction des phrases et le chat de Lumen puisent désormais dans votre forfait ChatGPT, comme Codex. Vous pouvez suivre et limiter ce que Lumen utilise dans ChatGPT, Réglages › Utilisation.",
+              "Word meanings, sentence translation and Lumen's chat now draw on your ChatGPT plan, like Codex. You can follow and limit what Lumen uses in ChatGPT, Settings › Usage.",
+            )}{" "}
+            <a className="link" href={status?.manage_url} onClick={manage}>
+              {t("Gérer l'utilisation", "Manage usage")}
+            </a>
+          </p>
+        </Sheet>,
+        document.body,
+      )}
+    </div>
+  );
+}
+
 /** L'IA en ligne : fournisseur, clé et modèle, ce qu'elle prend en charge, ce qui part en ligne. */
 export function OnlineSection() {
   const settings = useApp((s) => s.settings);
@@ -281,7 +508,9 @@ export function OnlineSection() {
                 {on && <motion.span layoutId="online-provider" className="look-ring" transition={TILE} />}
                 <span className={`place-glyph ${x.mark ? "mono" : ""}`}>{x.mark || <Icon name="link" size={18} />}</span>
                 <strong>{x.name}</strong>
-                <span className="place-note">{has ? (x.id === "custom" ? t("Adresse enregistrée", "Address saved") : t("Clé enregistrée", "Key saved")) : x.note}</span>
+                <span className="place-note">
+                  {has ? (x.id === "custom" ? t("Adresse enregistrée", "Address saved") : x.id === "chatgpt" ? t("Connecté", "Connected") : t("Clé enregistrée", "Key saved")) : x.note}
+                </span>
               </button>
             );
           })}
@@ -295,7 +524,7 @@ export function OnlineSection() {
               <strong>{p.name}</strong>
               <span>{p.about}</span>
             </div>
-            {saved && p.id !== "gemini" && (
+            {saved && p.id !== "gemini" && p.id !== "chatgpt" && (
               <button
                 className="btn sm ghost"
                 onClick={() => {
@@ -308,8 +537,8 @@ export function OnlineSection() {
             )}
           </div>
           <div className="set-row">
-            {/* une clé par fournisseur : le champ repart de la sienne */}
-            <OnlineKey key={p.id} provider={p} />
+            {/* une clé par fournisseur : le champ repart de la sienne ; ChatGPT, lui, se connecte */}
+            {p.id === "chatgpt" ? <ChatGptAccount /> : <OnlineKey key={p.id} provider={p} />}
           </div>
           <div className="set-row">
             <div className="grow">
@@ -356,8 +585,8 @@ export function OnlineSection() {
               <strong>{t("Et mon abonnement ChatGPT, Claude ou Gemini ?", "What about my ChatGPT, Claude or Gemini subscription?")}</strong>
               <span>
                 {t(
-                  "Un abonnement ne sert que dans les applications de son éditeur : Anthropic et Google interdisent d'utiliser Claude Pro ou Google AI Pro ailleurs, et suspendent les comptes qui le font. Il faut donc une clé, payée à l'usage, ou une clé gratuite : Gemini ou NVIDIA.",
-                  "A subscription only works in its maker's own apps: Anthropic and Google forbid using Claude Pro or Google AI Pro anywhere else, and suspend accounts that do. So you need a key, paid as you go, or a free key: Gemini or NVIDIA.",
+                  "ChatGPT Plus ou Pro : choisissez la tuile ChatGPT et connectez-vous, OpenAI permet aux applications open source comme Lumen d'utiliser votre forfait. Claude Pro et Google AI Pro, en revanche, ne servent que dans les applications de leur éditeur : Anthropic et Google suspendent les comptes qui les utilisent ailleurs. Il faut alors une clé, payée à l'usage, ou une clé gratuite : Gemini ou NVIDIA.",
+                  "ChatGPT Plus or Pro: pick the ChatGPT tile and sign in, OpenAI lets open-source apps like Lumen use your plan. Claude Pro and Google AI Pro, however, only work in their maker's own apps: Anthropic and Google suspend accounts that use them elsewhere. Then you need a key, paid as you go, or a free key: Gemini or NVIDIA.",
                 )}
               </span>
             </div>

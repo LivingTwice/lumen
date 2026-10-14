@@ -141,26 +141,44 @@ pub fn build_transcript(words: &[WWord]) -> (String, String) {
     (text, serde_json::to_string(&timings).unwrap_or_else(|_| "[]".into()))
 }
 
+/// Qui écrit le texte d'une transcription, plus juste que Whisper (qui garde
+/// le minutage des mots).
+pub enum Writer {
+    /// Qwen3-ASR par llama.cpp : modèle et partie audio
+    Qwen { model: PathBuf, mmproj: PathBuf },
+    /// Parakeet par le moteur sherpa-onnx : dossier du modèle
+    Parakeet { data_dir: PathBuf, model: PathBuf },
+}
+
+impl Writer {
+    fn name(&self) -> &'static str {
+        match self {
+            Writer::Qwen { .. } => "Qwen3-ASR",
+            Writer::Parakeet { .. } => "Parakeet",
+        }
+    }
+}
+
 /// Texte et horodatages d'une leçon à partir d'un son. Whisper repère chaque
-/// mot dans le temps (et décode le son) ; si Qwen3-ASR est fourni (`fine` :
-/// modèle et partie audio), il écrit le texte, plus juste, sur lequel le
-/// minutage de Whisper est recalé. Le texte est ensuite aéré comme sur LingQ.
+/// mot dans le temps (et décode le son) ; si un `writer` est fourni (Qwen3-ASR
+/// ou Parakeet), il écrit le texte, plus juste, sur lequel le minutage de
+/// Whisper est recalé. Le texte est ensuite aéré comme sur LingQ.
 /// `reference` : un texte déjà écrit (article, transcription officielle d'une
 /// page), gardé tel quel si le son le suit ; sinon, transcription comme d'habitude.
 pub async fn lesson_transcript(
     engine: &crate::ai::Engine,
     whisper: &Path,
-    fine: Option<(PathBuf, PathBuf)>,
+    writer: Option<Writer>,
     media: &Path,
     lang: &str,
     reference: Option<&str>,
     mut on_event: impl FnMut(ImportEvent),
 ) -> Result<(String, String)> {
-    let pcm = fine.as_ref().map(|_| std::env::temp_dir().join(format!("lumen-{}.pcm", new_stem())));
+    let pcm = writer.as_ref().map(|_| std::env::temp_dir().join(format!("lumen-{}.pcm", new_stem())));
     let heard = transcribe(whisper, media, lang, pcm.as_deref(), |e| {
-        // avec Qwen3-ASR, Whisper ne fait plus que repérer les mots dans le temps
+        // avec Qwen3-ASR ou Parakeet, Whisper ne fait plus que repérer les mots dans le temps
         let e = match e {
-            ImportEvent::Stage { stage } if stage == "transcribe" && fine.is_some() => ImportEvent::Stage { stage: "timing".into() },
+            ImportEvent::Stage { stage } if stage == "transcribe" && writer.is_some() => ImportEvent::Stage { stage: "timing".into() },
             e => e,
         };
         on_event(e);
@@ -187,15 +205,25 @@ pub async fn lesson_transcript(
         eprintln!("texte de la page écarté : {:.0} % des mots retrouvés", found * 100.0);
     }
     let (mut text, mut timings) = build_transcript(&words);
-    if let (Some((model, mmproj)), Some(pcm)) = (fine, pcm) {
+    if let (Some(writer), Some(pcm)) = (writer, pcm) {
         on_event(ImportEvent::Stage { stage: "text".into() });
-        let written = read_pcm(&pcm).and_then(|samples| {
-            tokio::task::block_in_place(|| {
-                crate::asr::transcribe(engine, &model, &mmproj, &samples, lang, &std::sync::atomic::AtomicBool::new(false), |p| {
-                    on_event(ImportEvent::Progress { value: p });
-                })
-            })
-        });
+        let stop = std::sync::atomic::AtomicBool::new(false);
+        let written = match read_pcm(&pcm) {
+            Err(e) => Err(e),
+            Ok(samples) => match &writer {
+                Writer::Qwen { model, mmproj } => tokio::task::block_in_place(|| {
+                    crate::asr::transcribe(engine, model, mmproj, &samples, lang, &stop, |p| {
+                        on_event(ImportEvent::Progress { value: p });
+                    })
+                }),
+                Writer::Parakeet { data_dir, model } => {
+                    crate::parakeet::transcribe(data_dir, model, &samples, &stop, |p| {
+                        on_event(ImportEvent::Progress { value: p });
+                    })
+                    .await
+                }
+            },
+        };
         let _ = std::fs::remove_file(&pcm);
         match written {
             Ok(t) if !t.trim().is_empty() => {
@@ -207,12 +235,12 @@ pub async fn lesson_transcript(
                     text = t;
                     timings = t_timings;
                 } else {
-                    eprintln!("Qwen3-ASR écarté : {:.0} % des mots retrouvés", found * 100.0);
+                    eprintln!("{} écarté : {:.0} % des mots retrouvés", writer.name(), found * 100.0);
                 }
             }
             Ok(_) => {}
             // Whisper seul plutôt qu'un échec : la leçon se crée quand même
-            Err(e) => eprintln!("Qwen3-ASR indisponible : {e}"),
+            Err(e) => eprintln!("{} indisponible : {e}", writer.name()),
         }
     }
     Ok(airy(&text, lang, &timings))
@@ -1285,23 +1313,32 @@ mod tests {
         assert!(tm.len() > words.len() * 8 / 10);
     }
 
-    /// Import réel de bout en bout (Whisper puis Qwen3-ASR, recalage, mise en page) :
-    /// LUMEN_ASR_MODEL=ggml-….bin LUMEN_ASR_DIR=dossier de Qwen3-ASR LUMEN_TEST_AUDIO=son.mp3
-    /// LUMEN_TEST_LANG=it [LUMEN_AIRY_OUT=texte.txt] cargo test --release --lib transcript_live -- --ignored --nocapture
+    /// Import réel de bout en bout (Whisper puis Qwen3-ASR ou Parakeet, recalage, mise en page) :
+    /// LUMEN_ASR_MODEL=ggml-….bin LUMEN_ASR_DIR=dossier de Qwen3-ASR (ou LUMEN_PARAKEET_DIR=dossier
+    /// de Parakeet) LUMEN_TEST_AUDIO=son.mp3 LUMEN_TEST_LANG=it [LUMEN_AIRY_OUT=texte.txt]
+    /// cargo test --release --lib transcript_live -- --ignored --nocapture
     /// (copier d'abord binaries/lumen-whisper-aarch64-apple-darwin en target/release/deps/lumen-whisper)
     #[tokio::test(flavor = "multi_thread")]
     #[ignore]
     async fn transcript_live() {
         let (Ok(whisper), Ok(audio)) = (std::env::var("LUMEN_ASR_MODEL"), std::env::var("LUMEN_TEST_AUDIO")) else { return };
         let lang = std::env::var("LUMEN_TEST_LANG").unwrap_or_else(|_| "it".into());
-        let fine = std::env::var("LUMEN_ASR_DIR").ok().map(|d| {
-            let files: Vec<PathBuf> = std::fs::read_dir(d).unwrap().filter_map(|e| e.ok()).map(|e| e.path()).collect();
-            let pick = |mm: bool| files.iter().find(|p| {
-                let n = p.file_name().unwrap().to_string_lossy();
-                n.ends_with(".gguf") && n.starts_with("mmproj") == mm
-            }).unwrap().clone();
-            (pick(false), pick(true))
-        });
+        let fine = if let Ok(model) = std::env::var("LUMEN_PARAKEET_DIR") {
+            // le moteur dans un dossier jetable
+            let data = std::env::temp_dir().join("lumen-parakeet-live");
+            std::fs::create_dir_all(&data).unwrap();
+            crate::sherpa::ensure(&data, crate::sherpa::Tool::Asr, Default::default(), |_, _| {}).await.unwrap();
+            Some(Writer::Parakeet { data_dir: data, model: PathBuf::from(model) })
+        } else {
+            std::env::var("LUMEN_ASR_DIR").ok().map(|d| {
+                let files: Vec<PathBuf> = std::fs::read_dir(d).unwrap().filter_map(|e| e.ok()).map(|e| e.path()).collect();
+                let pick = |mm: bool| files.iter().find(|p| {
+                    let n = p.file_name().unwrap().to_string_lossy();
+                    n.ends_with(".gguf") && n.starts_with("mmproj") == mm
+                }).unwrap().clone();
+                Writer::Qwen { model: pick(false), mmproj: pick(true) }
+            })
+        };
         let engine = crate::ai::Engine::new();
         let t = std::time::Instant::now();
         let mut stages = Vec::new();

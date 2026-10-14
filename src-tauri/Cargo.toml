@@ -4,7 +4,7 @@ resolver = "2"
 
 [package]
 name = "lumen"
-version = "1.1.0"
+version = "1.2.0"
 description = "Lumen : apprendre les langues en lisant et en écoutant"
 authors = ["Ulysse Rives"]
 license = "GPL-3.0-or-later"
@@ -23,8 +23,6 @@ tauri-build = { version = "2.7", features = [] }
 tauri = { version = "2.12", features = ["protocol-asset", "macos-private-api"] }
 tauri-plugin-dialog = "2.8"
 tauri-plugin-opener = "2.7"
-tauri-plugin-updater = "2.13"
-tauri-plugin-process = "2.4"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 rusqlite = { version = "0.40", features = ["bundled", "backup"] }
@@ -40,6 +38,8 @@ anyhow = "1"
 base64 = "0.22"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 parking_lot = "0.12"
+# hasard du système (connexion à ChatGPT : PKCE, state, nonce) ; déjà compilé pour rustls
+getrandom = "0.3"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 llama-cpp-2 = { version = "0.1.158", default-features = false, features = ["metal", "mtmd"] }
@@ -55,8 +55,22 @@ objc2-core-media = { version = "0.3", default-features = false, features = ["std
 objc2-audio-toolbox = { version = "0.3", default-features = false, features = ["std", "AudioCodec", "AudioConverter", "AudioFile", "ExtendedAudioFile", "objc2-core-audio-types", "objc2-core-foundation"] }
 objc2-av-foundation = { version = "0.3", default-features = false, features = ["std", "block2", "AVAsset", "AVAssetReader", "AVAssetReaderOutput", "AVAssetTrack", "AVAssetWriter", "AVAssetWriterInput", "AVMediaFormat", "AVVideoSettings", "objc2-core-media", "objc2-core-foundation"] }
 
-[target.'cfg(not(any(target_os = "macos", windows)))'.dependencies]
+[target.'cfg(not(any(target_os = "macos", target_os = "ios", windows)))'.dependencies]
 llama-cpp-2 = { version = "0.1.158", default-features = false, features = ["mtmd"] }
+
+# mises à jour automatiques et relance : Mac et Windows seulement (sur iPhone et
+# iPad, c'est l'App Store ou TestFlight qui met l'app à jour)
+[target.'cfg(not(any(target_os = "ios", target_os = "android")))'.dependencies]
+tauri-plugin-updater = "2.13"
+tauri-plugin-process = "2.4"
+
+# iPhone et iPad : l'IA sur la puce graphique (Metal), comme sur Mac ; ce que fait
+# la version Windows sans les outils de macOS (archives .tar.bz2, couvertures)
+[target.'cfg(target_os = "ios")'.dependencies]
+llama-cpp-2 = { version = "0.1.158", default-features = false, features = ["metal", "mtmd"] }
+tar = "0.4"
+bzip2 = "0.6"
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp", "gif"] }
 
 # Windows : ce que macOS fait avec ses propres outils (afconvert, sips, tar, ioreg)
 [target.'cfg(windows)'.dependencies]

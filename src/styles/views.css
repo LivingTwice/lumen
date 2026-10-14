@@ -1421,13 +1421,56 @@
   border-radius: inherit;
   background: linear-gradient(90deg, var(--light-strong), var(--light));
 }
-.pl-remove {
+.pl-row-more {
+  width: 30px;
+  height: 30px;
+  background: transparent;
+  color: var(--muted);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
   opacity: 0;
   transition: opacity 0.2s ease, background-color 0.18s ease, color 0.18s ease;
 }
-.pl-row:hover .pl-remove,
-.pl-remove:focus-visible {
+.pl-row-more:hover {
+  background: var(--chip-hover);
+  color: var(--text);
+}
+.pl-row:hover .pl-row-more,
+.pl-row.menu-open .pl-row-more,
+.pl-row-more:focus-visible {
   opacity: 1;
+}
+/* menu ouvert : la ligne passe devant les suivantes, que son menu recouvre */
+.pl-row.menu-open {
+  z-index: 6;
+  background: var(--chip);
+}
+/* sélection de plusieurs leçons : la coche à la place du numéro, un halo autour de la ligne */
+.pl-listbar {
+  display: flex;
+  justify-content: flex-end;
+  margin: -18px 0 8px;
+}
+.pl-list.selecting .pl-grip {
+  cursor: default;
+}
+.pl-row.picked,
+.pl-row.picked:hover {
+  background: var(--light-veil);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--light) 60%, transparent), 0 0 18px var(--light-veil);
+}
+/* en boucle : le bouton s'allume */
+.btn.pl-loop.on {
+  color: color-mix(in srgb, var(--light-strong) 70%, var(--text));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--light) 55%, transparent), 0 0 18px var(--light-veil);
+}
+.btn.pl-loop.on .icon {
+  color: var(--light-strong);
+}
+.pl-looping {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
 }
 
 /* ---------- choisir des leçons, choisir une playlist ---------- */
@@ -2231,6 +2274,12 @@
 }
 
 .goal {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
+.goal-side {
   display: flex;
   flex-direction: column;
   align-items: center;

@@ -5,7 +5,7 @@ import { Duration, Orb, Sheet } from "../../components/ui";
 import { api, errorText, isNoModel } from "../../lib/api";
 import { count, t } from "../../lib/i18n";
 import { LEVELS, langInfo } from "../../lib/langs";
-import { isBook } from "../../lib/playlists";
+import { isBook, nextIn } from "../../lib/playlists";
 import { pronounce } from "../../lib/pronounce";
 import { studyTime, useStudyClock } from "../../lib/progress";
 import { formatNumber, useApp } from "../../lib/store";
@@ -21,7 +21,7 @@ import { confirmAsk } from "../../lib/dialogs";
 import { useLessonMenu, useMenu } from "../../lib/menu";
 import { AddToPlaylist } from "../../components/AddToPlaylist";
 import { DisplayMenu } from "./Display";
-import { PlaylistStrip, UpNext, usePlaylist } from "./PlaylistBar";
+import { PlaylistStrip, UpNext, toggleLoop, usePlaylist } from "./PlaylistBar";
 import { AsideTabs, ReaderChat, type AsideTab } from "./ReaderChat";
 import { VideoStage } from "./VideoStage";
 import { WordFloat } from "./WordFloat";
@@ -197,6 +197,8 @@ export function Reader() {
         setData(d);
         setTerms(d.terms);
         setPage(pg);
+        // la lecture en cours de sa langue
+        useApp.getState().settleLesson(d.lesson.lang);
       })
       .catch(() => {
         if (!alive) return;
@@ -291,10 +293,16 @@ export function Reader() {
     // écoutée jusqu'au bout : la dernière page est lue
     if (pageNow.current === pages.length - 1) logRead(creditPage(pageNow.current, false));
     if (!pl || !lesson) return;
-    const nextId = pl.lessons[pl.lessons.indexOf(lesson.id) + 1];
+    const nextId = nextIn(pl, lesson.id);
     if (!nextId) {
       toast(t(`Fin de la playlist « ${pl.name} »`, `End of the playlist “${pl.name}”`), "light");
       void api().playlistUpdate(pl.id, { current: 0 });
+      return;
+    }
+    // en boucle, une playlist d'une seule leçon la reprend aussitôt (réécouter, c'est relire)
+    if (nextId === lesson.id) {
+      readToks.current = new Uint8Array(readToks.current.length);
+      playerRef.current?.restart();
       return;
     }
     setCinema(false);
@@ -742,8 +750,11 @@ export function Reader() {
 
   const findNext = async () => {
     if (!lesson) return null;
-    // dans une playlist, la suivante est la sienne ; sinon, celle de la collection
-    if (pl) return pl.lessons[pl.lessons.indexOf(lesson.id) + 1] ?? null;
+    // dans une playlist, la suivante est la sienne (la première, en boucle) ; sinon, celle de la collection
+    if (pl) {
+      const n = nextIn(pl, lesson.id);
+      return n && n !== lesson.id ? n : null;
+    }
     const all = await api().lessonsList(lesson.lang);
     const same = all.filter((l) => l.collection && l.collection === lesson.collection).sort((a, b) => a.created_at - b.created_at || a.id - b.id);
     const idx = same.findIndex((l) => l.id === lesson.id);
@@ -966,7 +977,7 @@ export function Reader() {
     bump();
     go("library");
   };
-  useLessonMenu(lesson ? { media: !!lesson.media_path, video: !!lesson.video_path, float: floating } : null, {
+  useLessonMenu(lesson ? { media: !!lesson.media_path, video: !!lesson.video_path, float: floating, loop: pl && !isBook(pl) ? pl.looping : null } : null, {
     toggle: () => playerRef.current?.toggle(),
     skip: (secs) => playerRef.current?.skip(secs),
     prev: () => goPage(page - 1),
@@ -987,6 +998,7 @@ export function Reader() {
     cover: () => void changeCover(),
     remove: () => void removeLesson(),
     panel: () => togglePanel(),
+    loop: () => pl && void toggleLoop(pl),
   });
 
   // le chat cadre l'extrait des longues leçons sur la page lue
@@ -1360,7 +1372,7 @@ export function Reader() {
         <div className="reader-top drag" data-tauri-drag-region>
           {!cinema && (
             <button
-              className="icon-btn no-drag"
+              className="icon-btn no-drag reader-side-toggle"
               onClick={() => setSetting("reader_sidebar", sideHidden ? "1" : "0")}
               aria-label={sideHidden ? t("Afficher la barre latérale", "Show the sidebar") : t("Masquer la barre latérale", "Hide the sidebar")}
               title={sideHidden ? t("Afficher la barre latérale", "Show the sidebar") : t("Masquer la barre latérale pour lire plus au large", "Hide the sidebar to read with more room")}

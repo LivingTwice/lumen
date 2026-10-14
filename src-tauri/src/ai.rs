@@ -206,6 +206,7 @@ pub enum Piece<'a> {
     Answer(&'a str),
 }
 
+#[derive(Debug)]
 pub struct Output {
     pub thought: String,
     pub answer: String,

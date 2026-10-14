@@ -2,6 +2,7 @@ import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Avatar } from "../components/Avatar";
 import { Icon, type IconName } from "../components/Icon";
+import { useCompact } from "../components/MobileNav";
 import { sampleFor, splitWords } from "../components/Guide";
 import { Orb, Segmented, Switch } from "../components/ui";
 import { api, isTauri } from "../lib/api";
@@ -30,6 +31,7 @@ import { useOnline } from "../lib/online";
 import { PodcastSection } from "./PodcastSection";
 import { ProfileSection } from "./ProfileSection";
 import { useUser } from "../lib/user";
+import { shortName, writerFor } from "../lib/writers";
 
 /* Réglages : un menu de catégories à gauche, une page par catégorie à droite.
    Chaque page ne montre que son domaine ; la recherche du menu retrouve un réglage. */
@@ -264,6 +266,9 @@ export function Settings() {
   const tab = useApp((s) => s.settingsTab);
   const online = useApp((s) => s.settings.online_on === "1");
   const openSettings = useApp((s) => s.openSettings);
+  // iPhone : la liste des catégories, puis la page choisie (« ‹ Réglages » y ramène)
+  const compact = useCompact();
+  const paneOpen = useApp((s) => s.settingsPane);
   const still = !!useReducedMotion();
   const [query, setQuery] = useState("");
   const mainRef = useRef<HTMLDivElement>(null);
@@ -275,15 +280,17 @@ export function Settings() {
   const found = query.trim() ? tabs.filter((x) => matches(x, query)) : tabs;
 
   const pick = (id: SettingsTab) => {
-    if (id !== tab) openSettings(id);
+    if (id !== tab || (compact && !paneOpen)) openSettings(id);
   };
 
   // la recherche ouvre d'elle-même la première page trouvée
   const first = found[0]?.id;
   const shown = found.some((x) => x.id === tab);
   useEffect(() => {
+    // sur iPhone, la liste trouvée reste sous les yeux : on touche la page voulue
+    if (compact) return;
     if (query.trim() && first && !shown) openSettings(first);
-  }, [query, first, shown, openSettings]);
+  }, [query, first, shown, openSettings, compact]);
 
   // ↑ ↓ dans le menu : page précédente ou suivante (parmi celles trouvées)
   const onNavKey = (e: React.KeyboardEvent) => {
@@ -300,7 +307,7 @@ export function Settings() {
   return (
     <>
       <div className="titlebar drag" data-tauri-drag-region />
-      <div className="settings-shell">
+      <div className={`settings-shell ${compact ? (paneOpen ? "m-pane" : "m-list") : ""}`}>
         <nav className="set-nav" ref={navRef} aria-label={t("Catégories des réglages", "Settings categories")} onKeyDown={onNavKey}>
           <h1 className="set-nav-title">{t("Réglages", "Settings")}</h1>
           <label className="set-search">
@@ -383,6 +390,11 @@ export function Settings() {
               exit={still ? { opacity: 0 } : { opacity: 0, y: -6, filter: "blur(4px)" }}
               transition={{ duration: 0.26, ease: EASE }}
             >
+              {compact && (
+                <button className="set-back" onClick={() => useApp.setState({ settingsPane: false })}>
+                  <Icon name="back" size={18} /> {t("Réglages", "Settings")}
+                </button>
+              )}
               <header className="set-pane-head">
                 <motion.span
                   className="set-pane-icon"
@@ -760,7 +772,7 @@ function ReadingPane() {
               ]}
             />
           </div>
-          <div className="set-row">
+          <div className="set-row panel-choice">
             <div className="grow">
               <strong>{t("Panneau du mot", "Word panel")}</strong>
               <span>
@@ -1081,6 +1093,9 @@ function AiPane() {
   const setSetting = useApp((s) => s.setSetting);
   const models = useApp((s) => s.models);
   const download = useApp((s) => s.download);
+  const lang = settings.lang;
+  // Qwen3-ASR ou Parakeet : celui qui écrit le texte dans la langue étudiée
+  const writer = writerFor(models, lang);
 
   const pickProfile = (id: string) => {
     const p = PROFILES.find((x) => x.id === id)!;
@@ -1148,16 +1163,25 @@ function AiPane() {
       </Section>
       <Section
         title={t("Texte des transcriptions", "Transcript text")}
-        note={t(
-          "Facultatif, conseillé : Qwen3-ASR écrit le texte, plus juste et sans phrase sautée, et Whisper repère chaque mot dans le temps pour la lanterne. Il couvre 23 langues ; l'estonien, le letton, le lituanien, le slovaque, le slovène, le croate, le bulgare et l'ukrainien restent transcrits par Whisper seul.",
-          "Optional, recommended: Qwen3-ASR writes the text, more accurately and without skipped sentences, and Whisper times each word for the lantern. It covers 23 languages; Estonian, Latvian, Lithuanian, Slovak, Slovenian, Croatian, Bulgarian and Ukrainian are still transcribed by Whisper alone.",
-        )}
+        note={
+          t(
+            "Facultatif, conseillé : un second modèle écrit le texte, plus juste et sans phrase sautée, et Whisper repère chaque mot dans le temps pour la lanterne. Qwen3-ASR sert dans 15 langues, dont le japonais, le coréen et l'arabe ; Parakeet, plus léger et plus rapide, dans 18 langues européennes, dont l'ukrainien, le croate et le lituanien. Chacun ne sert que là où il a été mesuré au moins aussi juste que Whisper seul ; avec les deux, Lumen prend le meilleur.",
+            "Optional, recommended: a second model writes the text, more accurately and without skipped sentences, and Whisper times each word for the lantern. Qwen3-ASR works in 15 languages, including Japanese, Korean and Arabic; Parakeet, lighter and faster, in 18 European languages, including Ukrainian, Croatian and Lithuanian. Each one is only used where it was measured at least as accurate as Whisper alone; with both, Lumen picks the better one.",
+          ) +
+          " " +
+          (writer
+            ? t(`${capital(inLang(lang))}, ${shortName(writer)} écrit le texte.`, `${capital(inLang(lang))}, ${shortName(writer)} writes the text.`)
+            : t(`${capital(inLang(lang))}, Whisper écrit seul le texte.`, `${capital(inLang(lang))}, Whisper writes the text alone.`))
+        }
       >
         <div className="set-card">{lines("asrtext")}</div>
       </Section>
     </>
   );
 }
+
+/** « en italien » → « En italien ». */
+const capital = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 
 /** Mémoire d'une carte graphique, comptée comme ses fabricants (8 Go, 12 Go). */
 function gpuMemory(bytes: number): string {
@@ -1425,8 +1449,8 @@ function AboutPane() {
         </div>
         <p className="set-credits">
           {t(
-            "Dictionnaires : Wiktionnaire via kaikki.org ; JMdict et KANJIDIC2, selon la licence de l'Electronic Dictionary Research and Development Group ; corpus Universal Dependencies (tous CC BY-SA 4.0). Traduction : Qwen3.5 (Apache 2.0) par llama.cpp (MIT). Transcription : Qwen3-ASR (Apache 2.0) par llama.cpp et Whisper (MIT) par whisper.cpp. Voix : Supertonic 3 par sherpa-onnx. Polices : Literata, Newsreader, Geist (OFL).",
-            "Dictionaries: Wiktionary via kaikki.org; JMdict and KANJIDIC2, used under the Electronic Dictionary Research and Development Group licence; Universal Dependencies treebanks (all CC BY-SA 4.0). Translation: Qwen3.5 (Apache 2.0) with llama.cpp (MIT). Transcription: Qwen3-ASR (Apache 2.0) with llama.cpp, and Whisper (MIT) with whisper.cpp. Voice: Supertonic 3 with sherpa-onnx. Fonts: Literata, Newsreader, Geist (OFL).",
+            "Dictionnaires : Wiktionnaire via kaikki.org ; JMdict et KANJIDIC2, selon la licence de l'Electronic Dictionary Research and Development Group ; corpus Universal Dependencies (tous CC BY-SA 4.0). Traduction : Qwen3.5 (Apache 2.0) par llama.cpp (MIT). Transcription : Qwen3-ASR (Apache 2.0) par llama.cpp, Parakeet TDT 0.6B v3 de NVIDIA (CC BY 4.0, poids compressés par Lumen) par sherpa-onnx, et Whisper (MIT) par whisper.cpp. Voix : Supertonic 3 par sherpa-onnx (Apache 2.0). Polices : Literata, Newsreader, Geist (OFL).",
+            "Dictionaries: Wiktionary via kaikki.org; JMdict and KANJIDIC2, used under the Electronic Dictionary Research and Development Group licence; Universal Dependencies treebanks (all CC BY-SA 4.0). Translation: Qwen3.5 (Apache 2.0) with llama.cpp (MIT). Transcription: Qwen3-ASR (Apache 2.0) with llama.cpp, NVIDIA's Parakeet TDT 0.6B v3 (CC BY 4.0, weights compressed by Lumen) with sherpa-onnx, and Whisper (MIT) with whisper.cpp. Voice: Supertonic 3 with sherpa-onnx (Apache 2.0). Fonts: Literata, Newsreader, Geist (OFL).",
           )}
         </p>
       </Section>

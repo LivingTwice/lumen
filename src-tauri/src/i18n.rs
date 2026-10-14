@@ -24,6 +24,18 @@ pub fn native() -> &'static str {
     }
 }
 
+/// L'appareil où tourne Lumen, à glisser dans une phrase : « l'IA de {ce Mac} »,
+/// « {this Mac}'s AI » (« ce PC » sous Windows, « cet appareil » sur iPhone et iPad).
+pub fn this_device() -> &'static str {
+    if cfg!(windows) {
+        t("ce PC", "this PC")
+    } else if cfg!(target_os = "ios") {
+        t("cet appareil", "this device")
+    } else {
+        t("ce Mac", "this Mac")
+    }
+}
+
 /// Texte fixe dans la langue de l'interface : `t("Le texte est vide.", "The text is empty.")`.
 pub fn t(fr: &'static str, en: &'static str) -> &'static str {
     if self::en() {

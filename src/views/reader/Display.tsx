@@ -250,7 +250,8 @@ export function DisplayMenu({ open, onClose, lang }: { open: boolean; onClose():
                 ]}
               />
             </div>
-            <div className="look-row">
+            {/* sur iPhone, le mot s'ouvre toujours en carte : pas de choix (mobile.css) */}
+            <div className="look-row panel-choice">
               <span title={t("À droite du texte, ou flottant au-dessus du mot touché. « Auto » le fait flotter quand la fenêtre est étroite.", "On the right of the text, or floating above the word you tap. “Auto” floats it when the window is narrow.")}>
                 {t("Panneau", "Panel")}
               </span>

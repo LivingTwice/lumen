@@ -128,6 +128,8 @@ interface AppStore {
   guide: number | null;
   /** page ouverte dans les Réglages */
   settingsTab: SettingsTab;
+  /** iPhone : une page des Réglages est ouverte (sinon, la liste des catégories) */
+  settingsPane: boolean;
   /** visite guidée en cours, à cette étape (null : pas de visite) */
   tour: number | null;
   /** fenêtre des nouveautés : celles de la mise à jour, ou tout l'historique (null : fermée) */
@@ -155,6 +157,14 @@ interface AppStore {
   openLesson(id: number, opts?: { playlist?: number; autoplay?: boolean }): void;
   /** oublie la leçon en cours si c'est celle-ci (supprimée) */
   forgetLesson(id: number): void;
+  /**
+   * La leçon ouverte est chargée : elle devient la lecture en cours de sa langue
+   * (réglages `last_lesson_<langue>`, `last_playlist_<langue>`). Une leçon d'une
+   * autre langue étudiée (notification d'un import) fait passer Lumen dans sa langue.
+   */
+  settleLesson(lang: LangCode): void;
+  /** reprend la lecture en cours de la langue étudiée (au démarrage, au changement de langue) */
+  recallLesson(): void;
   openImport(files?: string[] | null, tab?: ImportTab): void;
   /** importe un élément de Découvrir : vidéo, épisode ou article */
   openImportItem(item: DiscoverItem): void;
@@ -198,6 +208,7 @@ export const useApp = create<AppStore>((set, get) => ({
   replay: false,
   guide: null,
   settingsTab: "general",
+  settingsPane: false,
   tour: null,
   news: null,
 
@@ -215,7 +226,7 @@ export const useApp = create<AppStore>((set, get) => ({
   },
 
   openSettings(tab) {
-    set(tab ? { view: "settings", settingsTab: tab } : { view: "settings" });
+    set(tab ? { view: "settings", settingsTab: tab, settingsPane: true } : { view: "settings", settingsPane: false });
   },
 
   async startTour() {
@@ -260,14 +271,13 @@ export const useApp = create<AppStore>((set, get) => ({
 
   async init() {
     const [info, settings] = await Promise.all([api().appInfo(), api().settingsGet()]);
-    // la dernière leçon ouverte reste « en cours » d'un lancement à l'autre
-    const last = Number(settings.last_lesson) || null;
-    const queue = (last && Number(settings.last_playlist)) || null;
     // langue de l'interface : celle du Mac au premier lancement ; le français pour
     // ceux qui utilisaient Lumen avant que l'anglais n'existe
     const ui = (settings.ui_lang || (settings.onboarded ? "fr" : systemUiLang())) as UiLang;
     setUiLang(ui);
-    set({ info, settings: { ...DEFAULTS, ...settings, ui_lang: ui }, lessonId: last, queue, ready: true });
+    set({ info, settings: { ...DEFAULTS, ...settings, ui_lang: ui }, ready: true });
+    // la lecture en cours de la langue étudiée reste « en cours » d'un lancement à l'autre
+    get().recallLesson();
     if (settings.ui_lang !== ui) void get().setSetting("ui_lang", ui);
     await get().refreshModels();
     await get().refreshKnown();
@@ -282,7 +292,10 @@ export const useApp = create<AppStore>((set, get) => ({
   async setSetting(key, value) {
     // la langue s'applique avant le nouveau rendu (et avant la relecture des modèles)
     if (key === "ui_lang") setUiLang(value as UiLang);
+    const before = key === "lang" ? get().lang() : null;
     set((s) => ({ settings: { ...s.settings, [key]: value } }));
+    // chaque langue a sa lecture en cours : celle de la nouvelle langue prend la place
+    if (before !== null && get().lang() !== before) get().recallLesson();
     // écritures à la file : la dernière valeur choisie est toujours la dernière enregistrée
     const write = writes.then(() => api().settingsSet(key, value));
     writes = write.catch(() => {});
@@ -320,9 +333,52 @@ export const useApp = create<AppStore>((set, get) => ({
   },
 
   forgetLesson(id) {
+    // elle n'est plus la lecture en cours de sa langue
+    for (const [k, v] of Object.entries(get().settings)) if (k.startsWith("last_lesson_") && v === String(id)) void get().setSetting(k, "");
     if (get().lessonId !== id) return;
     set({ lessonId: null, queue: null });
     void get().setSetting("last_lesson", "");
+  },
+
+  settleLesson(lang) {
+    const { lessonId: id, queue, settings: s } = get();
+    if (!id) return;
+    const write = (k: string, v: string) => {
+      if ((s[k] ?? "") !== v) void get().setSetting(k, v);
+    };
+    const pl = queue ? String(queue) : "";
+    write(`last_lesson_${lang}`, String(id));
+    write(`last_playlist_${lang}`, pl);
+    write("last_playlist", pl);
+    // écrit d'abord : en changeant de langue, recallLesson retrouve cette même leçon
+    if (lang !== get().lang() && get().langs().includes(lang)) {
+      void get()
+        .setSetting("lang", lang)
+        .then(() => get().refreshKnown());
+    }
+  },
+
+  recallLesson() {
+    const lang = get().lang();
+    const s = get().settings;
+    const key = `last_lesson_${lang}`;
+    if (key in s) {
+      const id = Number(s[key]) || null;
+      set({ lessonId: id, queue: (id && Number(s[`last_playlist_${lang}`])) || null });
+      return;
+    }
+    // langue où rien n'a été ouvert depuis cette version : sa leçon ouverte le plus récemment
+    set({ lessonId: null, queue: null });
+    void api()
+      .lessonsList(lang)
+      .then((ls) => {
+        const id = ls.find((l) => l.opened_at)?.id;
+        if (!id || get().lang() !== lang || get().lessonId) return;
+        // la playlist suivie ne vaut que pour la dernière leçon ouverte, toutes langues confondues
+        const st = get().settings;
+        set({ lessonId: id, queue: String(id) === st.last_lesson ? Number(st.last_playlist) || null : null });
+      })
+      .catch(() => {});
   },
 
   openImport(files = null, tab) {

@@ -1,6 +1,7 @@
 // Playlists : des leçons d'une langue dans l'ordre choisi, qui s'enchaînent
 // d'elles-mêmes à l'écoute (comme sur LingQ).
 
+import { api, errorText } from "./api";
 import { count, t } from "./i18n";
 import { useApp } from "./store";
 import type { LessonSummary, Playlist } from "./types";
@@ -101,6 +102,37 @@ export function plural(n: number, fr: string, en: string): string {
 /** Leçon par laquelle la playlist reprend (là où elle en était), sinon la première. */
 export function startOf(p: Playlist): number | null {
   return p.current ?? p.lessons[0] ?? null;
+}
+
+/** Leçon qui suit ; en boucle, la première après la dernière (une playlist d'une leçon : elle-même). */
+export function nextIn(p: Playlist, id: number): number | undefined {
+  const i = p.lessons.indexOf(id);
+  if (i < 0) return undefined;
+  return p.lessons[i + 1] ?? (p.looping && !isBook(p) ? p.lessons[0] : undefined);
+}
+
+/**
+ * Marque des leçons lues ou non lues (les mots ne changent pas de statut) ; la
+ * bibliothèque et les playlists se relisent. `said` : la notification, sinon le nombre de leçons.
+ */
+export async function markRead(ids: number[], read: boolean, said?: string): Promise<boolean> {
+  const app = useApp.getState();
+  if (!ids.length) return false;
+  try {
+    await api().lessonsSetCompleted(ids, read);
+  } catch (e) {
+    app.toast(errorText(e), "error");
+    return false;
+  }
+  app.bumpLibrary();
+  app.toast(
+    said ??
+      (read
+        ? count(ids.length, "leçon marquée comme lue", "leçons marquées comme lues", "lesson marked as read", "lessons marked as read")
+        : count(ids.length, "leçon marquée comme non lue", "leçons marquées comme non lues", "lesson marked as unread", "lessons marked as unread")),
+    "light",
+  );
+  return true;
 }
 
 /** Lance la playlist : la leçon s'ouvre et sa lecture démarre ; les suivantes s'enchaînent. */

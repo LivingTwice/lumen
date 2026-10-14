@@ -2,11 +2,11 @@ import { motion } from "motion/react";
 import { useEffect, useRef, useState } from "react";
 import { Cover } from "../../components/Cover";
 import { Icon } from "../../components/Icon";
-import { api } from "../../lib/api";
+import { api, errorText } from "../../lib/api";
 import { useApp } from "../../lib/store";
 import type { Lesson, LessonSummary, Playlist } from "../../lib/types";
 import { t } from "../../lib/i18n";
-import { isBook } from "../../lib/playlists";
+import { isBook, nextIn } from "../../lib/playlists";
 
 /**
  * Playlist suivie par la leçon ouverte, relue à chaque changement. Une
@@ -35,13 +35,13 @@ export function usePlaylist(lesson: Lesson | undefined): Playlist | null {
         if (!p) {
           if (queue) {
             useApp.setState({ queue: null });
-            void useApp.getState().setSetting("last_playlist", "");
+            useApp.getState().settleLesson(lang);
           }
           return;
         }
         if (p.id !== queue) {
           useApp.setState({ queue: p.id });
-          void useApp.getState().setSetting("last_playlist", String(p.id));
+          useApp.getState().settleLesson(lang);
         }
         if (marked.current !== id) {
           // la playlist reprendra ici
@@ -57,13 +57,27 @@ export function usePlaylist(lesson: Lesson | undefined): Playlist | null {
   return pl;
 }
 
+/** Met la playlist en boucle, ou l'en sort ; le lecteur la relit. */
+export async function toggleLoop(pl: Playlist) {
+  const app = useApp.getState();
+  try {
+    await api().playlistUpdate(pl.id, { looping: !pl.looping });
+    app.bumpLibrary();
+    app.toast(pl.looping ? t("La playlist ne se lit plus en boucle", "The playlist no longer loops") : t("La playlist se lit en boucle", "The playlist now loops"), "light");
+  } catch (e) {
+    app.toast(errorText(e), "error");
+  }
+}
+
 /** Au centre de la barre du haut : la playlist, la place de la leçon, précédente et suivante. */
 export function PlaylistStrip({ pl, lessonId, playing }: { pl: Playlist; lessonId: number; playing(): boolean }) {
   const openLesson = useApp((s) => s.openLesson);
   const openPlaylist = useApp((s) => s.openPlaylist);
   const i = pl.lessons.indexOf(lessonId);
   const prev = pl.lessons[i - 1];
-  const next = pl.lessons[i + 1];
+  // en boucle, après la dernière vient la première
+  const after = nextIn(pl, lessonId);
+  const next = after !== lessonId ? after : undefined;
   // on passe d'une leçon à l'autre sans couper l'écoute en cours
   const go = (id: number) => openLesson(id, { playlist: pl.id, autoplay: playing() });
   const book = isBook(pl);
@@ -94,6 +108,17 @@ export function PlaylistStrip({ pl, lessonId, playing }: { pl: Playlist; lessonI
       >
         <Icon name="right" size={16} />
       </button>
+      {!book && (
+        <button
+          className={`icon-btn pl-strip-loop ${pl.looping ? "on" : ""}`}
+          onClick={() => void toggleLoop(pl)}
+          aria-pressed={pl.looping}
+          aria-label={t("Lire la playlist en boucle", "Loop the playlist")}
+          title={pl.looping ? t("En boucle : après la dernière leçon, la première", "Looping: after the last lesson, the first one") : t("Lire la playlist en boucle", "Loop the playlist")}
+        >
+          <Icon name="repeat" size={15} />
+        </button>
+      )}
     </motion.div>
   );
 }

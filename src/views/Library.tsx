@@ -8,7 +8,7 @@ import { api, errorText } from "../lib/api";
 import { confirmAsk } from "../lib/dialogs";
 import { count, isEn, t } from "../lib/i18n";
 import { STARTERS, inLang, starterCollection } from "../lib/langs";
-import { bookView, isBook, pagesOf, progressOf, readBook, type BookView } from "../lib/playlists";
+import { bookView, isBook, markRead, pagesOf, progressOf, readBook, type BookView } from "../lib/playlists";
 import { formatDuration, formatNumber, useApp } from "../lib/store";
 import { isWindows } from "../lib/platform";
 import type { LessonSummary, Playlist } from "../lib/types";
@@ -16,7 +16,9 @@ import { useUserName } from "../lib/user";
 import { LibraryList } from "./library/LibraryList";
 import {
   EntryMenu,
+  completedOf,
   firstDesc,
+  idsOf,
   lessonsIn,
   parseSort,
   sortEntries,
@@ -442,7 +444,18 @@ export function Library() {
     return true;
   };
 
-  // ---------- sélection de plusieurs éléments (pour les supprimer d'un coup) ----------
+  /** Leçons et livres lus, ou de nouveau à lire ; un livre se reprend alors à son premier chapitre. */
+  const markEntries = async (list: Entry[], read: boolean) => {
+    await Promise.all(list.filter((e) => e.b).map((e) => api().playlistUpdate(e.b!.p.id, { current: 0 }).catch(() => {})));
+    const b = list.length === 1 ? list[0].b : undefined;
+    return markRead(
+      list.flatMap(idsOf),
+      read,
+      b && (read ? t(`« ${b.p.name} » est marqué comme lu`, `“${b.p.name}” marked as read`) : t(`« ${b.p.name} » est marqué comme non lu`, `“${b.p.name}” marked as unread`)),
+    );
+  };
+
+  // ---------- sélection de plusieurs éléments (pour les supprimer ou les marquer lus d'un coup) ----------
   const [selecting, setSelecting] = useState(false);
   const [picked, setPicked] = useState<Set<string>>(() => new Set());
   // dernier élément touché : Maj + clic coche tout l'intervalle jusqu'à lui
@@ -485,7 +498,9 @@ export function Library() {
       return kept.length === now.size ? now : new Set(kept);
     });
   }, [shown]);
-  const pickedLessons = shown.filter((e) => picked.has(e.key)).reduce((n, e) => n + lessonsIn(e), 0);
+  const pickedEntries = shown.filter((e) => picked.has(e.key));
+  const pickedLessons = pickedEntries.reduce((n, e) => n + lessonsIn(e), 0);
+  const pickedRead = pickedEntries.length > 0 && pickedEntries.every(completedOf);
   const removePicked = async () => {
     if (await removeEntries(shown.filter((e) => picked.has(e.key)))) stopSelect();
   };
@@ -542,6 +557,7 @@ export function Library() {
     onSelect: () => startSelect(e.key),
     onDelete: () => void removeEntries([e]),
     onRename: () => rename(e),
+    onMark: () => void markEntries([e], !completedOf(e)),
     onPlaylist: e.l ? () => setAdding(e.l) : undefined,
     onRead: e.b ? () => readBook(e.b) : undefined,
     onChapters: e.b ? () => openPlaylist(e.b.p.id) : undefined,
@@ -661,7 +677,7 @@ export function Library() {
                   "Import an article, a book, a podcast or a video, or start with a short story written for you.",
                 )}
               </p>
-              <div style={{ display: "flex", gap: 10, marginTop: 8 }}>
+              <div className="empty-actions" style={{ display: "flex", gap: 10, marginTop: 8 }}>
                 <button className="btn primary lg glow" onClick={addStarter}>
                   {t(`Lire « ${STARTERS[lang].title} »`, `Read “${STARTERS[lang].title}”`)}
                 </button>
@@ -733,6 +749,9 @@ export function Library() {
               </span>
               <button className="btn sm ghost" onClick={pickAll} disabled={!shown.length}>
                 {allPicked ? t("Tout désélectionner", "Deselect all") : t("Tout sélectionner", "Select all")}
+              </button>
+              <button className="btn sm ghost" onClick={() => void markEntries(pickedEntries, !pickedRead)} disabled={!picked.size}>
+                <Icon name={pickedRead ? "unread" : "read"} size={15} /> {pickedRead ? t("Marquer comme non lu", "Mark as unread") : t("Marquer comme lu", "Mark as read")}
               </button>
               <button className="btn sm danger" onClick={() => void removePicked()} disabled={!picked.size}>
                 <Icon name="trash" size={15} /> {t("Supprimer", "Delete")}

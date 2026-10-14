@@ -12,6 +12,7 @@ import { useApp } from "../../lib/store";
 import type { LessonSummary } from "../../lib/types";
 import {
   EntryMenu,
+  completedOf,
   dayText,
   lengthText,
   newOf,
@@ -154,7 +155,7 @@ function Row({
   const { menu, setMenu, onContextMenu } = useEntryMenu();
   const title = e.b ? e.b.p.name : e.l.title;
   const progress = progressOfEntry(e);
-  const completed = e.b ? e.b.completed : e.l.completed;
+  const completed = completedOf(e);
   const opened = e.b ? e.b.started : !!e.l.opened_at;
   const k = e.l ? (KIND[e.l.kind] ?? KIND.text) : null;
   return (

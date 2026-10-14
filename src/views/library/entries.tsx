@@ -48,6 +48,9 @@ export const progressOfEntry = (e: Entry) => (e.b ? e.b.progress : progressOf(e.
 export const newOf = (e: Entry) => (e.b ? e.b.newPct : e.l.new_pct);
 export const wordsOf = (e: Entry) => (e.b ? e.b.words : e.l.word_count);
 export const lessonsIn = (e: Entry) => (e.b ? e.b.ls.length : 1);
+export const completedOf = (e: Entry) => (e.b ? e.b.completed : e.l.completed);
+/** Leçons d'un élément : la leçon, ou tous les chapitres du livre. */
+export const idsOf = (e: Entry) => (e.b ? e.b.ls.map((l) => l.id) : [e.l.id]);
 
 /** Longueur affichée : la durée du son, sinon le nombre de mots. */
 export function lengthText(e: Entry): string {
@@ -100,6 +103,8 @@ export interface EntryActions {
   onSelect(): void;
   onDelete(): void;
   onRename(): void;
+  /** lue (tout le livre), ou de nouveau à lire */
+  onMark(): void;
   /** leçon : l'ajouter à une playlist */
   onPlaylist?(): void;
   /** livre : reprendre la lecture, voir ses chapitres */
@@ -146,6 +151,9 @@ export function EntryMenu({ e, actions, open, setOpen }: { e: Entry; actions: En
           </button>
         </>
       )}
+      <button className="menu-item" onClick={run(actions.onMark)}>
+        <Icon name={completedOf(e) ? "unread" : "read"} size={16} /> {completedOf(e) ? t("Marquer comme non lu", "Mark as unread") : t("Marquer comme lu", "Mark as read")}
+      </button>
       <button className="menu-item" onClick={run(actions.onSelect)}>
         <Icon name="check" size={16} /> {t("Sélectionner plusieurs éléments", "Select several items")}
       </button>

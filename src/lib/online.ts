@@ -2,10 +2,13 @@
 // prend le relais de Qwen3.5 sur ce Mac pour la traduction et le chat
 // (miroir des fournisseurs de `online.rs`). Whisper et la voix restent sur ce Mac.
 
+import { useCallback, useEffect, useState } from "react";
+import { api } from "./api";
 import { t } from "./i18n";
 import { useApp } from "./store";
+import type { ChatGptStatus } from "./types";
 
-export type OnlineId = "deepseek" | "gemini" | "nvidia" | "mistral" | "openai" | "anthropic" | "openrouter" | "custom";
+export type OnlineId = "deepseek" | "gemini" | "nvidia" | "mistral" | "openai" | "chatgpt" | "anthropic" | "openrouter" | "custom";
 
 export interface OnlineProvider {
   id: OnlineId;
@@ -18,7 +21,8 @@ export interface OnlineProvider {
   about: string;
   /** page où l'on crée sa clé ("" : serveur choisi) */
   keyUrl: string;
-  /** réglage qui garde la clé (celle de Gemini sert aussi aux podcasts) */
+  /** réglage qui garde la clé (celle de Gemini sert aussi aux podcasts) ; pour ChatGPT,
+   *  l'adresse du compte connecté (les jetons restent hors des réglages, `chatgpt.rs`) */
   keySetting: string;
 }
 
@@ -77,11 +81,23 @@ export const onlineProviders = (): OnlineProvider[] => [
     mark: "O",
     note: t("Les modèles de ChatGPT", "ChatGPT's models"),
     about: t(
-      "Les modèles de ChatGPT, payés à l'usage sur la plateforme d'OpenAI. C'est un compte à part : l'abonnement ChatGPT n'en fait pas partie.",
-      "ChatGPT's models, paid as you go on the OpenAI platform. It's a separate account: the ChatGPT subscription isn't included.",
+      "Les modèles de ChatGPT, payés à l'usage sur la plateforme d'OpenAI. C'est un compte à part ; pour utiliser votre abonnement ChatGPT, choisissez plutôt la tuile ChatGPT.",
+      "ChatGPT's models, paid as you go on the OpenAI platform. It's a separate account; to use your ChatGPT subscription, pick the ChatGPT tile instead.",
     ),
     keyUrl: "https://platform.openai.com/api-keys",
     keySetting: "online_key_openai",
+  },
+  {
+    id: "chatgpt",
+    name: "ChatGPT",
+    mark: "◎",
+    note: t("Votre abonnement Plus ou Pro", "Your Plus or Pro subscription"),
+    about: t(
+      "Sans clé : connectez votre compte ChatGPT, et Lumen puise dans votre forfait Plus ou Pro (le même que Codex), dans la limite que vous fixez dans ChatGPT. Les comptes gratuits peuvent se connecter, mais leur forfait ne sert pas aux autres apps. Aperçu d'OpenAI, ouvert aux applications open source comme Lumen.",
+      "No key: connect your ChatGPT account, and Lumen draws on your Plus or Pro plan (the same one as Codex), within the limit you set in ChatGPT. Free accounts can sign in, but their plan can't be used by other apps. An OpenAI preview, open to open-source apps like Lumen.",
+    ),
+    keyUrl: "",
+    keySetting: "online_key_chatgpt",
   },
   {
     id: "anthropic",
@@ -120,6 +136,39 @@ export const onlineProviders = (): OnlineProvider[] => [
     keySetting: "online_key_custom",
   },
 ];
+
+/**
+ * Connexion à ChatGPT de cet appareil, relue à l'affichage. `online_key_chatgpt`
+ * (l'adresse du compte) suit la connexion pour le reste de l'interface : jamais un
+ * jeton, seulement de quoi dire « connecté ».
+ */
+export function useChatGpt(): { status: ChatGptStatus | null; refresh(): Promise<ChatGptStatus | null>; set(s: ChatGptStatus): void } {
+  const [status, setStatus] = useState<ChatGptStatus | null>(null);
+  const setSetting = useApp((s) => s.setSetting);
+  const marker = useApp((s) => s.settings.online_key_chatgpt ?? "");
+  const set = useCallback(
+    (s: ChatGptStatus) => {
+      setStatus(s);
+      const want = s.signed_in && s.plan && !s.expired ? s.email || "1" : "";
+      if (want !== marker) void setSetting("online_key_chatgpt", want);
+    },
+    [marker, setSetting],
+  );
+  const refresh = useCallback(async () => {
+    try {
+      const s = await api().chatgptStatus();
+      set(s);
+      return s;
+    } catch {
+      return null;
+    }
+  }, [set]);
+  useEffect(() => {
+    void refresh();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  return { status, refresh, set };
+}
 
 export const onlineProvider = (id: string | undefined): OnlineProvider => onlineProviders().find((p) => p.id === id) ?? onlineProviders()[0];
 

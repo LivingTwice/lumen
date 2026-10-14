@@ -73,7 +73,8 @@ export function WordFloat({ col, page, scroller, a, b, layout, children }: Props
       // au-dessus du mot s'il y a la place d'une carte entière (elle cache alors ce qu'on
       // a déjà lu, pas la suite) ; sinon du côté le plus grand
       const up = above >= FULL_H || above >= below;
-      const width = Math.min(CARD_W, c.width - EDGE * 2);
+      // colonne à peine plus large que la carte (iPhone) : toute la largeur, comme une feuille
+      const width = c.width < CARD_W + 120 ? c.width - EDGE * 2 : CARD_W;
       const left = Math.min(Math.max(x - width / 2, EDGE), c.width - width - EDGE);
       const next: Place = {
         left: Math.round(left),

@@ -333,7 +333,7 @@ function NotebookRoute({ form }: { form: PodcastForm }) {
                     `In Gemini Notebook, add a source on the topic, then Audio Overview › Customize: choose ${theLang(form.lang)} and paste the instructions.`,
                   )}
                 </li>
-                <li>{t("Téléchargez l'aperçu et déposez le fichier dans Lumen : Whisper et Qwen3-ASR le transcrivent en leçon.", "Download the overview and drop the file into Lumen: Whisper and Qwen3-ASR turn it into a lesson.")}</li>
+                <li>{t("Téléchargez l'aperçu et déposez le fichier dans Lumen : Whisper, avec Qwen3-ASR ou Parakeet, le transcrit en leçon.", "Download the overview and drop the file into Lumen: Whisper, with Qwen3-ASR or Parakeet, turns it into a lesson.")}</li>
               </ol>
               <div className="pod-notebook-actions">
                 <button className="btn sm" onClick={() => void copy()}>

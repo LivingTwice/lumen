@@ -1136,6 +1136,13 @@ span.player-voice .icon-btn {
   font-weight: 500;
   color: var(--muted);
 }
+.pl-strip .pl-strip-loop {
+  color: var(--muted);
+}
+.pl-strip .pl-strip-loop.on {
+  color: var(--light-strong);
+  background: var(--light-veil);
+}
 .up-next {
   position: absolute;
   z-index: 15;

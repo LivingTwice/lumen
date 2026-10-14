@@ -429,13 +429,14 @@ export function SearchBar({ lang }: { lang: LangCode }) {
           aria-label={t("Chercher en ligne", "Search online")}
           dir="auto"
           spellCheck={false}
+          enterKeyHint="search"
         />
         {text && (
           <button type="button" className="icon-btn" onClick={() => go("")} aria-label={t("Effacer", "Clear")}>
             <Icon name="close" size={15} />
           </button>
         )}
-        <button type="submit" className="btn primary sm" disabled={!text.trim()}>
+        <button type="submit" className="btn primary sm disc-search-go" disabled={!text.trim()}>
           {link ? t("Ouvrir", "Open") : t("Chercher", "Search")}
         </button>
       </form>

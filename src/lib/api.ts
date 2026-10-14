@@ -1,4 +1,4 @@
-import type { AppInfo, BackupInfo, BackupPlace, BackupRestored, BackupStatus, ChatEvent, CreatedBook, ChatOptions, ChatPatch, ChatReply, ChatSummary, ChatThread, DictResult, DictStatus, DiscoverFeed, DiscoverReport, DownloadEvent, GeminiModels, GoalReached, GpuInfo, ImportEvent, LangCode, LessonLink, LessonSummary, LevelEstimate, LightenProgress, LightenReport, LinkInfo, LinkMedia, LingqEvent, LingqLang, LingqPlan, LingqReport, Lyrics, MediaStream, MediaUsage, ModelRow, NewBook, NewLesson, OnlineCheck, OpenedLesson, Playlist, PlaylistPatch, PodcastRequest, Resynced, SearchPage, SearchPlatform, SongItem, Stats, Term, TermQuery, TextStats, WordAnswer, VoicedLesson } from "./types";
+import type { AppInfo, BackupInfo, BackupPlace, BackupRestored, BackupStatus, ChatEvent, ChatGptStatus, CreatedBook, ChatOptions, ChatPatch, ChatReply, ChatSummary, ChatThread, DictResult, DictStatus, DiscoverFeed, DiscoverReport, DownloadEvent, GeminiModels, GoalReached, GpuInfo, ImportEvent, LangCode, LessonLink, LessonSummary, LevelEstimate, LightenProgress, LightenReport, LinkInfo, LinkMedia, LingqEvent, LingqLang, LingqPlan, LingqReport, Lyrics, MediaStream, MediaUsage, ModelRow, NewBook, NewLesson, OnlineCheck, OpenedLesson, Playlist, PlaylistPatch, PodcastRequest, Resynced, SearchPage, SearchPlatform, SongItem, Stats, Term, TermQuery, TextStats, WordAnswer, VoicedLesson } from "./types";
 
 export const isTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
@@ -35,6 +35,8 @@ export interface Api {
   lessonDelete(id: number): Promise<void>;
   /** supprime plusieurs leçons d'un coup (les mots appris restent) */
   lessonsDelete(ids: number[]): Promise<void>;
+  /** marque des leçons lues ou non lues d'un coup (les mots ne changent pas) */
+  lessonsSetCompleted(ids: number[], completed: boolean): Promise<void>;
   /** Couverture (image déjà réduite) ; `null` la retire. Renvoie le chemin enregistré. */
   /** `also` : autres leçons qui prennent la même image (les chapitres d'un livre) */
   lessonSetCover(id: number, data: Uint8Array | null, ext: string | null, also?: number[]): Promise<string | null>;
@@ -145,6 +147,10 @@ export interface Api {
   geminiCheck(key: string): Promise<GeminiModels>;
   /** vérifie une clé d'IA en ligne (`url` : serveur compatible) ; modèles, modèle retenu, temps de réponse */
   onlineCheck(provider: string, key: string, url?: string, model?: string): Promise<OnlineCheck>;
+  /** Sign in with ChatGPT : état, connexion dans le navigateur (annulable par modelCancel("chatgpt")), déconnexion. */
+  chatgptStatus(): Promise<ChatGptStatus>;
+  chatgptSignIn(): Promise<ChatGptStatus>;
+  chatgptSignOut(): Promise<ChatGptStatus>;
   /** Gemini écrit et dit un podcast sur mesure, qui devient une leçon (étapes « script », « studio ») */
   podcastCreate(lang: LangCode, request: PodcastRequest, onEvent: (e: ImportEvent) => void): Promise<number>;
   /** niveau estimé d'après les mots connus regroupés par lemme */
@@ -173,6 +179,7 @@ async function createTauriApi(): Promise<Api> {
     lessonUpdate: (id, patch) => invoke("lesson_update", { id, patch }),
     lessonDelete: (id) => invoke("lesson_delete", { id }),
     lessonsDelete: (ids) => invoke("lessons_delete", { ids }),
+    lessonsSetCompleted: (ids, completed) => invoke("lessons_set_completed", { ids, completed }),
     lessonSetCover: (id, data, ext, also) => invoke("lesson_set_cover", { id, data: data ? Array.from(data) : null, ext, also: also ?? null }),
     lessonCoverFetch: (id, url, also) => invoke("lesson_cover_fetch", { id, url, also: also ?? null }),
     lessonLinks: (lang) => invoke("lesson_links", { lang }),
@@ -255,6 +262,9 @@ async function createTauriApi(): Promise<Api> {
     importSong: (lang, song, onEvent) => invoke("import_song", { lang, song, onEvent: ch<ImportEvent>(onEvent) }),
     geminiCheck: (key) => invoke("gemini_check", { key }),
     onlineCheck: (provider, key, url, model) => invoke("online_check", { provider, key, url: url ?? null, model: model ?? null }),
+    chatgptStatus: () => invoke("chatgpt_status"),
+    chatgptSignIn: () => invoke("chatgpt_sign_in"),
+    chatgptSignOut: () => invoke("chatgpt_sign_out"),
     podcastCreate: (lang, request, onEvent) => invoke("podcast_create", { lang, request, onEvent: ch<ImportEvent>(onEvent) }),
     levelEstimate: (lang) => invoke("level_estimate", { lang }),
     textStats: (lang, text) => invoke("text_stats", { lang, text }),

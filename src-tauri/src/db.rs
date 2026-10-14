@@ -109,6 +109,8 @@ pub fn open(path: &Path) -> Result<Connection> {
     if add_column(&conn, "playlists", "kind", "TEXT NOT NULL DEFAULT ''")? {
         gather_old_books(&conn)?;
     }
+    // playlist en boucle : après la dernière leçon, l'écoute reprend à la première
+    add_column(&conn, "playlists", "looping", "INTEGER NOT NULL DEFAULT 0")?;
     // chat : conversations (une leçon peut y être jointe) et leurs messages
     conn.execute_batch(
         r#"
@@ -461,6 +463,20 @@ pub fn lesson_update(c: &Connection, id: i64, p: &LessonPatch) -> Result<()> {
     Ok(())
 }
 
+/// Marque des leçons lues (ou non lues) d'un coup : une playlist, une sélection.
+/// Ni les mots ni la page atteinte ne changent : « non lue » rend l'avancement d'avant.
+pub fn lessons_set_completed(c: &mut Connection, ids: &[i64], completed: bool) -> Result<()> {
+    let tx = c.transaction()?;
+    {
+        let mut st = tx.prepare_cached("UPDATE lessons SET completed=?1 WHERE id=?2")?;
+        for &id in ids {
+            st.execute(params![completed as i64, id])?;
+        }
+    }
+    tx.commit()?;
+    Ok(())
+}
+
 pub fn lesson_delete(c: &Connection, id: i64) -> Result<Vec<String>> {
     let files: Option<(Option<String>, Option<String>, Option<String>)> = c
         .query_row("SELECT media_path, video_path, cover_path FROM lessons WHERE id=?1", [id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
@@ -627,6 +643,8 @@ pub struct Playlist {
     pub created_at: i64,
     /// « book » : un livre importé (ses chapitres) ; vide : une playlist faite à la main
     pub kind: String,
+    /// en boucle : après la dernière leçon, l'écoute reprend à la première
+    pub looping: bool,
 }
 
 #[derive(Deserialize, Debug, Default)]
@@ -635,6 +653,7 @@ pub struct PlaylistPatch {
     pub lessons: Option<Vec<i64>>,
     /// 0 : la playlist repart du début
     pub current: Option<i64>,
+    pub looping: Option<bool>,
 }
 
 /// Nom propre, jamais vide, de longueur raisonnable.
@@ -644,10 +663,19 @@ fn playlist_name(name: &str) -> String {
 }
 
 pub fn playlists_list(c: &Connection, lang: &str) -> Result<Vec<Playlist>> {
-    let mut st = c.prepare("SELECT id,lang,name,current_id,created_at,kind FROM playlists WHERE lang=?1 ORDER BY created_at DESC, id DESC")?;
+    let mut st = c.prepare("SELECT id,lang,name,current_id,created_at,kind,looping FROM playlists WHERE lang=?1 ORDER BY created_at DESC, id DESC")?;
     let mut out = st
         .query_map([lang], |r| {
-            Ok(Playlist { id: r.get(0)?, lang: r.get(1)?, name: r.get(2)?, lessons: Vec::new(), current: r.get(3)?, created_at: r.get(4)?, kind: r.get(5)? })
+            Ok(Playlist {
+                id: r.get(0)?,
+                lang: r.get(1)?,
+                name: r.get(2)?,
+                lessons: Vec::new(),
+                current: r.get(3)?,
+                created_at: r.get(4)?,
+                kind: r.get(5)?,
+                looping: r.get::<_, i64>(6)? != 0,
+            })
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     let mut items = c.prepare_cached("SELECT lesson_id FROM playlist_items WHERE playlist_id=?1 ORDER BY position")?;
@@ -696,6 +724,9 @@ pub fn playlist_update(c: &mut Connection, id: i64, p: &PlaylistPatch) -> Result
     }
     if let Some(cur) = p.current {
         tx.execute("UPDATE playlists SET current_id=?1 WHERE id=?2", params![(cur > 0).then_some(cur), id])?;
+    }
+    if let Some(v) = p.looping {
+        tx.execute("UPDATE playlists SET looping=?1 WHERE id=?2", params![v as i64, id])?;
     }
     tx.commit()?;
     Ok(())
@@ -1812,9 +1843,16 @@ mod tests {
         let id = playlist_create(&mut c, "en", "   ", &[b, a, b, other]).unwrap();
         let p = &playlists_list(&c, "en").unwrap()[0];
         assert_eq!((p.name.as_str(), p.lessons.clone(), p.current), ("Nouvelle playlist", vec![b, a], None));
-        playlist_update(&mut c, id, &PlaylistPatch { name: Some("  Le  matin ".into()), lessons: Some(vec![a, d, b]), current: Some(d) }).unwrap();
+        assert!(!p.looping);
+        playlist_update(&mut c, id, &PlaylistPatch { name: Some("  Le  matin ".into()), lessons: Some(vec![a, d, b]), current: Some(d), looping: Some(true) }).unwrap();
         let p = &playlists_list(&c, "en").unwrap()[0];
-        assert_eq!((p.name.as_str(), p.lessons.clone(), p.current), ("Le matin", vec![a, d, b], Some(d)));
+        assert_eq!((p.name.as_str(), p.lessons.clone(), p.current, p.looping), ("Le matin", vec![a, d, b], Some(d), true));
+        // toute la playlist lue, puis de nouveau à lire
+        lessons_set_completed(&mut c, &[a, d, b], true).unwrap();
+        assert!(lessons_list(&c, "en").unwrap().iter().all(|l| l.completed));
+        lessons_set_completed(&mut c, &[a], false).unwrap();
+        let done: Vec<(i64, bool)> = lessons_list(&c, "en").unwrap().iter().map(|l| (l.id, l.completed)).collect();
+        assert!(done.iter().all(|&(id, c)| c == (id != a)));
         // une leçon supprimée quitte la playlist, et n'y est plus « en cours »
         lesson_delete(&c, d).unwrap();
         let p = &playlists_list(&c, "en").unwrap()[0];

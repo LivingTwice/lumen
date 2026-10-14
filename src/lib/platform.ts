@@ -1,30 +1,55 @@
 /**
- * Système de l'app : Mac ou Windows. Il décide de la fenêtre (boutons de la
- * fenêtre, barre de titre), des raccourcis (⌘ ou Ctrl), des chemins de fichiers
- * et de quelques mots (« ce Mac » devient « ce PC », voir `forPc`).
+ * Système de l'app : Mac, Windows, iPhone ou iPad. Il décide de la fenêtre (boutons
+ * de la fenêtre, barre de titre), des raccourcis (⌘ ou Ctrl), des chemins de
+ * fichiers et de quelques mots (« ce Mac » devient « ce PC » ou « cet iPhone »,
+ * voir `forPc`).
  *
- * Dans le navigateur (`npm run dev`), on peut essayer l'allure de Windows :
- * http://localhost:1420/?platform=windows, ou
+ * Dans le navigateur (`npm run dev`), on peut essayer l'allure de Windows, d'un
+ * iPhone ou d'un iPad : http://localhost:1420/?platform=windows (ou ios, ipad), ou
  *   localStorage.setItem("lumen-platform", "windows") puis recharger.
  */
 
 const inTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
-function detect(): boolean {
-  if (typeof navigator === "undefined") return false;
+type System = "mac" | "windows" | "iphone" | "ipad";
+
+function detect(): System {
+  if (typeof navigator === "undefined") return "mac";
   if (!inTauri) {
     try {
       const forced = new URLSearchParams(location.search).get("platform") ?? localStorage.getItem("lumen-platform");
-      if (forced) return forced === "windows";
+      if (forced === "windows") return "windows";
+      if (forced === "ios" || forced === "iphone") return "iphone";
+      if (forced === "ipad") return "ipad";
+      if (forced) return "mac";
     } catch {
       // stockage indisponible : on suit le navigateur
     }
   }
-  return /Windows/i.test(navigator.userAgent);
+  const ua = navigator.userAgent;
+  if (/Windows/i.test(ua)) return "windows";
+  if (/iPhone|iPod/.test(ua)) return "iphone";
+  // un iPad se présente souvent comme un Mac : il se trahit par son écran tactile
+  if (/iPad/.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1)) return "ipad";
+  return "mac";
 }
 
-/** L'app tourne sous Windows (sinon : sur Mac, ou dans un navigateur). */
-export const isWindows = detect();
+const system = detect();
+
+/** L'app tourne sous Windows (sinon : sur Mac, iPhone, iPad, ou dans un navigateur). */
+export const isWindows = system === "windows";
+
+/** L'app tourne sur iPhone ou iPad (iOS). */
+export const isIOS = system === "iphone" || system === "ipad";
+
+/** Sur iPad (grand écran tactile, souvent avec un clavier). */
+export const isIPad = system === "ipad";
+
+/** Appareil mobile, à l'écran tactile (iPhone, iPad ; Android plus tard). */
+export const isMobile = isIOS;
+
+/** Nom de l'appareil dans une phrase : « iPhone », « iPad », « Mac », « PC ». */
+export const deviceWord = system === "iphone" ? "iPhone" : system === "ipad" ? "iPad" : isWindows ? "PC" : "Mac";
 
 /**
  * Formats d'image que le moteur de cette fenêtre lit, en plus du H.264 (« vp9 »,
@@ -90,11 +115,40 @@ const SWAPS: [RegExp, string][] = [
   [/⌘ ?/g, "Ctrl+"],
 ];
 
+// iPhone et iPad : même idée, avec l'élision française devant la voyelle
+// (« cet iPhone », « de l'iPad », « un nouvel iPhone »)
+function iosSwaps(d: string): [RegExp, string][] {
+  const not = "(?! (?:mini|Studio|Pro)\\b)";
+  const fr = (words: string, by: string): [RegExp, string] => [new RegExp(`\\b(?:${words}) Mac\\b${not}`, "g"), by];
+  return [
+    fr("ce", `cet ${d}`),
+    fr("Ce", `Cet ${d}`),
+    fr("du", `de l'${d}`),
+    fr("le", `l'${d}`),
+    fr("Le", `L'${d}`),
+    fr("nouveau", `nouvel ${d}`),
+    [new RegExp(`\\b(votre|Votre|un|autre|les|Les|chaque|application|sur|petit) Mac\\b${not}`, "g"), `$1 ${d}`],
+    [new RegExp(`\\b(this|This|your|Your|the|The|a|new|another|every|each|on|small|other) Mac\\b${not}`, "g"), `$1 ${d}`],
+    [/\bMacs\b/g, `${d}s`],
+    // « rien ne quitte votre ordinateur » : sur iPhone, l'appareil a son nom
+    [/\bvotre ordinateur\b/g, `votre ${d}`],
+    [/\byour computer\b/g, `your ${d}`],
+    [/\bdans le Finder\b/g, "dans l'app Fichiers"],
+    [/\bin Finder\b/g, "in the Files app"],
+    [/\bRéglages Système\b/g, "Réglages"],
+    [/\bSystem Settings\b/g, "Settings"],
+    [/\bmacOS\b/g, "iOS"],
+  ];
+}
+
+const IOS_SWAPS = isIOS ? iosSwaps(deviceWord) : [];
+
 /**
  * Sous Windows, un texte écrit pour le Mac parle du PC : « Calculé sur votre
- * Mac » devient « Calculé sur votre PC ». Appliqué par `t()` ; sur Mac, rien ne change.
+ * Mac » devient « Calculé sur votre PC » ; sur iPhone, « Calculé sur votre
+ * iPhone ». Appliqué par `t()` ; sur Mac, rien ne change.
  */
 export function forPc(s: string): string {
-  if (!isWindows || !/Mac|Finder|Système|System Settings|macOS|⌘/.test(s)) return s;
-  return SWAPS.reduce((out, [re, by]) => out.replace(re, by), s);
+  if (!(isWindows || isIOS) || !/Mac|Finder|Système|System Settings|macOS|⌘/.test(s)) return s;
+  return (isWindows ? SWAPS : IOS_SWAPS).reduce((out, [re, by]) => out.replace(re, by), s);
 }

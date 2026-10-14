@@ -3,6 +3,7 @@ import { Fragment, useEffect, useMemo, useState, type ReactNode } from "react";
 import { count, t } from "../lib/i18n";
 import { useApp } from "../lib/store";
 import { useOnline } from "../lib/online";
+import { shortName } from "../lib/writers";
 import type { LangCode, ModelRow } from "../lib/types";
 import { Icon, type IconName } from "./Icon";
 
@@ -263,7 +264,7 @@ export const roles = (): Role[] => [
     kind: "asrtext",
     icon: "edit",
     name: t("La plume", "The pen"),
-    model: "Qwen3-ASR",
+    model: "Qwen3-ASR · Parakeet",
     what: t("Écrit plus fidèlement ce que l'oreille entend.", "Writes down what the ear hears, more faithfully."),
     ready: t("Prête", "Ready"),
     optional: true,
@@ -290,6 +291,9 @@ function SceneModels({ still }: { still: boolean }) {
           // traduction confiée à l'IA en ligne : son nom, et prête si la clé est là
           const remote = r.kind === "llm" && online.words;
           const installed = remote ? online.ready : models.some((m) => m.kind === r.kind && m.installed);
+          // la plume : Qwen3-ASR, Parakeet, ou ceux qui sont installés
+          const pens = models.filter((m) => m.kind === "asrtext" && m.installed).map(shortName);
+          const model = r.kind === "asrtext" && pens.length ? pens.join(" · ") : r.model;
           return (
             <motion.div
               key={r.kind}
@@ -304,7 +308,7 @@ function SceneModels({ still }: { still: boolean }) {
               <span className="body">
                 <span className="head">
                   <strong>{r.name}</strong>
-                  <span className="model">{remote ? t(`${online.provider.name} · en ligne`, `${online.provider.name} · online`) : r.model}</span>
+                  <span className="model">{remote ? t(`${online.provider.name} · en ligne`, `${online.provider.name} · online`) : model}</span>
                 </span>
                 <span className="what">{r.what}</span>
                 <span className={`state ${installed ? "ok" : ""}`}>

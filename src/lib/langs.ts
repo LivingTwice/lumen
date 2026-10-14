@@ -61,6 +61,13 @@ export const LANGS: LangInfo[] = RAW.map((l) => ({
   },
 }));
 
+/** Drapeau d'une langue (accueil de l'iPhone) : celui du pays de sa voix préférée (« en-GB » → 🇬🇧). */
+export function flagOf(l: LangInfo): string {
+  const region = (l.tts[0].split("-")[1] ?? "").toUpperCase();
+  // lettres régionales d'Unicode : « G » + « B » s'affichent en drapeau
+  return [...region].map((c) => String.fromCodePoint(0x1f1a5 + c.charCodeAt(0))).join("");
+}
+
 /** Les six langues les plus étudiées (sans la langue de l'interface, le français en plus
  *  pour un anglophone) : en grand à l'accueil. */
 export function featuredLangs(): LangCode[] {

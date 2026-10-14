@@ -3,6 +3,7 @@ mod i18n;
 mod ai;
 mod asr;
 mod backup;
+mod chatgpt;
 mod commands;
 mod compress;
 mod db;
@@ -16,9 +17,11 @@ mod lyrics;
 mod media;
 mod models;
 mod online;
+mod parakeet;
 mod podcast;
 mod proc;
 mod search;
+mod sherpa;
 mod state;
 mod text;
 mod tools;
@@ -32,17 +35,21 @@ mod win;
 use std::collections::HashMap;
 
 use parking_lot::Mutex;
-use tauri::{Emitter, Manager};
+use tauri::Manager;
 
+// iPhone et iPad : point d'entrée appelé par le projet Xcode (gen/apple)
+#[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
-        .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_opener::init())
-        .plugin(tauri_plugin_updater::Builder::new().build())
-        .plugin(tauri_plugin_process::init())
+    let builder = tauri::Builder::default().plugin(tauri_plugin_dialog::init()).plugin(tauri_plugin_opener::init());
+    // mises à jour et relance : Mac et Windows (sur iPhone et iPad, l'App Store s'en charge)
+    #[cfg(desktop)]
+    let builder = builder.plugin(tauri_plugin_updater::Builder::new().build()).plugin(tauri_plugin_process::init());
+    builder
         .setup(|app| {
             let data_dir = app.path().app_data_dir()?;
             std::fs::create_dir_all(&data_dir)?;
+            // connexion à ChatGPT (jetons hors de la base, propres à cet appareil)
+            chatgpt::init(&data_dir);
             let conn = db::open(&db::path(&data_dir))?;
             // langue de l'interface, des messages et des traductions
             i18n::set(&db::setting(&conn, "ui_lang").unwrap_or_default());
@@ -68,9 +75,10 @@ pub fn run() {
             });
             // barre des menus (construite par l'interface, lib/menu.ts) : l'élément choisi lui
             // revient par son identifiant ; les actions JavaScript des éléments de sous-menus
-            // sont oubliées par Tauri dès leur création
+            // sont oubliées par Tauri dès leur création (pas de barre des menus sur iPhone et iPad)
+            #[cfg(desktop)]
             app.on_menu_event(|app, event| {
-                let _ = app.emit("menu", event.id().as_ref());
+                let _ = tauri::Emitter::emit(app, "menu", event.id().as_ref());
             });
             // sauvegarde automatique, au plus toutes les 10 minutes
             tauri::async_runtime::spawn(backup::auto_loop(app.handle().clone()));
@@ -89,6 +97,7 @@ pub fn run() {
             commands::lesson_update,
             commands::lesson_delete,
             commands::lessons_delete,
+            commands::lessons_set_completed,
             commands::lesson_set_cover,
             commands::lesson_cover_fetch,
             commands::lesson_links,
@@ -151,6 +160,9 @@ pub fn run() {
             commands::import_song,
             commands::gemini_check,
             commands::online_check,
+            commands::chatgpt_status,
+            commands::chatgpt_sign_in,
+            commands::chatgpt_sign_out,
             commands::podcast_create,
             commands::level_estimate,
             commands::text_stats,

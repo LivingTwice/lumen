@@ -56,6 +56,16 @@ pub fn language_name(code: &str) -> Option<&'static str> {
     })
 }
 
+/// Langues où Qwen3-ASR écrit le texte des leçons : celles qu'il connaît, sauf
+/// celles où il fait nettement moins bien que Whisper seul (mots faux, FLEURS,
+/// 15 min par langue, octobre 2026 : finnois 25,6 % contre 7,7 %, suédois 23,1
+/// contre 10,7, roumain 19,5 contre 10,2, grec 48,4 contre 17,1 ; aussi danois,
+/// polonais, tchèque, hongrois). Ailleurs, il fait mieux, souvent de beaucoup
+/// (hindi 16,1 contre 34,9, coréen 12,9 contre 24,6).
+pub fn writes(lang: &str) -> bool {
+    language_name(lang).is_some() && !matches!(lang, "sv" | "da" | "fi" | "pl" | "cs" | "hu" | "ro" | "el")
+}
+
 /// Transcrit un son (mono, 16 kHz) dans la langue donnée. Chaque morceau passe
 /// sur le GPU à son tour (`Engine::exclusive`) : le chat et la traduction des
 /// mots s'intercalent entre deux morceaux.
@@ -303,6 +313,8 @@ mod tests {
         assert_eq!(repeated_tail("今日はとても暑いですね。", false), None);
         assert_eq!(language_name("it"), Some("Italian"));
         assert_eq!(language_name("uk"), None);
+        // le finnois, Qwen3-ASR le connaît, mais Whisper seul y fait mieux
+        assert!(writes("it") && !writes("fi") && !writes("uk"));
     }
 }
 

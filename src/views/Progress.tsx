@@ -153,28 +153,30 @@ function StreakHero({ st, onGoal }: { st: Stats | null; onGoal(): Promise<void> 
 
       <div className="goal">
         <GoalRing secs={streak.today_secs} goal={goalSecs} done={streak.today_done} />
-        <Menu
-          open={menu}
-          onClose={() => setMenu(false)}
-          align="right"
-          anchor={
-            <button className="goal-pick" onClick={() => setMenu((v) => !v)} aria-haspopup="menu" aria-expanded={menu}>
-              {t(`Objectif : ${streak.goal_min} min par jour`, `Goal: ${streak.goal_min} min a day`)}
-              <Icon name="chevron" size={14} />
-            </button>
-          }
-        >
-          <div className="menu-note">{t("Temps actif dans une leçon, chaque jour", "Active time in a lesson, every day")}</div>
-          {GOALS.map((m) => (
-            <button key={m} className="menu-item" role="menuitem" onClick={() => void chooseGoal(m)}>
-              <span style={{ flex: 1 }}>{t(`${m} min par jour`, `${m} min a day`)}</span>
-              {m === streak.goal_min && <Icon name="check" size={16} />}
-            </button>
-          ))}
-        </Menu>
-        {streak.best > 0 && (
-          <span className="goal-best muted num">{t(`Record : ${count(streak.best, "jour", "jours", "", "")}`, `Best: ${count(streak.best, "", "", "day", "days")}`)}</span>
-        )}
+        <div className="goal-side">
+          <Menu
+            open={menu}
+            onClose={() => setMenu(false)}
+            align="right"
+            anchor={
+              <button className="goal-pick" onClick={() => setMenu((v) => !v)} aria-haspopup="menu" aria-expanded={menu}>
+                {t(`Objectif : ${streak.goal_min} min par jour`, `Goal: ${streak.goal_min} min a day`)}
+                <Icon name="chevron" size={14} />
+              </button>
+            }
+          >
+            <div className="menu-note">{t("Temps actif dans une leçon, chaque jour", "Active time in a lesson, every day")}</div>
+            {GOALS.map((m) => (
+              <button key={m} className="menu-item" role="menuitem" onClick={() => void chooseGoal(m)}>
+                <span style={{ flex: 1 }}>{t(`${m} min par jour`, `${m} min a day`)}</span>
+                {m === streak.goal_min && <Icon name="check" size={16} />}
+              </button>
+            ))}
+          </Menu>
+          {streak.best > 0 && (
+            <span className="goal-best muted num">{t(`Record : ${count(streak.best, "jour", "jours", "", "")}`, `Best: ${count(streak.best, "", "", "day", "days")}`)}</span>
+          )}
+        </div>
       </div>
     </motion.section>
   );

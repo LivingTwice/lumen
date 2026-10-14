@@ -2,7 +2,9 @@ node_modules
 dist
 src-tauri/target
 src-tauri/binaries
-src-tauri/gen
+# schémas régénérés à chaque compilation ; le projet Xcode d'iOS (gen/apple), lui, est versionné
+src-tauri/gen/*
+!src-tauri/gen/apple
 *.log
 .DS_Store
 tsconfig.tsbuildinfo

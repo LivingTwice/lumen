@@ -2,6 +2,66 @@
   "_lisezmoi": "Nouveautés montrées après chaque mise à jour (components/News.tsx) et notes de publication. Ajouter ce qui change sous la version \"next\" au fil du travail ; « Publier une version » lui donne son numéro et sa date. Icônes : noms de components/Icon.tsx. Actions : \"tour\" (visite guidée), \"guide\", \"settings:<page>\" (profile, general, langs, reading, voice, discover, podcasts, ai, videos, backup, storage, lingq, about), \"import:<onglet>\" (text, link, file, media, podcast), \"view:<vue>\" (library, discover, playlists, chat, vocab, progress).",
   "releases": [
     {
+      "version": "1.2.0",
+      "date": "2026-10-14",
+      "title": { "fr": "Des transcriptions plus justes, des playlists à votre main", "en": "More accurate transcripts, playlists that do what you want" },
+      "items": [
+        {
+          "icon": "wave",
+          "title": { "fr": "Parakeet : des transcriptions plus justes, jusqu'en ukrainien", "en": "Parakeet: more accurate transcripts, even in Ukrainian" },
+          "body": {
+            "fr": "Nouveau modèle facultatif dans Réglages › IA : Parakeet V3, de NVIDIA, écrit le texte de vos audios et de vos vidéos, et Whisper garde le minutage des mots pour la lanterne. Rapide et léger (1 Go), il ne saute pas de phrase et ponctue bien : sur 14 leçons italiennes, 2,7 % de mots faux, contre 7,4 % pour Whisper seul. Il sert dans 18 langues, dont l'ukrainien, le croate, le lituanien et le slovaque, jusqu'ici transcrits par Whisper seul. Mesuré langue par langue, Lumen prend désormais dans chacune le plus juste de Qwen3-ASR, Parakeet et Whisper seul.",
+            "en": "A new optional model in Settings › AI: NVIDIA's Parakeet V3 writes the text of your audio and videos, while Whisper keeps timing the words for the lantern. Fast and light (1 GB), it doesn't skip sentences and punctuates well: on 14 Italian lessons, 2.7% wrong words, against 7.4% for Whisper alone. It works in 18 languages, including Ukrainian, Croatian, Lithuanian and Slovak, until now transcribed by Whisper alone. Measured language by language, Lumen now picks in each one the most accurate of Qwen3-ASR, Parakeet and Whisper alone."
+          },
+          "action": "settings:ai"
+        },
+        {
+          "icon": "sparkle",
+          "title": { "fr": "Votre abonnement ChatGPT dans Lumen", "en": "Your ChatGPT subscription in Lumen" },
+          "body": {
+            "fr": "Abonné à ChatGPT Plus ou Pro ? Dans Réglages › IA, choisissez ChatGPT et « Continuer avec ChatGPT » : le sens des mots, les phrases et le chat puisent dans votre forfait, sans clé à copier. Lumen va doucement : seul le mot où vous vous arrêtez part, et chaque traduction est gardée. Aperçu d'OpenAI, ouvert aux applications open source.",
+            "en": "Subscribed to ChatGPT Plus or Pro? In Settings › AI, pick ChatGPT and “Continue with ChatGPT”: word meanings, sentences and the chat draw on your plan, with no key to copy. Lumen takes it easy: only the word you stop on is sent, and every translation is kept. An OpenAI preview, open to open-source apps."
+          },
+          "action": "settings:ai"
+        },
+        {
+          "icon": "read",
+          "title": { "fr": "Marquer comme lu", "en": "Mark as read" },
+          "body": {
+            "fr": "Une leçon, une playlist entière ou un livre se marquent comme lus, ou de nouveau à lire, depuis leur menu « … » : dans les playlists comme dans la bibliothèque. Une playlist marquée repart de sa première leçon, et vos mots gardent leur couleur.",
+            "en": "A lesson, a whole playlist or a book can be marked as read, or as unread again, from its “…” menu: in playlists as well as in the library. A marked playlist starts again from its first lesson, and your words keep their color."
+          },
+          "action": "view:playlists"
+        },
+        {
+          "icon": "repeat",
+          "title": { "fr": "Des playlists en boucle", "en": "Looping playlists" },
+          "body": {
+            "fr": "Le bouton « En boucle » d'une playlist fait reprendre l'écoute à la première leçon après la dernière, sans fin. Il est aussi dans le bandeau de la playlist, en haut de la leçon, et dans le menu Leçon.",
+            "en": "A playlist's “Loop” button brings listening back to the first lesson after the last one, endlessly. It is also in the playlist strip at the top of the lesson, and in the Lesson menu."
+          },
+          "action": "view:playlists"
+        },
+        {
+          "icon": "check",
+          "title": { "fr": "Plusieurs leçons d'un coup", "en": "Several lessons at once" },
+          "body": {
+            "fr": "« Sélectionner », au-dessus des leçons d'une playlist : cochez-en plusieurs (Maj + clic pour toute une suite, ⌘A pour toutes), puis marquez-les lues, retirez-les de la playlist ou supprimez-les. La sélection de la bibliothèque sait aussi marquer comme lu.",
+            "en": "“Select”, above a playlist's lessons: check several of them (Shift-click for a whole run, ⌘A for all), then mark them as read, remove them from the playlist or delete them. Selection in the library can now mark as read too."
+          },
+          "action": "view:playlists"
+        },
+        {
+          "icon": "book",
+          "title": { "fr": "Chaque langue, sa lecture en cours", "en": "Each language, its own current reading" },
+          "body": {
+            "fr": "« Lecture en cours » et « Reprendre la lecture » (⌘R) rouvrent la dernière leçon de la langue où vous êtes, et non plus la dernière toutes langues confondues. Passer à une autre langue retrouve la leçon où vous en étiez dans celle-ci.",
+            "en": "“Now reading” and “Resume Reading” (⌘R) reopen the last lesson of the language you're in, no longer the last one across all languages. Switching to another language brings back the lesson where you were in it."
+          }
+        }
+      ]
+    },
+    {
       "version": "1.1.0",
       "date": "2026-10-12",
       "title": { "fr": "Des livres entiers, une bibliothèque à votre goût", "en": "Whole books, a library the way you like it" },

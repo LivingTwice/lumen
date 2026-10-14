@@ -57,11 +57,14 @@ function groups(): { title: string; rows: Row[] }[] {
       ],
     },
     {
-      title: t("Sélection de leçons, dans la bibliothèque", "Selecting lessons, in the library"),
+      title: t("Sélection de leçons, dans la bibliothèque et les playlists", "Selecting lessons, in the library and playlists"),
       rows: [
         { keys: [[shift, t("clic", "click")]], label: t("Sélectionner toutes les leçons jusqu'à celle-ci", "Select every lesson up to this one") },
         { keys: [[M, "A"]], label: t("Tout sélectionner", "Select all") },
-        { keys: [[isWindows ? t("Suppr", "Delete") : "⌫"]], label: t("Supprimer les leçons sélectionnées", "Delete the selected lessons") },
+        {
+          keys: [[isWindows ? t("Suppr", "Delete") : "⌫"]],
+          label: t("Supprimer les leçons sélectionnées (dans une playlist : les en retirer)", "Delete the selected lessons (in a playlist: remove them from it)"),
+        },
         { keys: [[t("Échap", "Esc")]], label: t("Terminer la sélection", "Done selecting") },
       ],
     },

@@ -7,7 +7,8 @@ import { api, errorText } from "../lib/api";
 import { confirmAsk } from "../lib/dialogs";
 import { count, t } from "../lib/i18n";
 import { inLang, langInfo } from "../lib/langs";
-import { bookView, formatLength, isBook, lessonsOf, listenSecs, playPlaylist, plural, progressOf, readBook } from "../lib/playlists";
+import { isWindows } from "../lib/platform";
+import { bookView, formatLength, isBook, lessonsOf, listenSecs, markRead, playPlaylist, plural, progressOf, readBook } from "../lib/playlists";
 import { formatDuration, useApp } from "../lib/store";
 import type { LessonSummary, Playlist, PlaylistPatch } from "../lib/types";
 
@@ -59,7 +60,19 @@ export function Playlists() {
 
   /** Modification affichée tout de suite, enregistrée ensuite. */
   const update = async (id: number, patch: PlaylistPatch) => {
-    setLists((ls) => ls?.map((p) => (p.id === id ? { ...p, ...(patch.name !== undefined && { name: patch.name.trim() || p.name }), ...(patch.lessons && { lessons: patch.lessons }) } : p)) ?? ls);
+    setLists(
+      (ls) =>
+        ls?.map((p) =>
+          p.id === id
+            ? {
+                ...p,
+                ...(patch.name !== undefined && { name: patch.name.trim() || p.name }),
+                ...(patch.lessons && { lessons: patch.lessons }),
+                ...(patch.looping !== undefined && { looping: patch.looping }),
+              }
+            : p,
+        ) ?? ls,
+    );
     try {
       await api().playlistUpdate(id, patch);
     } catch (e) {
@@ -163,6 +176,25 @@ export function Playlists() {
   );
 }
 
+/** Toute la playlist (ou tout le livre) lue, ou de nouveau à lire : elle repart du début. */
+async function markPlaylist(p: Playlist, ls: LessonSummary[], read: boolean) {
+  await api()
+    .playlistUpdate(p.id, { current: 0 })
+    .catch(() => {});
+  const book = isBook(p);
+  await markRead(
+    ls.map((l) => l.id),
+    read,
+    read
+      ? book
+        ? t(`« ${p.name} » est marqué comme lu`, `“${p.name}” marked as read`)
+        : t(`« ${p.name} » est marquée comme lue`, `“${p.name}” marked as read`)
+      : book
+        ? t(`« ${p.name} » est marqué comme non lu`, `“${p.name}” marked as unread`)
+        : t(`« ${p.name} » est marquée comme non lue`, `“${p.name}” marked as unread`),
+  );
+}
+
 // ---------- toutes les playlists ----------
 
 function PlaylistsHome({ lists, all, onCreate, onDelete }: { lists: Playlist[] | null; all: LessonSummary[] | null; onCreate(): void; onDelete(p: Playlist): void }) {
@@ -234,6 +266,7 @@ function PlaylistCard({ p, ls, index, onDelete }: { p: Playlist; ls: LessonSumma
   const glow = useGlow<HTMLDivElement>();
   const [menu, setMenu] = useState(false);
   const done = ls.filter((l) => l.completed).length;
+  const allDone = ls.length > 0 && done === ls.length;
   const secs = listenSecs(ls);
   // un livre : ses chapitres se lisent (le son ne démarre pas de lui-même)
   const book = isBook(p) ? bookView(p, ls) : null;
@@ -279,6 +312,14 @@ function PlaylistCard({ p, ls, index, onDelete }: { p: Playlist; ls: LessonSumma
               <span className="num">{formatLength(secs)}</span>
             </>
           )}
+          {p.looping && !book && (
+            <>
+              <span className="sep" />
+              <span className="pl-looping" title={t("En boucle", "Looping")}>
+                <Icon name="repeat" size={13} stroke={2} /> {t("En boucle", "Loop")}
+              </span>
+            </>
+          )}
         </div>
         {ls.length > 0 && (
           <div className="lesson-known" title={t(`${done} leçon${done > 1 ? "s" : ""} terminée${done > 1 ? "s" : ""} sur ${ls.length}`, `${done} of ${ls.length} lessons finished`)}>
@@ -305,6 +346,11 @@ function PlaylistCard({ p, ls, index, onDelete }: { p: Playlist; ls: LessonSumma
           <button className="menu-item" onClick={() => (setMenu(false), openPlaylist(p.id))}>
             <Icon name="playlist" size={16} /> {t("Ouvrir", "Open")}
           </button>
+          {ls.length > 0 && (
+            <button className="menu-item" onClick={() => (setMenu(false), void markPlaylist(p, ls, !allDone))}>
+              <Icon name={allDone ? "unread" : "read"} size={16} /> {allDone ? t("Marquer comme non lu", "Mark as unread") : t("Marquer comme lu", "Mark as read")}
+            </button>
+          )}
           <div className="menu-sep" />
           <button className="menu-item danger" onClick={() => (setMenu(false), onDelete())}>
             <Icon name="trash" size={16} /> {book ? t("Défaire le livre", "Ungroup the book") : t("Supprimer la playlist", "Delete the playlist")}
@@ -320,6 +366,7 @@ function PlaylistCard({ p, ls, index, onDelete }: { p: Playlist; ls: LessonSumma
 function PlaylistPage({ p, all, onUpdate, onDelete, onAdd }: { p: Playlist; all: LessonSummary[]; onUpdate(patch: PlaylistPatch): void; onDelete(): void; onAdd(): void }) {
   const openPlaylist = useApp((s) => s.openPlaylist);
   const openLesson = useApp((s) => s.openLesson);
+  const bump = useApp((s) => s.bumpLibrary);
   const lang = useApp((s) => s.lang)();
   const toast = useApp((s) => s.toast);
   const ls = useMemo(() => lessonsOf(p, all), [p, all]);
@@ -340,6 +387,7 @@ function PlaylistPage({ p, all, onUpdate, onDelete, onAdd }: { p: Playlist; all:
   };
 
   const done = ls.filter((l) => l.completed).length;
+  const allDone = ls.length > 0 && done === ls.length;
   const secs = listenSecs(ls);
   const words = ls.reduce((s, l) => s + l.word_count, 0);
   // un livre : on y lit ses chapitres dans l'ordre, sans lancer le son
@@ -353,10 +401,128 @@ function PlaylistPage({ p, all, onUpdate, onDelete, onAdd }: { p: Playlist; all:
     else setTitle(p.name);
   };
 
-  const removeLesson = (l: LessonSummary) => {
-    onUpdate({ lessons: p.lessons.filter((x) => x !== l.id) });
-    toast(t(`« ${l.title} » a quitté la playlist`, `“${l.title}” left the playlist`));
+  /** Retire des leçons de la playlist (elles restent dans la bibliothèque). */
+  const removeLessons = (gone: LessonSummary[]) => {
+    if (!gone.length) return;
+    const out = new Set(gone.map((l) => l.id));
+    onUpdate({ lessons: p.lessons.filter((x) => !out.has(x)) });
+    toast(
+      gone.length === 1
+        ? book
+          ? t(`« ${gone[0].title} » a quitté le livre`, `“${gone[0].title}” left the book`)
+          : t(`« ${gone[0].title} » a quitté la playlist`, `“${gone[0].title}” left the playlist`)
+        : book
+          ? t(`${count(gone.length, "leçon", "leçons", "", "")} ont quitté le livre`, `${count(gone.length, "", "", "lesson", "lessons")} left the book`)
+          : t(`${count(gone.length, "leçon", "leçons", "", "")} ont quitté la playlist`, `${count(gone.length, "", "", "lesson", "lessons")} left the playlist`),
+    );
   };
+
+  /** Supprime des leçons de la bibliothèque, après confirmation (les mots appris restent). */
+  const deleteLessons = async (gone: LessonSummary[]) => {
+    if (!gone.length) return false;
+    const ok = await confirmAsk(
+      gone.length === 1
+        ? t(`Supprimer « ${gone[0].title} » de votre bibliothèque ? Les mots appris sont conservés.`, `Delete “${gone[0].title}” from your library? The words you learned are kept.`)
+        : t(
+            `Supprimer ${count(gone.length, "leçon", "leçons", "", "")} de votre bibliothèque ? Elles quittent aussi les autres playlists. Les mots appris sont conservés.`,
+            `Delete ${count(gone.length, "", "", "lesson", "lessons")} from your library? They also leave your other playlists. The words you learned are kept.`,
+          ),
+      gone.length === 1 ? t("Supprimer la leçon", "Delete the lesson") : t("Supprimer les leçons", "Delete the lessons"),
+      t("Supprimer", "Delete"),
+    );
+    if (!ok) return false;
+    const out = gone.map((l) => l.id);
+    try {
+      await api().lessonsDelete(out);
+      // un livre dont il ne reste aucun chapitre n'a plus de raison d'être
+      if (book && out.length >= ls.length) {
+        await api().playlistDelete(p.id);
+        if (useApp.getState().queue === p.id) useApp.setState({ queue: null });
+        openPlaylist(null);
+      }
+    } catch (e) {
+      toast(errorText(e), "error");
+      bump();
+      return false;
+    }
+    const app = useApp.getState();
+    for (const id of out) app.forgetLesson(id);
+    toast(count(out.length, "leçon supprimée", "leçons supprimées", "lesson deleted", "lessons deleted"));
+    bump();
+    return true;
+  };
+
+  // ---------- sélection de plusieurs leçons ----------
+  const [selecting, setSelecting] = useState(false);
+  const [picked, setPicked] = useState<Set<number>>(() => new Set());
+  // dernière leçon touchée : Maj + clic coche tout l'intervalle jusqu'à elle
+  const pickFrom = useRef<number | null>(null);
+  const startSelect = (first?: number) => {
+    setSelecting(true);
+    setPicked(new Set(first === undefined ? [] : [first]));
+    pickFrom.current = first ?? null;
+  };
+  const stopSelect = () => {
+    setSelecting(false);
+    setPicked(new Set());
+    pickFrom.current = null;
+  };
+  const pick = (id: number, range: boolean) => {
+    const fromId = pickFrom.current;
+    pickFrom.current = id;
+    setPicked((now) => {
+      const next = new Set(now);
+      const from = fromId === null ? -1 : order.indexOf(fromId);
+      const to = order.indexOf(id);
+      if (range && from >= 0 && to >= 0) {
+        for (let i = Math.min(from, to); i <= Math.max(from, to); i++) next.add(order[i]);
+      } else if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  };
+  // une leçon qui a quitté la playlist quitte aussi la sélection
+  useEffect(() => {
+    setPicked((now) => {
+      const kept = [...now].filter((id) => byId.has(id));
+      return kept.length === now.size ? now : new Set(kept);
+    });
+  }, [byId]);
+  const pickedLessons = order.filter((id) => picked.has(id)).map((id) => byId.get(id)!).filter(Boolean);
+  const allPicked = order.length > 0 && order.every((id) => picked.has(id));
+  const pickedRead = pickedLessons.length > 0 && pickedLessons.every((l) => l.completed);
+  const pickAll = () => setPicked(allPicked ? new Set() : new Set(order));
+  const removePicked = () => {
+    removeLessons(pickedLessons);
+    stopSelect();
+  };
+  const deletePicked = async () => {
+    if (await deleteLessons(pickedLessons)) stopSelect();
+  };
+  const markPicked = () => void markRead(pickedLessons.map((l) => l.id), !pickedRead);
+  useEffect(() => {
+    if (!selecting) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.defaultPrevented) return;
+      const typing = e.target instanceof HTMLElement && !!e.target.closest("input, textarea, select, [contenteditable]");
+      if (e.key === "Escape") {
+        e.preventDefault();
+        stopSelect();
+      } else if (!typing && (isWindows ? e.ctrlKey : e.metaKey) && e.key.toLowerCase() === "a") {
+        e.preventDefault();
+        setPicked(new Set(order));
+      } else if (!typing && (e.key === "Backspace" || e.key === "Delete") && picked.size) {
+        // dans une playlist, la touche retire les leçons sans les supprimer
+        e.preventDefault();
+        removePicked();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  });
 
   const li = langInfo(lang);
 
@@ -427,6 +593,18 @@ function PlaylistPage({ p, all, onUpdate, onDelete, onAdd }: { p: Playlist; all:
                     <button className="btn outline lg" onClick={onAdd}>
                       <Icon name="plus" size={16} /> {t("Ajouter des leçons", "Add lessons")}
                     </button>
+                    <button
+                      className={`btn lg pl-loop ${p.looping ? "soft on" : "outline"}`}
+                      onClick={() => onUpdate({ looping: !p.looping })}
+                      aria-pressed={p.looping}
+                      title={
+                        p.looping
+                          ? t("En boucle : après la dernière leçon, l'écoute reprend à la première", "Looping: after the last lesson, listening starts again from the first")
+                          : t("Lire la playlist en boucle", "Loop the playlist")
+                      }
+                    >
+                      <Icon name="repeat" size={16} /> {t("En boucle", "Loop")}
+                    </button>
                   </>
                 )}
                 {book && book.hasMedia && (
@@ -451,6 +629,16 @@ function PlaylistPage({ p, all, onUpdate, onDelete, onAdd }: { p: Playlist; all:
                       <Icon name="plus" size={16} /> {t("Ajouter des leçons", "Add lessons")}
                     </button>
                   )}
+                  {ls.length > 0 && (
+                    <>
+                      <button className="menu-item" onClick={() => (setMenu(false), void markPlaylist(p, ls, !allDone))}>
+                        <Icon name={allDone ? "unread" : "read"} size={16} /> {allDone ? t("Tout marquer comme non lu", "Mark all as unread") : t("Tout marquer comme lu", "Mark all as read")}
+                      </button>
+                      <button className="menu-item" onClick={() => (setMenu(false), startSelect())}>
+                        <Icon name="check" size={16} /> {t("Sélectionner des leçons", "Select lessons")}
+                      </button>
+                    </>
+                  )}
                   <div className="menu-sep" />
                   <button className="menu-item danger" onClick={() => (setMenu(false), onDelete())}>
                     <Icon name="trash" size={16} /> {book ? t("Défaire le livre", "Ungroup the book") : t("Supprimer la playlist", "Delete the playlist")}
@@ -469,29 +657,87 @@ function PlaylistPage({ p, all, onUpdate, onDelete, onAdd }: { p: Playlist; all:
               </button>
             </div>
           ) : (
-            <Reorder.Group as="ol" axis="y" values={order} onReorder={setOrder} className="pl-list">
-              <AnimatePresence initial={false}>
-                {order.map((id, i) => {
-                  const l = byId.get(id);
-                  return l ? (
-                    <Row
-                      key={id}
-                      l={l}
-                      index={i}
-                      current={book ? !!resume && id === resume.id : id === p.current}
-                      book={!!book}
-                      onOpen={() => openLesson(id, { playlist: p.id })}
-                      onPlay={() => (book ? readBook(book, id) : playPlaylist(p, id))}
-                      onRemove={() => removeLesson(l)}
-                      onDrop={saveOrder}
-                    />
-                  ) : null;
-                })}
-              </AnimatePresence>
-            </Reorder.Group>
+            <>
+              <div className="pl-listbar">
+                <button className={`btn sm ${selecting ? "soft" : "ghost"}`} onClick={() => (selecting ? stopSelect() : startSelect())} aria-pressed={selecting}>
+                  <Icon name="check" size={15} stroke={2.4} /> {selecting ? t("Terminé", "Done") : t("Sélectionner", "Select")}
+                </button>
+              </div>
+              <Reorder.Group as="ol" axis="y" values={order} onReorder={setOrder} className={`pl-list ${selecting ? "selecting" : ""}`}>
+                <AnimatePresence initial={false}>
+                  {order.map((id, i) => {
+                    const l = byId.get(id);
+                    return l ? (
+                      <Row
+                        key={id}
+                        l={l}
+                        index={i}
+                        current={book ? !!resume && id === resume.id : id === p.current}
+                        book={!!book}
+                        selecting={selecting}
+                        picked={picked.has(id)}
+                        onPick={(ev) => pick(id, ev.shiftKey)}
+                        onOpen={() => openLesson(id, { playlist: p.id })}
+                        onPlay={() => (book ? readBook(book, id) : playPlaylist(p, id))}
+                        onMark={() => void markRead([id], !l.completed)}
+                        onRemove={() => removeLessons([l])}
+                        onSelect={() => startSelect(id)}
+                        onDelete={() => void deleteLessons([l])}
+                        onDrop={saveOrder}
+                      />
+                    ) : null;
+                  })}
+                </AnimatePresence>
+              </Reorder.Group>
+            </>
           )}
         </div>
       </motion.div>
+      <div className="lib-selbar-wrap">
+        <AnimatePresence>
+          {selecting && (
+            <motion.div
+              className="lib-selbar"
+              role="toolbar"
+              aria-label={t("Leçons sélectionnées", "Selected lessons")}
+              initial={{ opacity: 0, y: 22, scale: 0.96 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 14, scale: 0.97, transition: { duration: 0.16, ease: "easeOut" } }}
+              transition={{ type: "spring", stiffness: 380, damping: 30 }}
+            >
+              <span className="lib-selcount num" aria-live="polite">
+                {picked.size
+                  ? count(picked.size, "leçon sélectionnée", "leçons sélectionnées", "lesson selected", "lessons selected")
+                  : t("Touchez les leçons à sélectionner", "Click the lessons to select")}
+              </span>
+              <button className="btn sm ghost" onClick={pickAll}>
+                {allPicked ? t("Tout désélectionner", "Deselect all") : t("Tout sélectionner", "Select all")}
+              </button>
+              <button className="btn sm ghost" onClick={markPicked} disabled={!picked.size}>
+                <Icon name={pickedRead ? "unread" : "read"} size={15} /> {pickedRead ? t("Marquer comme non lu", "Mark as unread") : t("Marquer comme lu", "Mark as read")}
+              </button>
+              <button
+                className="btn sm ghost"
+                onClick={removePicked}
+                disabled={!picked.size}
+                title={
+                  book
+                    ? t("Retirer du livre (les leçons restent dans la bibliothèque)", "Remove from the book (the lessons stay in the library)")
+                    : t("Retirer de la playlist (les leçons restent dans la bibliothèque)", "Remove from the playlist (the lessons stay in the library)")
+                }
+              >
+                <Icon name="close" size={15} /> {t("Retirer", "Remove")}
+              </button>
+              <button className="btn sm danger" onClick={() => void deletePicked()} disabled={!picked.size} title={t("Supprimer de la bibliothèque", "Delete from the library")}>
+                <Icon name="trash" size={15} /> {t("Supprimer", "Delete")}
+              </button>
+              <button className="icon-btn" onClick={stopSelect} aria-label={t("Terminer la sélection", "Done selecting")} title={t("Terminer la sélection (Échap)", "Done selecting (Esc)")}>
+                <Icon name="close" size={16} />
+              </button>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
     </>
   );
 }
@@ -501,9 +747,15 @@ function Row({
   index,
   current,
   book,
+  selecting,
+  picked,
+  onPick,
   onOpen,
   onPlay,
+  onMark,
   onRemove,
+  onSelect,
+  onDelete,
   onDrop,
 }: {
   l: LessonSummary;
@@ -511,21 +763,34 @@ function Row({
   current: boolean;
   /** chapitre d'un livre : on le lit, on ne l'écoute pas */
   book: boolean;
+  /** sélection de plusieurs leçons : toucher la ligne la coche */
+  selecting: boolean;
+  picked: boolean;
+  onPick(ev: React.MouseEvent): void;
   onOpen(): void;
   onPlay(): void;
+  /** lue ou de nouveau à lire */
+  onMark(): void;
   onRemove(): void;
+  onSelect(): void;
+  onDelete(): void;
   onDrop(): void;
 }) {
   const controls = useDragControls();
   const [dragging, setDragging] = useState(false);
+  const [menu, setMenu] = useState(false);
   const progress = progressOf(l);
+  const run = (fn: () => void) => () => {
+    setMenu(false);
+    fn();
+  };
   return (
     <Reorder.Item
       as="li"
       value={l.id}
       dragListener={false}
       dragControls={controls}
-      className={`pl-row ${current ? "current" : ""} ${dragging ? "dragging" : ""}`}
+      className={`pl-row ${current ? "current" : ""} ${dragging ? "dragging" : ""} ${picked ? "picked" : ""} ${menu ? "menu-open" : ""}`}
       initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0, transition: { ...SPRING, delay: Math.min(index, 14) * 0.025 } }}
       exit={{ opacity: 0, x: -24, transition: { duration: 0.2 } }}
@@ -534,30 +799,55 @@ function Row({
         setDragging(false);
         onDrop();
       }}
+      onContextMenu={(e: React.MouseEvent) => {
+        if (selecting) return;
+        e.preventDefault();
+        setMenu(true);
+      }}
     >
-      <button
-        className="pl-grip"
-        onPointerDown={(e) => {
-          e.preventDefault();
-          controls.start(e);
-        }}
-        aria-label={t("Déplacer la leçon", "Move the lesson")}
-        title={t("Glisser pour changer l'ordre", "Drag to change the order")}
-      >
-        <Icon name="grip" size={16} stroke={2.8} />
-      </button>
-      <span className="pl-index num">{current ? <Orb size={10} /> : index + 1}</span>
-      <button className="pl-row-hit" onClick={onOpen} aria-label={t(`Ouvrir ${l.title}`, `Open ${l.title}`)} />
+      {selecting ? (
+        <span className="pl-grip" aria-hidden="true" />
+      ) : (
+        <button
+          className="pl-grip"
+          onPointerDown={(e) => {
+            e.preventDefault();
+            controls.start(e);
+          }}
+          aria-label={t("Déplacer la leçon", "Move the lesson")}
+          title={t("Glisser pour changer l'ordre", "Drag to change the order")}
+        >
+          <Icon name="grip" size={16} stroke={2.8} />
+        </button>
+      )}
+      <span className="pl-index num">
+        {selecting ? (
+          <span className={`lib-check ${picked ? "on" : ""}`} aria-hidden="true">
+            <Icon name="check" size={11} stroke={3} />
+          </span>
+        ) : current ? (
+          <Orb size={10} />
+        ) : (
+          index + 1
+        )}
+      </span>
+      {selecting ? (
+        <button className="pl-row-hit" onClick={onPick} aria-pressed={picked} aria-label={t(`Sélectionner ${l.title}`, `Select ${l.title}`)} />
+      ) : (
+        <button className="pl-row-hit" onClick={onOpen} aria-label={t(`Ouvrir ${l.title}`, `Open ${l.title}`)} />
+      )}
       <div className="pl-thumb">
         <Cover lesson={l} bare />
-        <button
-          className="pl-thumb-play"
-          onClick={onPlay}
-          aria-label={book ? t(`Lire à partir de ${l.title}`, `Read from ${l.title}`) : t(`Écouter à partir de ${l.title}`, `Play from ${l.title}`)}
-          title={book ? t("Lire le livre à partir d'ici", "Read the book from here") : t("Écouter la playlist à partir d'ici", "Play the playlist from here")}
-        >
-          <Icon name={book ? "book" : "play"} size={14} />
-        </button>
+        {!selecting && (
+          <button
+            className="pl-thumb-play"
+            onClick={onPlay}
+            aria-label={book ? t(`Lire à partir de ${l.title}`, `Read from ${l.title}`) : t(`Écouter à partir de ${l.title}`, `Play from ${l.title}`)}
+            title={book ? t("Lire le livre à partir d'ici", "Read the book from here") : t("Écouter la playlist à partir d'ici", "Play the playlist from here")}
+          >
+            <Icon name={book ? "book" : "play"} size={14} />
+          </button>
+        )}
       </div>
       <div className="pl-row-body">
         <strong>{l.title}</strong>
@@ -575,11 +865,32 @@ function Row({
             </span>
           )
         )}
-        <button className="icon-btn pl-remove" onClick={onRemove} aria-label={t("Retirer de la playlist", "Remove from the playlist")}
-          title={t("Retirer de la playlist (la leçon reste dans la bibliothèque)", "Remove from the playlist (the lesson stays in the library)")}
-        >
-          <Icon name="close" size={15} />
-        </button>
+        {!selecting && (
+          <Menu
+            open={menu}
+            onClose={() => setMenu(false)}
+            align="right"
+            anchor={
+              <button className="icon-btn pl-row-more" onClick={() => setMenu((m) => !m)} aria-label={t("Options de la leçon", "Lesson options")}>
+                <Icon name="more" size={17} stroke={2.6} />
+              </button>
+            }
+          >
+            <button className="menu-item" onClick={run(onMark)}>
+              <Icon name={l.completed ? "unread" : "read"} size={16} /> {l.completed ? t("Marquer comme non lu", "Mark as unread") : t("Marquer comme lu", "Mark as read")}
+            </button>
+            <button className="menu-item" onClick={run(onRemove)}>
+              <Icon name="close" size={16} /> {book ? t("Retirer du livre", "Remove from the book") : t("Retirer de la playlist", "Remove from the playlist")}
+            </button>
+            <button className="menu-item" onClick={run(onSelect)}>
+              <Icon name="check" size={16} /> {t("Sélectionner plusieurs leçons", "Select several lessons")}
+            </button>
+            <div className="menu-sep" />
+            <button className="menu-item danger" onClick={run(onDelete)}>
+              <Icon name="trash" size={16} /> {t("Supprimer de la bibliothèque", "Delete from the library")}
+            </button>
+          </Menu>
+        )}
       </div>
     </Reorder.Item>
   );
