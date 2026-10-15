@@ -49,33 +49,8 @@ pub fn cached_path(data_dir: &Path, m: &ModelInfo, lang: &str, text: &str, voice
 /// (Retourne None si l'ELF de Lumen ne se laisse pas lire : lancement direct.)
 #[cfg(target_os = "linux")]
 fn engine_command(data_dir: &Path) -> Option<tokio::process::Command> {
-    // notre propre éditeur de liens : PT_INTERP de /proc/self/exe
     let exe = std::fs::read(std::fs::read_link("/proc/self/exe").ok()?).ok()?;
-    if exe.first()? != &0x7f || exe.get(1)? != &b'E' {
-        return None;
-    }
-    let u16at = |i: usize| -> Option<u16> {
-        let b = exe.get(i..i + 2)?;
-        Some(u16::from_le_bytes([b[0], b[1]]))
-    };
-    let u64at = |i: usize| -> Option<u64> {
-        let b = exe.get(i..i + 8)?;
-        Some(u64::from_le_bytes(b.try_into().ok()?))
-    };
-    let phoff = u64at(0x20)? as usize;
-    let phsize = u16at(0x36)? as usize;
-    let phnum = u16at(0x38)? as usize;
-    let mut interp: Option<&[u8]> = None;
-    for i in 0..phnum {
-        let p = phoff + i * phsize;
-        // PT_INTERP (3) : le chemin de l'éditeur, en chaîne à zéro
-        if u32::from_le_bytes([*exe.get(p)?, *exe.get(p + 1)?, *exe.get(p + 2)?, *exe.get(p + 3)?]) == 3 {
-            let off = u64at(p + 8)? as usize;
-            let end = exe[off..].iter().position(|b| *b == 0)? + off;
-            interp = Some(&exe[off..end]);
-        }
-    }
-    let interp = std::str::from_utf8(interp?).ok()?;
+    let interp = elf_interpreter(&exe)?;
     // les bibliothèques du moteur : la libc et ses sœurs viennent du dossier de
     // l'éditeur de liens lui-même (une seule libc, celle qui l'accompagne —
     // /proc/self/maps peut contenir une seconde libc chargée en privé par une
@@ -83,7 +58,7 @@ fn engine_command(data_dir: &Path) -> Option<tokio::process::Command> {
     // libstdc++ et libgcc_s, de la première chargée par l'app.
     let mut dirs: Vec<String> = vec![
         crate::sherpa::dir(data_dir).join("lib").display().to_string(),
-        Path::new(interp).parent().map(|d| d.display().to_string())?,
+        Path::new(&interp).parent().map(|d| d.display().to_string())?,
     ];
     let mut have_cxx = false;
     let mut have_gcc = false;
@@ -106,9 +81,41 @@ fn engine_command(data_dir: &Path) -> Option<tokio::process::Command> {
             break;
         }
     }
-    let mut cmd = crate::proc::tokio_command(interp);
+    let mut cmd = crate::proc::tokio_command(&interp);
     cmd.arg("--library-path").arg(dirs.join(":")).arg(crate::sherpa::bin(data_dir, crate::sherpa::Tool::Tts));
     Some(cmd)
+}
+
+/// Lit l'éditeur de liens d'un exécutable ELF64 (segment PT_INTERP) : c'est
+/// lui qui charge le binaire et ses bibliothèques. Sous Linux sans paquet
+/// (NixOS), le moteur téléchargé attend celui du système, absent : Lumen lui
+/// prête le sien.
+#[cfg(target_os = "linux")]
+fn elf_interpreter(exe: &[u8]) -> Option<String> {
+    if exe.first()? != &0x7f || exe.get(1)? != &b'E' {
+        return None;
+    }
+    let u16at = |i: usize| -> Option<u16> {
+        let b = exe.get(i..i + 2)?;
+        Some(u16::from_le_bytes([b[0], b[1]]))
+    };
+    let u64at = |i: usize| -> Option<u64> {
+        let b = exe.get(i..i + 8)?;
+        Some(u64::from_le_bytes(b.try_into().ok()?))
+    };
+    let phoff = u64at(0x20)? as usize;
+    let phsize = u16at(0x36)? as usize;
+    let phnum = u16at(0x38)? as usize;
+    for i in 0..phnum {
+        let p = phoff + i * phsize;
+        let kind = u32::from_le_bytes([*exe.get(p)?, *exe.get(p + 1)?, *exe.get(p + 2)?, *exe.get(p + 3)?]);
+        if kind == 3 {
+            let off = u64at(p + 8)? as usize;
+            let end = exe[off..].iter().position(|b| *b == 0)? + off;
+            return std::str::from_utf8(&exe[off..end]).ok().map(String::from);
+        }
+    }
+    None
 }
 
 /// Lance le moteur une fois : `text` prononcé dans `out` (WAV PCM 16 bits mono).
@@ -558,6 +565,47 @@ mod tests {
     fn polish_leaves_unknown_formats_alone() {
         assert!(polish_wav(b"pas un wav").is_none());
         assert!(polish_wav(&wav(&[0; 100], 1000)).is_none());
+    }
+
+    /// Un ELF64 minimal avec un segment PT_INTERP : l'en-tête (64 octets),
+    /// un programme d'en-tête (56 octets) de type 3, et le chemin.
+    #[cfg(target_os = "linux")]
+    fn elf_with_interpreter(path: &str) -> Vec<u8> {
+        let mut e = vec![0u8; 64];
+        e[0] = 0x7f;
+        e[1] = b'E';
+        e[2] = b'L';
+        e[3] = b'F';
+        e[4] = 2; // ELF64
+        e[5] = 1; // little endian
+        e[0x20..0x28].copy_from_slice(&64u64.to_le_bytes()); // e_phoff
+        e[0x36..0x38].copy_from_slice(&56u16.to_le_bytes()); // e_phentsize
+        e[0x38..0x3a].copy_from_slice(&1u16.to_le_bytes()); // e_phnum
+        let mut p = vec![0u8; 56];
+        p[0..4].copy_from_slice(&3u32.to_le_bytes()); // PT_INTERP
+        let path_off = 64 + 56;
+        p[8..16].copy_from_slice(&(path_off as u64).to_le_bytes()); // p_offset
+        p[32..40].copy_from_slice(&(path.len() as u64 + 1).to_le_bytes()); // p_filesz
+        let mut out = e;
+        out.extend(p);
+        out.extend_from_slice(path.as_bytes());
+        out.push(0);
+        out
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn elf_interpreter_is_found() {
+        let elf = elf_with_interpreter("/nix/store/…-glibc/lib/ld-linux-x86-64.so.2");
+        assert_eq!(elf_interpreter(&elf).as_deref(), Some("/nix/store/…-glibc/lib/ld-linux-x86-64.so.2"));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn elf_interpreter_rejects_non_elf() {
+        assert!(elf_interpreter(b"pas un elf").is_none());
+        assert!(elf_interpreter(b"\x7fEL\x00").is_none()); // magie incomplète
+        assert!(elf_interpreter(&[]).is_none());
     }
 }
 
