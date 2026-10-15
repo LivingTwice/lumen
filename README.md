@@ -72,6 +72,7 @@ The code is public precisely so that anyone can check this.
 
 - **Mac** (M1 or later, macOS 13 Ventura or later): open the DMG and drag Lumen into Applications. Lumen isn't verified by Apple yet: on first launch, go to **System Settings › Privacy & Security** and click **Open Anyway**.
 - **Windows** (10 or 11, 64-bit): run `Lumen_<version>_x64-setup.exe`. No administrator password needed. The installer isn't signed yet: if Windows shows “Windows protected your PC”, click **More info**, then **Run anyway**. The local AI runs on the graphics card through Vulkan (NVIDIA, AMD or Intel, with an up-to-date driver), or on the processor when there is no compatible card; the processor needs AVX2 (Intel since 2013, AMD since 2015).
+- **Linux** (x86_64, Wayland or X11): from this repository, `nix run .#lumen` (Nix/NixOS, with flakes) or `npm run app:build` (see below). The local AI runs on the graphics card through Vulkan (NVIDIA, AMD or Intel; the processor needs AVX2 as a fallback); video playback needs GStreamer plugins (H.264/AAC) and the system voice needs speech-dispatcher — the nix package wraps both. Updates follow your package manager: nothing installs itself. To reuse your system's already-downloaded toolchains, pin this flake's nixpkgs to the same revision: `nix flake lock --override-input nixpkgs github:NixOS/nixpkgs/<rev>` (needs a nixpkgs recent enough to have `webkitgtk_4_1`).
 
 The AI models (about 0.5 to 3 GB depending on the profile you choose) download on first launch. After that, everything works offline.
 
@@ -87,7 +88,7 @@ source scripts/mac-env.sh && npm run app:build -- --bundles app,dmg   # installa
 node scripts/build-windows.mjs           # Windows build, cross-compiled on the Mac (cargo-xwin, NSIS)
 ```
 
-The first build takes about ten minutes (llama.cpp and whisper.cpp). On a Windows PC, `npm run app:build` works with Visual Studio Build Tools, CMake and LLVM.
+The first build takes about ten minutes (llama.cpp and whisper.cpp). On a Windows PC, `npm run app:build` works with Visual Studio Build Tools, CMake and LLVM. On Linux, install `libwebkit2gtk-4.1-dev libgtk-3-dev libsoup-3.0-dev libjavascriptcoregtk-4.1-dev pkg-config cmake clang` (Debian names) plus Node.js and Rust, then use the same commands (`npm run app:dev`, `npm run app:build -- --bundles deb`); `nix develop` gives the whole toolchain ready.
 
 Checks:
 

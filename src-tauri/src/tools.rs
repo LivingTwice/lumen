@@ -20,19 +20,29 @@ fn home() -> String {
 
 /// Emplacements usuels des outils installés par Homebrew ou à la main
 /// (une app lancée depuis le Finder n'hérite pas du PATH du Terminal).
+/// Sous Linux, le PATH aussi est parcouru (une app lancée du bureau l'hérite),
+/// et les profils de NixOS.
 fn system_candidates(name: &str) -> Vec<PathBuf> {
     if cfg!(windows) {
         return windows_candidates(name);
     }
     let h = home();
-    vec![
+    let mut out = vec![
         PathBuf::from(format!("/opt/homebrew/bin/{name}")),
         PathBuf::from(format!("/usr/local/bin/{name}")),
         PathBuf::from(format!("{h}/.homebrew/bin/{name}")),
         PathBuf::from(format!("{h}/.local/bin/{name}")),
         PathBuf::from(format!("{h}/.deno/bin/{name}")),
         PathBuf::from(format!("/usr/bin/{name}")),
-    ]
+    ];
+    if cfg!(target_os = "linux") {
+        if let Some(path) = std::env::var_os("PATH") {
+            out.extend(std::env::split_paths(&path).map(|d| d.join(name)));
+        }
+        out.push(PathBuf::from(format!("/run/current-system/sw/bin/{name}")));
+        out.push(PathBuf::from(format!("/etc/profiles/per-user/{h}/bin/{name}")));
+    }
+    out
 }
 
 /// Windows : outils installés par winget, Scoop, Chocolatey, l'installateur de

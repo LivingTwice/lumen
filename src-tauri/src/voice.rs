@@ -29,6 +29,7 @@ fn speaker(voice: &str) -> u32 {
     }
 }
 
+
 /// Dossier des prononciations en cache (dans `media/`, lisible par l'interface).
 fn cache_dir(data_dir: &Path) -> PathBuf {
     data_dir.join("media").join("voice")
@@ -41,10 +42,89 @@ pub fn cached_path(data_dir: &Path, m: &ModelInfo, lang: &str, text: &str, voice
     cache_dir(data_dir).join(format!("{}.wav", &hex::encode(h.finalize())[..20]))
 }
 
+/// Linux : le moteur téléchargé attend l'éditeur de liens du système
+/// (/lib64/ld-linux…), qui n'existe pas sous NixOS. On le lance avec celui de
+/// Lumen et les bibliothèques déjà chargées par l'app (la libc, libstdc++…) :
+/// le moteur trouve ainsi tout ce qu'il lui faut, sur toute distribution.
+/// (Retourne None si l'ELF de Lumen ne se laisse pas lire : lancement direct.)
+#[cfg(target_os = "linux")]
+fn engine_command(data_dir: &Path) -> Option<tokio::process::Command> {
+    let exe = std::fs::read(std::fs::read_link("/proc/self/exe").ok()?).ok()?;
+    let interp = elf_interpreter(&exe)?;
+    // les bibliothèques du moteur : la libc et ses sœurs viennent du dossier de
+    // l'éditeur de liens lui-même (une seule libc, celle qui l'accompagne —
+    // /proc/self/maps peut contenir une seconde libc chargée en privé par une
+    // bibliothèque de l'app, qui mélangée à l'autre écrase la pile du moteur) ;
+    // libstdc++ et libgcc_s, de la première chargée par l'app.
+    let mut dirs: Vec<String> = vec![
+        crate::sherpa::dir(data_dir).join("lib").display().to_string(),
+        Path::new(&interp).parent().map(|d| d.display().to_string())?,
+    ];
+    let mut have_cxx = false;
+    let mut have_gcc = false;
+    for line in std::fs::read_to_string("/proc/self/maps").ok()?.lines() {
+        let Some((_, path)) = line.rsplit_once(' ') else { continue };
+        let Some(name) = Path::new(path).file_name().and_then(|n| n.to_str()) else { continue };
+        let Some(dir) = Path::new(path).parent().map(|d| d.display().to_string()) else { continue };
+        if !have_cxx && name.starts_with("libstdc++.so") {
+            have_cxx = true;
+            if !dirs.contains(&dir) {
+                dirs.push(dir);
+            }
+        } else if !have_gcc && name.starts_with("libgcc_s.so") {
+            have_gcc = true;
+            if !dirs.contains(&dir) {
+                dirs.push(dir);
+            }
+        }
+        if have_cxx && have_gcc {
+            break;
+        }
+    }
+    let mut cmd = crate::proc::tokio_command(&interp);
+    cmd.arg("--library-path").arg(dirs.join(":")).arg(crate::sherpa::bin(data_dir, crate::sherpa::Tool::Tts));
+    Some(cmd)
+}
+
+/// Lit l'éditeur de liens d'un exécutable ELF64 (segment PT_INTERP) : c'est
+/// lui qui charge le binaire et ses bibliothèques. Sous Linux sans paquet
+/// (NixOS), le moteur téléchargé attend celui du système, absent : Lumen lui
+/// prête le sien.
+#[cfg(target_os = "linux")]
+fn elf_interpreter(exe: &[u8]) -> Option<String> {
+    if exe.first()? != &0x7f || exe.get(1)? != &b'E' {
+        return None;
+    }
+    let u16at = |i: usize| -> Option<u16> {
+        let b = exe.get(i..i + 2)?;
+        Some(u16::from_le_bytes([b[0], b[1]]))
+    };
+    let u64at = |i: usize| -> Option<u64> {
+        let b = exe.get(i..i + 8)?;
+        Some(u64::from_le_bytes(b.try_into().ok()?))
+    };
+    let phoff = u64at(0x20)? as usize;
+    let phsize = u16at(0x36)? as usize;
+    let phnum = u16at(0x38)? as usize;
+    for i in 0..phnum {
+        let p = phoff + i * phsize;
+        let kind = u32::from_le_bytes([*exe.get(p)?, *exe.get(p + 1)?, *exe.get(p + 2)?, *exe.get(p + 3)?]);
+        if kind == 3 {
+            let off = u64at(p + 8)? as usize;
+            let end = exe[off..].iter().position(|b| *b == 0)? + off;
+            return std::str::from_utf8(&exe[off..end]).ok().map(String::from);
+        }
+    }
+    None
+}
+
 /// Lance le moteur une fois : `text` prononcé dans `out` (WAV PCM 16 bits mono).
 async fn run_engine(data_dir: &Path, m: &ModelInfo, lang: &str, text: &str, voice: &str, threads: u32, out: &Path) -> Result<()> {
     let model = models::path_of(data_dir, m);
     let f = |name: &str| model.join(name);
+    #[cfg(target_os = "linux")]
+    let mut cmd = engine_command(data_dir).unwrap_or_else(|| crate::proc::tokio_command(crate::sherpa::bin(data_dir, crate::sherpa::Tool::Tts)));
+    #[cfg(not(target_os = "linux"))]
     let mut cmd = crate::proc::tokio_command(crate::sherpa::bin(data_dir, crate::sherpa::Tool::Tts));
     cmd.arg(format!("--supertonic-duration-predictor={}", f("duration_predictor.int8.onnx").display()))
         .arg(format!("--supertonic-text-encoder={}", f("text_encoder.int8.onnx").display()))
@@ -61,10 +141,19 @@ async fn run_engine(data_dir: &Path, m: &ModelInfo, lang: &str, text: &str, voic
         .arg(format!("--output-filename={}", out.display()))
         .arg(text)
         .kill_on_drop(true);
+    // LUMEN_DEBUG_VOICE=1 : l'appel exact sur la console, pour le rejouer à la main
+    // et comparer
+    if std::env::var_os("LUMEN_DEBUG_VOICE").is_some() {
+        eprintln!("lumen voix : {:?}", cmd.as_std());
+    }
     let res = tokio::time::timeout(Duration::from_secs(120), cmd.output())
         .await
-        .map_err(|_| anyhow!(crate::i18n::t("la voix a mis trop de temps à répondre", "the voice took too long to answer")))??;
+        .map_err(|_| anyhow!(crate::i18n::t("la voix a mis trop de temps à répondre", "the voice took too long to answer")))?
+        .map_err(|e| anyhow!(crate::tr!("le moteur de voix n'a pas pu être lancé : {}", "the voice engine couldn't be started: {}", e)))?;
     if !res.status.success() || !out.exists() {
+        // la raison sur la console : ce moteur vit hors de l'app, ses erreurs ne se voient pas autrement
+        let why: String = String::from_utf8_lossy(&res.stderr).trim().chars().take(300).collect();
+        eprintln!("lumen : moteur de voix échoué : {why}");
         let _ = tokio::fs::remove_file(out).await;
         return Err(anyhow!(crate::i18n::t("La voix n'a pas pu prononcer ce texte.", "The voice couldn't pronounce this text.")));
     }
@@ -360,14 +449,14 @@ pub(crate) fn level_volume(all: &mut [i16]) {
 
 /// Enregistre un son assemblé dans `media/<horodatage>.<tag>.m4a`, compressé en
 /// AAC (environ 0,5 Mo par minute au lieu de 5 Mo en WAV) ; en WAV si la compression
-/// échoue (`afconvert` sur Mac, l'encodeur de Windows sur PC).
+/// échoue (`afconvert` sur Mac, l'encodeur de Windows sur PC, `ffmpeg` sous Linux).
 /// `work` : dossier de travail, où passe le WAV intermédiaire.
 pub(crate) async fn save_m4a(work: &Path, media: &Path, tag: &str, rate: u32, samples: &[i16]) -> Result<PathBuf> {
     let wav_path = work.join(format!("{tag}.wav"));
     tokio::fs::write(&wav_path, write_wav(rate, samples)).await?;
     let stem = crate::media::new_stem();
     let m4a = media.join(format!("{stem}.{tag}.m4a"));
-    #[cfg(not(windows))]
+    #[cfg(target_os = "macos")]
     let converted = tokio::process::Command::new("afconvert")
         .args(["-f", "m4af", "-d", "aac", "-b", "64000"])
         .arg(&wav_path)
@@ -381,6 +470,17 @@ pub(crate) async fn save_m4a(work: &Path, media: &Path, tag: &str, rate: u32, sa
         let (out, pcm) = (m4a.clone(), samples.to_vec());
         tokio::task::spawn_blocking(move || crate::win::aac_m4a(rate, &pcm, &out)).await.map(|r| r.is_ok()).unwrap_or(false)
     };
+    // Linux : ffmpeg s'il est installé (le paquet nix le met au chaud)
+    #[cfg(target_os = "linux")]
+    let converted = tokio::process::Command::new("ffmpeg")
+        .args(["-y", "-nostdin", "-loglevel", "error", "-i"])
+        .arg(&wav_path)
+        .args(["-c:a", "aac", "-b:a", "96000"])
+        .arg(&m4a)
+        .output()
+        .await
+        .map(|o| o.status.success())
+        .unwrap_or(false);
     if converted && m4a.exists() {
         let _ = tokio::fs::remove_file(&wav_path).await;
         return Ok(m4a);
@@ -465,6 +565,47 @@ mod tests {
     fn polish_leaves_unknown_formats_alone() {
         assert!(polish_wav(b"pas un wav").is_none());
         assert!(polish_wav(&wav(&[0; 100], 1000)).is_none());
+    }
+
+    /// Un ELF64 minimal avec un segment PT_INTERP : l'en-tête (64 octets),
+    /// un programme d'en-tête (56 octets) de type 3, et le chemin.
+    #[cfg(target_os = "linux")]
+    fn elf_with_interpreter(path: &str) -> Vec<u8> {
+        let mut e = vec![0u8; 64];
+        e[0] = 0x7f;
+        e[1] = b'E';
+        e[2] = b'L';
+        e[3] = b'F';
+        e[4] = 2; // ELF64
+        e[5] = 1; // little endian
+        e[0x20..0x28].copy_from_slice(&64u64.to_le_bytes()); // e_phoff
+        e[0x36..0x38].copy_from_slice(&56u16.to_le_bytes()); // e_phentsize
+        e[0x38..0x3a].copy_from_slice(&1u16.to_le_bytes()); // e_phnum
+        let mut p = vec![0u8; 56];
+        p[0..4].copy_from_slice(&3u32.to_le_bytes()); // PT_INTERP
+        let path_off = 64 + 56;
+        p[8..16].copy_from_slice(&(path_off as u64).to_le_bytes()); // p_offset
+        p[32..40].copy_from_slice(&(path.len() as u64 + 1).to_le_bytes()); // p_filesz
+        let mut out = e;
+        out.extend(p);
+        out.extend_from_slice(path.as_bytes());
+        out.push(0);
+        out
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn elf_interpreter_is_found() {
+        let elf = elf_with_interpreter("/nix/store/…-glibc/lib/ld-linux-x86-64.so.2");
+        assert_eq!(elf_interpreter(&elf).as_deref(), Some("/nix/store/…-glibc/lib/ld-linux-x86-64.so.2"));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn elf_interpreter_rejects_non_elf() {
+        assert!(elf_interpreter(b"pas un elf").is_none());
+        assert!(elf_interpreter(b"\x7fEL\x00").is_none()); // magie incomplète
+        assert!(elf_interpreter(&[]).is_none());
     }
 }
 

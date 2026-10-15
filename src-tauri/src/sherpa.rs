@@ -14,14 +14,32 @@ use anyhow::{anyhow, Result};
 use crate::models::{self, DownloadEvent};
 
 const VERSION: &str = "1.13.8";
-/// Archive du moteur pour ce système : macOS (puce Apple) ou Windows (x64,
-/// bibliothèque C++ intégrée : rien à installer à côté).
-const FLAVOR: &str = if cfg!(windows) { "win-x64-shared-MT-Release" } else { "osx-arm64-shared" };
+/// Archive du moteur pour ce système : macOS (puce Apple), Windows ou Linux
+/// (x64, bibliothèque C++ intégrée : rien à installer à côté).
+const FLAVOR: &str = if cfg!(windows) {
+    "win-x64-shared-MT-Release"
+} else if cfg!(all(target_os = "linux", target_arch = "x86_64")) {
+    "linux-x64-shared"
+} else {
+    "osx-arm64-shared"
+};
 /// Taille de cette archive, pour la progression.
-pub const SIZE: u64 = if cfg!(windows) { 24_805_859 } else { 20_314_448 };
+pub const SIZE: u64 = if cfg!(windows) {
+    24_805_859
+} else if cfg!(all(target_os = "linux", target_arch = "x86_64")) {
+    28_156_791
+} else {
+    20_314_448
+};
 /// Bibliothèques que chargent les outils (sous Windows, à côté d'eux) ; la
 /// seconde, facultative, peut manquer.
-const LIBS: &[&str] = if cfg!(windows) { &["bin/onnxruntime.dll", "bin/onnxruntime_providers_shared.dll"] } else { &["lib/libonnxruntime.dylib"] };
+const LIBS: &[&str] = if cfg!(windows) {
+    &["bin/onnxruntime.dll", "bin/onnxruntime_providers_shared.dll"]
+} else if cfg!(target_os = "linux") {
+    &["lib/libonnxruntime.so"]
+} else {
+    &["lib/libonnxruntime.dylib"]
+};
 
 /// Les outils du moteur dont Lumen se sert.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -50,7 +68,7 @@ fn name() -> String {
     format!("sherpa-onnx-v{VERSION}-{FLAVOR}")
 }
 
-fn dir(data_dir: &Path) -> PathBuf {
+pub fn dir(data_dir: &Path) -> PathBuf {
     crate::tools::tools_dir(data_dir).join(name())
 }
 
@@ -86,7 +104,7 @@ pub async fn ensure(data_dir: &Path, tool: Tool, cancel: Arc<AtomicBool>, mut on
     if ready(data_dir, tool) {
         return Ok(());
     }
-    if !cfg!(any(all(target_os = "macos", target_arch = "aarch64"), all(windows, target_arch = "x86_64"))) {
+    if !cfg!(any(all(target_os = "macos", target_arch = "aarch64"), all(windows, target_arch = "x86_64"), all(target_os = "linux", target_arch = "x86_64"))) {
         return Err(anyhow!(match tool {
             Tool::Tts => crate::i18n::t("La voix naturelle n'est pas encore disponible sur cet ordinateur.", "The natural voice isn't available on this computer yet."),
             Tool::Asr => crate::i18n::t("Parakeet n'est pas encore disponible sur cet appareil.", "Parakeet isn't available on this device yet."),
@@ -110,10 +128,11 @@ pub async fn ensure(data_dir: &Path, tool: Tool, cancel: Arc<AtomicBool>, mut on
     let tmp = tools.join(".sherpa-extraction");
     let _ = tokio::fs::remove_dir_all(&tmp).await;
     tokio::fs::create_dir_all(&tmp).await?;
-    #[cfg(not(windows))]
+    // macOS : le tar du système ; ailleurs, décompressé ici (le tar de Windows 10
+    // ne lit pas toujours le bzip2, et NixOS n'a pas de tar système pour l'app)
+    #[cfg(target_os = "macos")]
     let ok = tokio::process::Command::new("tar").arg("-xjf").arg(&part).arg("-C").arg(&tmp).args(&wanted).output().await?.status.success();
-    // Windows : décompressé ici (le tar de Windows 10 ne lit pas toujours le bzip2)
-    #[cfg(windows)]
+    #[cfg(not(target_os = "macos"))]
     let ok = {
         let (archive, dest) = (part.clone(), tmp.clone());
         tokio::task::spawn_blocking(move || models::unpack_tar(&archive, &dest, Some(&wanted))).await?.is_ok()
