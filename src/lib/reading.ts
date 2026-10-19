@@ -1,7 +1,7 @@
 import type { CSSProperties } from "react";
 import { t } from "./i18n";
 import { langInfo } from "./langs";
-import { isWindows } from "./platform";
+import { isPc } from "./platform";
 
 /**
  * Affichage des leçons : mise en page, police, taille, couleur de la page,
@@ -48,7 +48,7 @@ export const READ_FONTS: ReadFont[] = [
 ];
 
 /** Polices proposées sur ce système (une police du Mac choisie avant reste lisible : `readFont`). */
-export const readFonts = (): ReadFont[] => (isWindows ? READ_FONTS.filter((f) => !f.mac) : READ_FONTS);
+export const readFonts = (): ReadFont[] => (isPc ? READ_FONTS.filter((f) => !f.mac) : READ_FONTS);
 
 export interface Paper {
   id: string;
