@@ -7,6 +7,7 @@ import { api, errorText } from "../lib/api";
 import { openSource } from "../lib/discover";
 import { t } from "../lib/i18n";
 import { latency, onlineProviders, useChatGpt, useOnline, type OnlineProvider } from "../lib/online";
+import { isIOS } from "../lib/platform";
 import { useApp } from "../lib/store";
 import type { OnlineCheck } from "../lib/types";
 
@@ -349,7 +350,9 @@ function ChatGptAccount() {
           <span className="grow muted">
             {status?.expired
               ? t(`La connexion de ${status.email || "votre compte"} a expiré.`, `The connection of ${status.email || "your account"} has expired.`)
-              : t("Ouvrez ChatGPT dans le navigateur, acceptez, et revenez : aucune clé à copier.", "Open ChatGPT in the browser, accept, and come back: no key to copy.")}
+              : isIOS
+                ? t("Connectez-vous à ChatGPT dans la page qui s'ouvre et acceptez : aucune clé à copier.", "Sign in to ChatGPT on the page that opens and accept: no key to copy.")
+                : t("Ouvrez ChatGPT dans le navigateur, acceptez, et revenez : aucune clé à copier.", "Open ChatGPT in the browser, accept, and come back: no key to copy.")}
           </span>
           {busy === "in" ? (
             <button className="btn sm ghost" onClick={() => void api().modelCancel("chatgpt")}>
@@ -378,7 +381,7 @@ function ChatGptAccount() {
         {busy === "in" && (
           <motion.div key="in" className="key-note" {...enter}>
             <Orb size={16} />
-            <span>{t("Terminez la connexion dans votre navigateur…", "Finish signing in in your browser…")}</span>
+            <span>{isIOS ? t("Terminez la connexion dans la page de ChatGPT…", "Finish signing in on the ChatGPT page…") : t("Terminez la connexion dans votre navigateur…", "Finish signing in in your browser…")}</span>
           </motion.div>
         )}
         {busy === "check" && (

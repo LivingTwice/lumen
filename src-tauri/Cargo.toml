@@ -4,7 +4,7 @@ resolver = "2"
 
 [package]
 name = "lumen"
-version = "1.2.0"
+version = "1.3.0"
 description = "Lumen : apprendre les langues en lisant et en écoutant"
 authors = ["Ulysse Rives"]
 license = "GPL-3.0-or-later"
@@ -18,6 +18,8 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
 tauri-build = { version = "2.7", features = [] }
+# Whisper dans l'app (iPhone et iPad) : whisper.cpp compilé avec la ggml de llama.cpp (build.rs)
+cc = "1"
 
 [dependencies]
 tauri = { version = "2.12", features = ["protocol-asset", "macos-private-api"] }
@@ -43,11 +45,18 @@ getrandom = "0.3"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 llama-cpp-2 = { version = "0.1.158", default-features = false, features = ["metal", "mtmd"] }
+
+# Mac, iPhone et iPad : les mêmes outils d'Apple (AVFoundation, AudioToolbox, Foundation)
+[target.'cfg(any(target_os = "macos", target_os = "ios"))'.dependencies]
+# dépendance directe (déjà là par llama-cpp-2) : build.rs y lit où sont les en-têtes de
+# ggml (DEP_LLAMA_GGML_CMAKE_DIR), pour y greffer Whisper sur iPhone et iPad
+llama-cpp-sys-2 = { version = "0.1.158", default-features = false }
 # état d'envoi vers iCloud des sauvegardes (déjà compilés pour Tauri)
 objc2 = { version = "0.6", features = ["exception"] }
 objc2-foundation = "0.3"
 # allègement des vidéos et des sons importés (src/compress.rs) : HEVC par la
-# puce vidéo du Mac, AAC par les outils de macOS
+# puce vidéo, AAC par les outils d'Apple ; sur iPhone aussi le son des leçons
+# (voix, podcasts) et son décodage pour la transcription
 block2 = "0.6"
 objc2-core-foundation = { version = "0.3", default-features = false, features = ["std", "CFString", "CFURL", "CFCGTypes"] }
 objc2-core-audio-types = { version = "0.3", default-features = false, features = ["std", "CoreAudioBaseTypes"] }
@@ -68,6 +77,9 @@ tauri-plugin-process = "2.4"
 # la version Windows sans les outils de macOS (archives .tar.bz2, couvertures)
 [target.'cfg(target_os = "ios")'.dependencies]
 llama-cpp-2 = { version = "0.1.158", default-features = false, features = ["metal", "mtmd"] }
+# la voix naturelle et Parakeet dans l'app (src/sherpa_ios.rs) : le crate officiel apporte
+# le framework iOS de sherpa-onnx (onnxruntime compris), intégré par gen/apple/project.yml
+sherpa-onnx = { version = "=1.13.8", default-features = false, features = ["shared"] }
 tar = "0.4"
 bzip2 = "0.6"
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp", "gif"] }

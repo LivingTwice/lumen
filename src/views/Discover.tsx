@@ -7,20 +7,22 @@ import { Menu, Orb, ScrollTop, Segmented, useGlow } from "../components/ui";
 import { formatWhen } from "../lib/backup";
 import { grainTexture, youtubeId } from "../lib/covers";
 import { LEVELS, ago, cleanTitle, fits, isNew, levelName, levelRange, markSeen, openSource, seenAt, unitsLabel, useDiscover, useLevel } from "../lib/discover";
-import { t } from "../lib/i18n";
+import { count, t } from "../lib/i18n";
 import { useImports } from "../lib/imports";
 import { useLessonOf } from "../lib/known";
 import { inLang } from "../lib/langs";
 import { fromItem, jobOf, usePreview } from "../lib/preview";
-import { useSearch } from "../lib/search";
+import { activeFilters, useFilters, useSearch } from "../lib/search";
 import { formatDuration, useApp } from "../lib/store";
 import type { DiscoverItem, LangCode } from "../lib/types";
-import { JobBadge, SearchBar, SearchResults, seedOf } from "./discover/Search";
+import { JobBadge, SearchBar, SearchResults, filterFinds, seedOf } from "./discover/Search";
 
 type Kind = "all" | "video" | "audio" | "text";
 
 /** Éléments au plus par rayon. */
 const SHELF_MAX = 18;
+/** Trouvailles filtrées affichées d'un coup, puis par « Voir plus ». */
+const BROWSE_BATCH = 36;
 
 function kindIcon(it: DiscoverItem): IconName {
   if (it.shelf === "music") return "music";
@@ -421,6 +423,16 @@ export function Discover({ lang }: { lang: LangCode }) {
     ].filter((s) => s.items.length > 0);
   }, [atLevel, shown, hero, level]);
 
+  // tri ou filtres choisis sans recherche : toutes les trouvailles à ce niveau, en une grille
+  const filters = useFilters();
+  const browsing = filters.sort !== "relevance" || activeFilters(filters) > 0;
+  const browsed = useMemo(
+    () => (browsing ? filterFinds(shown.filter((it) => it.shelf === "music" || fits(it, level)), filters) : []),
+    [browsing, shown, level, filters],
+  );
+  const [browseLimit, setBrowseLimit] = useState(BROWSE_BATCH);
+  useEffect(() => setBrowseLimit(BROWSE_BATCH), [filters, level, kind, lang]);
+
   const sourceNames = useMemo(() => [...new Set((feed?.items ?? []).map((it) => it.source_name))], [feed]);
   const first = !feed || (feed.refreshed_at === 0 && feed.items.length === 0);
 
@@ -524,43 +536,98 @@ export function Discover({ lang }: { lang: LangCode }) {
             )
           ) : (
             <AnimatePresence mode="wait">
-              <motion.div
-                key={`${level}-${kind}`}
-                className="disc-results"
-                initial={{ opacity: 0, y: 8 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, transition: { duration: 0.12 } }}
-                transition={{ duration: 0.28, ease: [0.2, 0.8, 0.2, 1] }}
-              >
-                {hero && <FindHero item={hero} lang={lang} />}
-                {shelves.map((s) => (
-                  <Shelf key={s.id} title={s.title} hint={s.hint} items={s.items} lang={lang} seen={seen} intro={intro} />
-                ))}
-                {!hero && shelves.length === 0 && (
-                  <div className="empty disc-empty">
-                    <Orb size={40} />
-                    <h3>{t(`Rien au niveau ${levelName(level)} pour l'instant`, `Nothing at level ${levelName(level)} for now`)}</h3>
-                    <p>
-                      {t(
-                        `Les sources ${inLang(lang)} proposent surtout d'autres niveaux aujourd'hui. Essayez le niveau voisin, ou cherchez ce qui vous intéresse dans le champ ci-dessus.`,
-                        `The sources ${inLang(lang)} mostly offer other levels today. Try the next level, or search for what interests you in the field above.`,
-                      )}
-                    </p>
-                    <div style={{ display: "flex", gap: 10 }}>
-                      {level > 1 && (
-                        <button className="btn outline" onClick={() => setLevel(level - 1)}>
-                          {levelName(level - 1)}
-                        </button>
-                      )}
-                      {level < 5 && (
-                        <button className="btn outline" onClick={() => setLevel(level + 1)}>
-                          {levelName(level + 1)}
-                        </button>
-                      )}
+              {browsing ? (
+                <motion.div
+                  key={`browse-${level}-${kind}-${filters.sort}-${filters.when}-${filters.length}-${filters.hideKnown}`}
+                  className="disc-results disc-browse"
+                  initial={{ opacity: 0, y: 8 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, transition: { duration: 0.12 } }}
+                  transition={{ duration: 0.28, ease: [0.2, 0.8, 0.2, 1] }}
+                >
+                  <header className="shelf-head">
+                    <div>
+                      <h3>
+                        {filters.sort === "recent"
+                          ? t("Les plus récentes d'abord", "Newest first")
+                          : filters.sort === "old"
+                            ? t("Les plus anciennes d'abord", "Oldest first")
+                            : t("Vos trouvailles filtrées", "Your filtered finds")}
+                      </h3>
+                      <p>
+                        {browsed.length
+                          ? t(
+                              `${count(browsed.length, "trouvaille", "trouvailles", "", "")} au niveau ${levelName(level)}, d'après vos filtres`,
+                              `${count(browsed.length, "", "", "find", "finds")} at level ${levelName(level)}, matching your filters`,
+                            )
+                          : t("Rien ne répond à ces filtres pour l'instant.", "Nothing matches these filters for now.")}
+                      </p>
                     </div>
-                  </div>
-                )}
-              </motion.div>
+                  </header>
+                  {browsed.length > 0 ? (
+                    <div className="hit-grid disc-browse-grid">
+                      {browsed.slice(0, browseLimit).map((it, i) => (
+                        <FindCard key={it.id} item={it} lang={lang} index={i % BROWSE_BATCH} intro={i < BROWSE_BATCH} seen={seen} />
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="empty disc-empty">
+                      <Orb size={40} />
+                      <p>
+                        {t(
+                          "Élargissez la période ou la durée, ou cherchez en ligne dans le champ ci-dessus : les filtres s'y appliquent aussi.",
+                          "Widen the period or the length, or search online in the field above: the filters apply there too.",
+                        )}
+                      </p>
+                    </div>
+                  )}
+                  {browsed.length > browseLimit && (
+                    <div className="hit-more">
+                      <button className="btn outline" onClick={() => setBrowseLimit((n) => n + BROWSE_BATCH)}>
+                        {t("Voir plus", "Show more")}
+                      </button>
+                    </div>
+                  )}
+                </motion.div>
+              ) : (
+                <motion.div
+                  key={`${level}-${kind}`}
+                  className="disc-results"
+                  initial={{ opacity: 0, y: 8 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, transition: { duration: 0.12 } }}
+                  transition={{ duration: 0.28, ease: [0.2, 0.8, 0.2, 1] }}
+                >
+                  {hero && <FindHero item={hero} lang={lang} />}
+                  {shelves.map((s) => (
+                    <Shelf key={s.id} title={s.title} hint={s.hint} items={s.items} lang={lang} seen={seen} intro={intro} />
+                  ))}
+                  {!hero && shelves.length === 0 && (
+                    <div className="empty disc-empty">
+                      <Orb size={40} />
+                      <h3>{t(`Rien au niveau ${levelName(level)} pour l'instant`, `Nothing at level ${levelName(level)} for now`)}</h3>
+                      <p>
+                        {t(
+                          `Les sources ${inLang(lang)} proposent surtout d'autres niveaux aujourd'hui. Essayez le niveau voisin, ou cherchez ce qui vous intéresse dans le champ ci-dessus.`,
+                          `The sources ${inLang(lang)} mostly offer other levels today. Try the next level, or search for what interests you in the field above.`,
+                        )}
+                      </p>
+                      <div style={{ display: "flex", gap: 10 }}>
+                        {level > 1 && (
+                          <button className="btn outline" onClick={() => setLevel(level - 1)}>
+                            {levelName(level - 1)}
+                          </button>
+                        )}
+                        {level < 5 && (
+                          <button className="btn outline" onClick={() => setLevel(level + 1)}>
+                            {levelName(level + 1)}
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </motion.div>
+              )}
             </AnimatePresence>
           )}
 

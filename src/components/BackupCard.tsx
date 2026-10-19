@@ -1,6 +1,7 @@
 import { AnimatePresence, motion } from "motion/react";
 import { useEffect } from "react";
-import { isCloud, placeDir, useBackup } from "../lib/backup";
+import { isCloud, joinOtherDevice, pickBackupFolder, placeDir, useBackup } from "../lib/backup";
+import { isIOS } from "../lib/platform";
 import { useApp } from "../lib/store";
 import { Icon } from "./Icon";
 import { t } from "../lib/i18n";
@@ -29,12 +30,21 @@ export function BackupCard() {
     if (noDir && !useBackup.getState().places) void useBackup.getState().loadPlaces();
   }, [noDir]);
   const fallback = noDir ? places?.find((p) => p.kind !== "icloud") : undefined;
-  const offer = undecided && (!!status.dir || !!fallback) && Date.now() / 1000 - snooze > SNOOZE;
+  // iPhone et iPad : le dossier se choisit d'abord dans l'app Fichiers (celui du Mac)
+  const offer = undecided && (!!status.dir || !!fallback || isIOS) && Date.now() / 1000 - snooze > SNOOZE;
   const failing = !!status?.enabled && !!status.error && !saving && !status.running && !here;
   // « iCloud Drive », « Dropbox »… ; rien pour un dossier ordinaire
   const cloud = status?.dir ? (status.icloud ? "iCloud Drive" : isCloud(status.place) ? status.place.name : "") : (fallback?.name ?? "");
 
   const activate = async () => {
+    // iPhone et iPad : choisir le dossier « Lumen » ; la progression du Mac qui s'y trouve
+    // rejoint aussitôt celle de cet appareil, puis les deux restent réunis
+    if (isIOS && !status?.dir) {
+      const dir = await pickBackupFolder();
+      if (!dir) return;
+      await useBackup.getState().refresh();
+      await joinOtherDevice();
+    }
     if (fallback) {
       const dir = await placeDir(fallback);
       if (dir === null) return;
@@ -73,13 +83,19 @@ export function BackupCard() {
             </button>
           </div>
           <span className="muted" style={{ fontSize: 11.5, lineHeight: 1.45 }}>
-            {t(
-              `Une copie de vos mots et de vos leçons dans votre ${cloud || "dossier de sauvegarde"}, si ce Mac venait à s'effacer.`,
-              `A copy of your words and lessons in your ${cloud || "backup folder"}, in case this Mac is ever wiped.`,
-            )}
+            {isIOS && !status?.dir
+              ? t(
+                  "Choisissez le dossier « Lumen » où votre\u00a0Mac sauvegarde (iCloud Drive, Google Drive…) : sa progression arrive ici, et celle de cet appareil y sera à l'abri. Les deux restent ensuite réunies.",
+                  "Choose the “Lumen” folder your\u00a0Mac backs up to (iCloud Drive, Google Drive…): its progress comes here, and this device's progress will be safe there. The two then stay together.",
+                )
+              : t(
+                  `Une copie de vos mots et de vos leçons dans votre ${cloud || "dossier de sauvegarde"}, si ce Mac venait à s'effacer.`,
+                  `A copy of your words and lessons in your ${cloud || "backup folder"}, in case this Mac is ever wiped.`,
+                )}
           </span>
           <button className="btn sm primary glow" disabled={saving} onClick={() => void activate()}>
-            <Icon name="cloud" size={14} /> {saving ? t("Sauvegarde…", "Backing up…") : t("Activer la sauvegarde", "Turn on backup")}
+            <Icon name="cloud" size={14} />{" "}
+            {saving ? t("Sauvegarde…", "Backing up…") : isIOS && !status?.dir ? t("Choisir le dossier", "Choose the folder") : t("Activer la sauvegarde", "Turn on backup")}
           </button>
         </motion.div>
       )}

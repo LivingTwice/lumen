@@ -90,8 +90,12 @@ fn managed_qjs(data_dir: &Path) -> PathBuf {
     tools_dir(data_dir).join(if cfg!(windows) { "qjs.exe" } else { "qjs" })
 }
 
-/// yt-dlp disponible (système ou géré par Lumen).
+/// yt-dlp disponible (système ou géré par Lumen). Sur iPhone et iPad, YouTube passe
+/// par Lumen lui-même (ytnative.rs) : ce chemin n'est jamais lancé.
 pub fn find_ytdlp(data_dir: &Path) -> Option<PathBuf> {
+    if crate::ytnative::is_on() {
+        return Some(PathBuf::from("youtube"));
+    }
     let m = managed_ytdlp(data_dir);
     if m.exists() {
         return Some(m);
@@ -156,6 +160,9 @@ async fn fetch(url: &str, dest: &Path, mut on_progress: impl FnMut(u64, u64)) ->
 
 /// Installe (si besoin) yt-dlp et le moteur JavaScript. Renvoie le chemin de yt-dlp.
 pub async fn ensure_youtube_tools(data_dir: &Path, mut on_progress: impl FnMut(f64)) -> Result<PathBuf> {
+    if crate::ytnative::is_on() {
+        return Ok(PathBuf::from("youtube"));
+    }
     tokio::fs::create_dir_all(tools_dir(data_dir)).await?;
     let need_ytdlp = find_ytdlp(data_dir).is_none();
     let need_js = js_runtime_arg(data_dir).is_none();
@@ -207,5 +214,8 @@ async fn maybe_self_update(data_dir: &Path) {
 }
 
 pub fn status(data_dir: &Path) -> (bool, bool) {
+    if crate::ytnative::is_on() {
+        return (true, true);
+    }
     (find_ytdlp(data_dir).is_some(), js_runtime_arg(data_dir).is_some())
 }

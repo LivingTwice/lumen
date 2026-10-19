@@ -1234,6 +1234,17 @@ export function createMockApi(): Api {
       commit();
       return { counts: OTHER_MAC, missing_media: 0 };
     },
+    async backupSync() {
+      await sleep(500);
+      return null;
+    },
+    async backupMerge() {
+      await sleep(900);
+      return { terms: 0, known: 0, lessons: 0, progress: 0, removed: 0 };
+    },
+    async syncListen() {
+      return () => {};
+    },
     async backupListen(onStatus) {
       backupListeners.add(onStatus);
       return () => backupListeners.delete(onStatus);
@@ -1248,6 +1259,19 @@ export function createMockApi(): Api {
       await sleep(200);
       // Google Drive : rien à la racine du compte, tout dans « Mon Drive »
       return path.includes("GoogleDrive-") ? `${path}/${t("Mon Drive", "My Drive")}` : path;
+    },
+    async backupPickFolder() {
+      await sleep(400);
+      const dir = "/private/var/mobile/Library/Mobile Documents/com~apple~CloudDocs/Lumen";
+      db.settings.backup_dir = dir;
+      db.settings.backup_bookmark = "mock";
+      commit();
+      return dir;
+    },
+    async haptic() {},
+    async deviceInfo() {
+      // l'aperçu « iPhone » du navigateur se comporte comme un iPhone de 8 Go
+      return { machine: "iPhone17,3", memory: 8 * 1024 ** 3, available: 5 * 1024 ** 3, thermal: "nominal" };
     },
     async discoverList(lang) {
       const d = discover.get(lang);
@@ -1294,11 +1318,25 @@ export function createMockApi(): Api {
       discoverListeners.add(onChange);
       return () => discoverListeners.delete(onChange);
     },
-    async searchOnline(lang, platform, query, page, _filter, onEvent) {
+    async searchOnline(lang, platform, query, page, filter, onEvent) {
       onEvent({ type: "stage", stage: "search" });
       await sleep(platform === "youtube" ? 1100 : platform === "music" ? 1500 : 600);
-      if (!query.trim()) return { hits: [], more: false };
-      return { hits: searchHits(lang as LangCode, platform, query, page), more: page < 1 && platform !== "podcast" };
+      if (!query.trim()) return { hits: [], more: false, window: "" };
+      // les filtres comme le natif les applique, à gros traits (search::Filters)
+      const f = Object.fromEntries(filter.split(";").map((p) => p.split("=") as [string, string]));
+      let hits = searchHits(lang as LangCode, platform, query, page);
+      const now = Date.now() / 1000;
+      const span: Record<string, number> = { day: 86400, week: 7 * 86400, month: 31 * 86400, year: 366 * 86400 };
+      if (f.when && platform !== "youtube" && platform !== "music" && platform !== "wiki")
+        hits = hits.filter((h) => h.kind === "show" || (h.published > 0 && (f.when === "older" ? now - h.published > span.year : now - h.published <= span[f.when])));
+      if (f.len === "short") hits = hits.filter((h) => !h.duration || h.duration < 240);
+      if (f.len === "medium") hits = hits.filter((h) => !h.duration || (h.duration >= 240 && h.duration <= 1200));
+      if (f.len === "long") hits = hits.filter((h) => !h.duration || h.duration > 1200);
+      if (f.sort === "popular") hits = [...hits].sort((a, b) => b.count - a.count);
+      if (f.sort === "recent") hits = [...hits].sort((a, b) => b.published - a.published);
+      if (f.sort === "old") hits = [...hits].sort((a, b) => (a.published || Infinity) - (b.published || Infinity));
+      const window = platform !== "youtube" ? "" : f.win ?? (f.when ? "" : f.sort === "recent" ? "up:3" : f.sort === "old" ? "before:2014-01-01" : "");
+      return { hits, more: page < 1 && platform !== "podcast", window };
     },
     async mediaStream(_url, audio) {
       await sleep(700);

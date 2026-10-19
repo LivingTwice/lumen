@@ -77,6 +77,10 @@ export const DEFAULTS: Record<string, string> = {
   backup_dir: "",
   backup_audio: "1",
   backup_video: "0",
+  // réunir la progression des appareils par la sauvegarde (backup.rs, sync.rs) : "0" coupé
+  backup_sync: "1",
+  // iPhone et iPad : signet du dossier choisi dans l'app Fichiers (propre à l'appareil)
+  backup_bookmark: "",
   // vidéos et sons importés (src-tauri/src/compress.rs) : "original" (rien n'est réencodé),
   // "balanced" (HEVC et AAC, presque sans perte visible), "compact" (720p, sons plus légers)
   media_quality: "balanced",

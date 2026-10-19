@@ -1,5 +1,6 @@
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
-import { useCallback, useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from "react";
+import { createPortal } from "react-dom";
 import { useApp } from "../lib/store";
 import { Icon } from "./Icon";
 import { formatNumber, t } from "../lib/i18n";
@@ -152,6 +153,19 @@ export function useGlow<T extends HTMLElement>() {
   return { ref, onMouseMove };
 }
 
+/** Place d'un menu ouvert, en coordonnées de la fenêtre. */
+interface MenuSpot {
+  top: number;
+  left: number;
+  /** ouvert au-dessus de son bouton, faute de place dessous */
+  up: boolean;
+}
+
+/**
+ * Menu déroulant. Il est posé à la racine de la page (portail) et placé d'après son
+ * bouton : rendu dans la carte, il passait sous la carte suivante (chaque case animée
+ * forme sa propre couche) et se faisait couper par les rangées qui défilent.
+ */
 export function Menu({
   anchor,
   open,
@@ -166,37 +180,114 @@ export function Menu({
   align?: "left" | "right";
 }) {
   const ref = useRef<HTMLDivElement>(null);
+  const box = useRef<HTMLDivElement>(null);
+  const [spot, setSpot] = useState<MenuSpot | null>(null);
+  const place = useCallback(() => {
+    const a = ref.current?.getBoundingClientRect();
+    const el = box.current;
+    if (!a || !el) return;
+    // offsetWidth et offsetHeight ignorent l'animation d'entrée (échelle)
+    const w = el.offsetWidth;
+    const h = el.offsetHeight;
+    const edge = 8;
+    const gap = 6;
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    const up = a.bottom + gap + h > vh - edge && a.top - gap - h >= edge;
+    const top = up ? a.top - gap - h : Math.max(edge, Math.min(a.bottom + gap, vh - edge - h));
+    const left = Math.max(edge, Math.min(align === "right" ? a.right - w : a.left, vw - edge - w));
+    setSpot((s) => (s && s.top === top && s.left === left && s.up === up ? s : { top, left, up }));
+  }, [align]);
+  useLayoutEffect(() => {
+    if (open && !document.documentElement.classList.contains("compact")) place();
+    else setSpot(null);
+  }, [open, place]);
   useEffect(() => {
     if (!open) return;
-    const onDown = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) onClose();
+    const onDown = (e: MouseEvent | TouchEvent) => {
+      const target = e.target as Node;
+      if (ref.current?.contains(target) || box.current?.contains(target)) return;
+      onClose();
     };
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    // la page défile ou change de taille : le menu suit son bouton (pas la feuille de l'iPhone)
+    const follow = () => !document.documentElement.classList.contains("compact") && place();
     window.addEventListener("mousedown", onDown);
+    window.addEventListener("touchstart", onDown, { passive: true });
     window.addEventListener("keydown", onKey);
+    window.addEventListener("resize", follow);
+    window.addEventListener("scroll", follow, true);
     return () => {
       window.removeEventListener("mousedown", onDown);
+      window.removeEventListener("touchstart", onDown);
       window.removeEventListener("keydown", onKey);
+      window.removeEventListener("resize", follow);
+      window.removeEventListener("scroll", follow, true);
     };
-  }, [open, onClose]);
-  return (
-    <div ref={ref} style={{ position: "relative" }}>
-      {anchor}
-      <AnimatePresence>
-        {open && (
-          <motion.div
-            className="menu"
-            role="menu"
-            style={{ top: "calc(100% + 6px)", [align]: 0 }}
-            initial={{ opacity: 0, y: -6, scale: 0.97 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: -4, scale: 0.98 }}
-            transition={{ duration: 0.16 }}
-          >
-            {children}
-          </motion.div>
+  }, [open, onClose, place]);
+  // iPhone (écran étroit) : une feuille qui monte du bas, sous le pouce, qu'on referme en la tirant
+  const sheet = typeof document !== "undefined" && document.documentElement.classList.contains("compact");
+  if (sheet)
+    return (
+      <div ref={ref} className={`menu-anchor ${open ? "open" : ""}`} style={{ position: "relative" }}>
+        {anchor}
+        {createPortal(
+          <AnimatePresence>
+            {open && (
+              <motion.div key="scrim" className="m-scrim menu-scrim" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={onClose} />
+            )}
+            {open && (
+              <motion.div
+                key="sheet"
+                ref={box}
+                className="menu menu-sheet"
+                role="menu"
+                initial={{ y: "110%" }}
+                animate={{ y: 0 }}
+                exit={{ y: "110%" }}
+                transition={{ type: "spring", stiffness: 520, damping: 42 }}
+                drag="y"
+                dragConstraints={{ top: 0, bottom: 0 }}
+                dragElastic={{ top: 0.05, bottom: 0.6 }}
+                onDragEnd={(_, info) => (info.offset.y > 70 || info.velocity.y > 500) && onClose()}
+              >
+                <span className="m-grabber" aria-hidden="true" />
+                {children}
+              </motion.div>
+            )}
+          </AnimatePresence>,
+          document.body,
         )}
-      </AnimatePresence>
+      </div>
+    );
+  return (
+    <div ref={ref} className={`menu-anchor ${open ? "open" : ""}`} style={{ position: "relative" }}>
+      {anchor}
+      {createPortal(
+        <AnimatePresence>
+          {open && (
+            <motion.div
+              ref={box}
+              className="menu"
+              role="menu"
+              style={{
+                position: "fixed",
+                top: spot?.top ?? 0,
+                left: spot?.left ?? 0,
+                visibility: spot ? "visible" : "hidden",
+                transformOrigin: `${align === "right" ? "right" : "left"} ${spot?.up ? "bottom" : "top"}`,
+              }}
+              initial={{ opacity: 0, y: spot?.up ? 6 : -6, scale: 0.97 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: spot?.up ? 4 : -4, scale: 0.98 }}
+              transition={{ duration: 0.16 }}
+            >
+              {children}
+            </motion.div>
+          )}
+        </AnimatePresence>,
+        document.body,
+      )}
     </div>
   );
 }

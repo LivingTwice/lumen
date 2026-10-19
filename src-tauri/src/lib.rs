@@ -1,6 +1,9 @@
 #[macro_use]
 mod i18n;
 mod ai;
+// iPhone et iPad : pont vers l'interface d'iOS (dossiers de l'app Fichiers, iCloud, haptique)
+#[cfg(target_os = "ios")]
+mod ios;
 mod asr;
 mod backup;
 mod chatgpt;
@@ -22,13 +25,21 @@ mod podcast;
 mod proc;
 mod search;
 mod sherpa;
+// iPhone et iPad : la voix et Parakeet par la bibliothèque sherpa-onnx, dans l'app
+#[cfg(target_os = "ios")]
+mod sherpa_ios;
 mod state;
+mod sync;
 mod text;
 mod tools;
 mod user;
 mod voice;
 #[cfg(windows)]
 mod vulkan;
+// Whisper dans l'app : iPhone et iPad (essais sur Mac : LUMEN_WHISPER_INAPP=1)
+#[cfg(whisper_inapp)]
+mod whisper;
+mod ytnative;
 #[cfg(windows)]
 mod win;
 
@@ -57,6 +68,8 @@ pub fn run() {
             ai::set_gpu(db::setting(&conn, "ai_gpu").as_deref() != Some("0"));
             // allègement des médias : fichiers d'un travail interrompu, originaux mis de côté
             compress::sweep(&media::media_dir(&data_dir), |p| db::media_used(&conn, p, None));
+            // iPhone et iPad : le dossier de l'app change à chaque mise à jour ; les médias suivent
+            let _ = db::rebase_media(&conn, &media::media_dir(&data_dir));
             let resource_dir = app.path().resource_dir()?.join("dicts");
             let dicts = dict::Dicts::new(resource_dir, dict::dict_dir(&data_dir));
             let discover = discover::Store::open(&data_dir);
@@ -149,6 +162,11 @@ pub fn run() {
             commands::backup_restore,
             commands::backup_places,
             commands::backup_place_dir,
+            commands::backup_pick_folder,
+            commands::backup_sync,
+            commands::backup_merge,
+            commands::haptic,
+            commands::device_info,
             commands::discover_list,
             commands::discover_refresh,
             commands::discover_mark,

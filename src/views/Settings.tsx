@@ -14,8 +14,8 @@ import { LANGS, STARTERS, inLang, langInfo, langLower, starterCollection, theLan
 import { useDictStatus } from "../lib/dicts";
 import { LEVELS, levelName, openSource, unitsLabel, useLevel } from "../lib/discover";
 import { useLingq } from "../lib/lingq";
-import { isWindows } from "../lib/platform";
-import { PROFILES } from "../lib/profiles";
+import { isIOS, isWindows } from "../lib/platform";
+import { PROFILES, useRecommendedProfile } from "../lib/profiles";
 import { formatBytes, useApp, type SettingsTab } from "../lib/store";
 import { naturalVoiceFor, naturalVoices, pronounce } from "../lib/pronounce";
 import { loadVoices, sayWord, voicesFor } from "../lib/tts";
@@ -152,11 +152,13 @@ const groups = (): { title: string | null; tabs: Tab[] }[] => [
         id: "videos",
         icon: "video",
         label: t("Vidéos en ligne", "Online videos"),
-        lead: t(
-          "YouTube et la plupart des sites vidéo : le son est transcrit sur votre Mac et l'image téléchargée en haute définition.",
-          "YouTube and most video sites: the sound is transcribed on your Mac and the picture downloaded in high definition.",
-        ),
-        keys: "videos en ligne youtube navigateur cookies yt-dlp composants online videos browser components",
+        lead: isIOS
+          ? t("YouTube et Dailymotion : le son est transcrit sur votre Mac et l'image téléchargée en haute définition.", "YouTube and Dailymotion: the sound is transcribed on your Mac and the picture downloaded in high definition.")
+          : t(
+              "YouTube et la plupart des sites vidéo : le son est transcrit sur votre Mac et l'image téléchargée en haute définition.",
+              "YouTube and most video sites: the sound is transcribed on your Mac and the picture downloaded in high definition.",
+            ),
+        keys: "videos en ligne youtube dailymotion navigateur cookies yt-dlp composants online videos browser components",
       },
     ],
   },
@@ -171,7 +173,7 @@ const groups = (): { title: string | null; tabs: Tab[] }[] => [
           "Une copie de votre progression dans votre iCloud Drive, votre Dropbox, Google Drive ou OneDrive : mots, expressions, leçons, playlists, conversations et réglages. Si ce Mac est effacé ou remplacé, vous la retrouvez en un clic. Elle ne passe par aucun serveur de Lumen : seul votre compte la reçoit.",
           "A copy of your progress in your iCloud Drive, Dropbox, Google Drive or OneDrive: words, phrases, lessons, playlists, conversations and settings. If this Mac is wiped or replaced, you get it back in one click. It goes through no Lumen server: only your account receives it.",
         ),
-        keys: "sauvegarde icloud drive dropbox google drive onedrive box proton pcloud nextcloud nuage cloud dossier cle usb disque emplacement restaurer historique audio videos backup folder usb disk location restore history",
+        keys: "sauvegarde icloud drive dropbox google drive onedrive box proton pcloud nextcloud nuage cloud dossier cle usb disque emplacement restaurer historique audio videos synchroniser synchronisation fusionner appareils iphone ipad mac backup folder usb disk location restore history sync merge devices",
       },
       {
         id: "storage",
@@ -1105,6 +1107,7 @@ function AiPane() {
     if (m && !m.installed) void download(p.llm);
   };
   const activeProfile = PROFILES.find((p) => p.llm === settings.llm_model)?.id;
+  const advised = useRecommendedProfile();
   const lines = (kind: ModelRow["kind"]) => models.filter((m) => m.kind === kind).map((m) => <ModelLine key={m.id} m={m} />);
 
   return (
@@ -1149,7 +1152,10 @@ function AiPane() {
               </span>
               <strong>{p.name}</strong>
               <span>{p.desc}</span>
-              <span className="size">{formatBytes(p.size)}</span>
+              <span className="size">
+                {formatBytes(p.size)}
+                {isIOS && p.id === advised && <em className="padvised">{t("Conseillé pour ce Mac", "Advised for this Mac")}</em>}
+              </span>
             </button>
           ))}
         </div>
@@ -1253,6 +1259,34 @@ function VideosPane() {
   const settings = useApp((s) => s.settings);
   const setSetting = useApp((s) => s.setSetting);
   const info = useApp((s) => s.info);
+  // iPhone et iPad : ni yt-dlp ni cookies du navigateur, Lumen lit lui-même YouTube et Dailymotion
+  if (isIOS)
+    return (
+      <Section note={t("Collez un lien dans « Importer » : Lumen en fait une leçon que vous regardez avec la transcription synchronisée.", "Paste a link in “Import”: Lumen turns it into a lesson you watch with the transcript in sync.")}>
+        <div className="set-card">
+          <div className="set-row">
+            <div className="grow">
+              <strong>{t("YouTube et Dailymotion", "YouTube and Dailymotion")}</strong>
+              <span>{t("Lus directement par Lumen, rien à installer. Le son est transcrit sur ce Mac, l'image téléchargée dans un format que l'écran lit sans effort.", "Read directly by Lumen, nothing to install. The sound is transcribed on this Mac, the picture downloaded in a format the screen plays effortlessly.")}</span>
+            </div>
+            <span className="dot ok" />
+          </div>
+          <div className="set-row">
+            <div className="grow">
+              <strong>{t("Podcasts, articles, fichiers", "Podcasts, articles, files")}</strong>
+              <span>{t("Flux des podcasts, Apple Podcasts, pages web et liens directs vers un son ou une vidéo.", "Podcast feeds, Apple Podcasts, web pages and direct links to audio or video.")}</span>
+            </div>
+            <span className="dot ok" />
+          </div>
+          <div className="set-row">
+            <div className="grow">
+              <strong>{t("Autres sites vidéo", "Other video sites")}</strong>
+              <span>{t("TikTok, Instagram, Vimeo… : importez la leçon depuis Lumen sur votre ordinateur, elle arrivera ici avec la sauvegarde.", "TikTok, Instagram, Vimeo…: import the lesson from Lumen on your computer, it will arrive here with the backup.")}</span>
+            </div>
+          </div>
+        </div>
+      </Section>
+    );
   return (
     <Section note={t("Collez un lien dans « Importer » : Lumen en fait une leçon que vous regardez avec la transcription synchronisée.", "Paste a link in “Import”: Lumen turns it into a lesson you watch with the transcript in sync.")}>
       <div className="set-card">

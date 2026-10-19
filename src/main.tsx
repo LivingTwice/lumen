@@ -42,6 +42,8 @@ function fontsReady(): Promise<unknown> {
 Promise.all([initApi(), fontsReady()]).then(() => {
   // accès de test dans l'aperçu navigateur (jamais dans l'application)
   if (import.meta.env.DEV && !isTauri) (window as unknown as Record<string, unknown>).__lumen = { api, useApp };
+  // en développement dans la vraie fenêtre (simulateur iPhone compris) : télécommande (scripts/vite-remote.ts)
+  if (import.meta.env.DEV && isTauri) void import("./lib/devremote").then((m) => m.startRemote());
   ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
     <React.StrictMode>
       <App />

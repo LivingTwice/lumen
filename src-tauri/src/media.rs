@@ -64,8 +64,18 @@ pub async fn transcribe(
     media: &Path,
     lang: &str,
     pcm_out: Option<&Path>,
-    mut on_event: impl FnMut(ImportEvent),
+    on_event: impl FnMut(ImportEvent),
 ) -> Result<Vec<WWord>> {
+    // iPhone et iPad : Whisper dans l'app (whisper.rs), le son décodé par AVFoundation
+    #[cfg(target_os = "ios")]
+    return transcribe_inapp(model, media, lang, pcm_out, on_event).await;
+    #[cfg(not(target_os = "ios"))]
+    return transcribe_sidecar(model, media, lang, pcm_out, on_event).await;
+}
+
+/// Whisper par le programme à part `lumen-whisper` (Mac et Windows).
+#[cfg(not(target_os = "ios"))]
+async fn transcribe_sidecar(model: &Path, media: &Path, lang: &str, pcm_out: Option<&Path>, mut on_event: impl FnMut(ImportEvent)) -> Result<Vec<WWord>> {
     let bin = sidecar_path()?;
     crate::ai::cpu_check()?;
     let mut cmd = crate::proc::tokio_command(bin);
@@ -106,6 +116,46 @@ pub async fn transcribe(
         return Err(anyhow!(e));
     }
     result.ok_or_else(|| anyhow!(crate::i18n::t("la transcription s'est arrêtée sans résultat", "the transcription stopped without a result")))
+}
+
+/// Whisper dans l'app (iPhone et iPad) : mêmes étapes et même résultat que `lumen-whisper`.
+#[cfg(target_os = "ios")]
+async fn transcribe_inapp(model: &Path, media: &Path, lang: &str, pcm_out: Option<&Path>, mut on_event: impl FnMut(ImportEvent)) -> Result<Vec<WWord>> {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
+    on_event(ImportEvent::Stage { stage: "decode".into() });
+    let src = media.to_path_buf();
+    let audio = tokio::task::spawn_blocking(move || crate::compress::pcm_mono(&src, 16_000.0)).await??;
+    if audio.is_empty() {
+        return Err(anyhow!(crate::i18n::t("le fichier ne contient pas de son exploitable", "the file contains no usable sound")));
+    }
+    if let Some(out) = pcm_out {
+        let bytes: Vec<u8> = audio.iter().flat_map(|x| x.to_le_bytes()).collect();
+        tokio::fs::write(out, bytes).await?;
+    }
+    on_event(ImportEvent::Stage { stage: "model".into() });
+    on_event(ImportEvent::Stage { stage: "transcribe".into() });
+    // le travail s'arrête si l'import est abandonné (la tâche qui attend disparaît)
+    struct Stop(Arc<AtomicBool>);
+    impl Drop for Stop {
+        fn drop(&mut self) {
+            self.0.store(true, Ordering::Relaxed);
+        }
+    }
+    let cancel = Arc::new(AtomicBool::new(false));
+    let _stop = Stop(cancel.clone());
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<f64>();
+    let (model, lang) = (model.to_path_buf(), lang.to_string());
+    let mut job = tokio::task::spawn_blocking(move || crate::whisper::transcribe(&model, &audio, &lang, crate::ai::gpu_wanted(), &cancel, |p| {
+        let _ = tx.send(p);
+    }));
+    let words = loop {
+        tokio::select! {
+            Some(p) = rx.recv() => on_event(ImportEvent::Progress { value: p }),
+            r = &mut job => break r??,
+        }
+    };
+    Ok(words.into_iter().map(|w| WWord { w: w.w, t0: w.t0, t1: w.t1 }).collect())
 }
 
 /// Assemble le texte et les horodatages par mot : [[début, fin, t0, t1], …]
@@ -794,6 +844,11 @@ async fn run_ytdlp(
     cookies_browser: Option<&str>,
     on_progress: &mut (dyn FnMut(f64) + Send),
 ) -> Result<Vec<String>> {
+    // iPhone et iPad : pas d'autre programme ; Lumen parle lui-même à YouTube (ytnative.rs)
+    if crate::ytnative::is_on() {
+        let _ = (data_dir, ytdlp, cookies_browser);
+        return crate::ytnative::run(args, on_progress).await;
+    }
     let mut cmd = crate::proc::tokio_command(ytdlp);
     cmd.args(["--no-playlist", "--newline", "--progress", "--no-colors"]);
     cmd.args(["--progress-template", "download:LUMEN %(progress._percent_str)s"]);

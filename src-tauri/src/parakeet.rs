@@ -10,13 +10,18 @@
 //! publié par sherpa-onnx, qui fait un tiers de fautes en plus et tronque des mots
 //! (« ingle » pour « inglese »).
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
+#[cfg(any(not(target_os = "ios"), test))]
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
+#[cfg(not(target_os = "ios"))]
 use std::time::Duration;
 
 use anyhow::{anyhow, Result};
 
-use crate::asr::{split_on_silence, RATE};
+use crate::asr::split_on_silence;
+#[cfg(any(not(target_os = "ios"), test))]
+use crate::asr::RATE;
 use crate::sherpa::{self, Tool};
 
 /// Langues où Parakeet écrit le texte : celles des 24 qu'il connaît où il fait au
@@ -45,6 +50,7 @@ const CHUNK_SECS: f64 = 15.0;
 
 /// Morceaux par lancement de l'outil (deux minutes de son) : il les décode
 /// ensemble, et la mémoire grandit avec leur nombre (environ 2,4 Go ici).
+#[cfg(not(target_os = "ios"))]
 const GROUP: usize = 8;
 
 /// Fils de calcul : 6 au plus, rien n'allait plus vite au-delà (M2 Pro).
@@ -53,6 +59,7 @@ fn threads() -> i32 {
 }
 
 /// Les fichiers du modèle, dans son dossier.
+#[cfg(any(not(target_os = "ios"), test))]
 fn files(model: &Path) -> [PathBuf; 4] {
     ["encoder.onnx", "decoder.onnx", "joiner.onnx", "tokens.txt"].map(|f| model.join(f))
 }
@@ -69,6 +76,28 @@ pub async fn transcribe(data_dir: &Path, model: &Path, pcm: &[f32], cancel: &Ato
     res
 }
 
+/// iPhone et iPad : la bibliothèque sherpa-onnx dans l'app (sherpa_ios.rs), mêmes morceaux.
+#[cfg(target_os = "ios")]
+async fn run(_data_dir: &Path, model: &Path, pcm: &[f32], _tmp: &Path, cancel: &AtomicBool, on_progress: &mut impl FnMut(f64)) -> Result<String> {
+    let pieces = split_on_silence(pcm, CHUNK_SECS);
+    let engine = tokio::task::block_in_place(|| crate::sherpa_ios::Parakeet::load(model, threads()))?;
+    // la mémoire d'un iPhone : deux morceaux à la fois (environ 1,4 Go avec le modèle),
+    // quatre s'il en reste beaucoup (iPad)
+    let group = if crate::ios::available_memory() > 4 << 30 { 4 } else { 2 };
+    let mut texts: Vec<String> = Vec::new();
+    for group in pieces.chunks(group) {
+        if cancel.load(Ordering::Relaxed) {
+            return Err(anyhow!("annulé"));
+        }
+        let slices: Vec<&[f32]> = group.iter().map(|&(a, b)| &pcm[a..b]).collect();
+        texts.extend(tokio::task::block_in_place(|| engine.decode(&slices)));
+        let done = group.last().map(|p| p.1).unwrap_or(pcm.len());
+        on_progress(done as f64 / pcm.len().max(1) as f64 * 100.0);
+    }
+    Ok(texts.into_iter().map(|t| t.trim().to_string()).filter(|t| !t.is_empty()).collect::<Vec<_>>().join(" "))
+}
+
+#[cfg(not(target_os = "ios"))]
 async fn run(data_dir: &Path, model: &Path, pcm: &[f32], tmp: &Path, cancel: &AtomicBool, on_progress: &mut impl FnMut(f64)) -> Result<String> {
     let pieces = split_on_silence(pcm, CHUNK_SECS);
     let mut texts: Vec<String> = Vec::new();
@@ -94,6 +123,7 @@ async fn run(data_dir: &Path, model: &Path, pcm: &[f32], tmp: &Path, cancel: &At
 }
 
 /// Un lancement de l'outil : le texte de chaque fichier, dans l'ordre.
+#[cfg(not(target_os = "ios"))]
 async fn decode(data_dir: &Path, model: &Path, wavs: &[PathBuf]) -> Result<Vec<String>> {
     let [encoder, decoder, joiner, tokens] = files(model);
     let mut cmd = crate::proc::tokio_command(sherpa::bin(data_dir, Tool::Asr));
@@ -121,6 +151,7 @@ async fn decode(data_dir: &Path, model: &Path, wavs: &[PathBuf]) -> Result<Vec<S
 }
 
 /// Une ligne JSON par fichier (`{"text": …, "tokens": …}`) ; le reste est ignoré.
+#[cfg_attr(target_os = "ios", allow(dead_code))]
 fn parse(stdout: &str) -> Vec<String> {
     stdout
         .lines()

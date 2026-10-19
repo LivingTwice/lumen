@@ -12,7 +12,7 @@
 //! - **Windows** : rien n'est réencodé ; les vidéos en ligne arrivent déjà en AV1
 //!   ou en VP9 quand le moteur de la fenêtre les lit (`media::video_format`).
 
-#![cfg_attr(not(target_os = "macos"), allow(dead_code))]
+#![cfg_attr(not(any(target_os = "macos", target_os = "ios")), allow(dead_code))]
 
 use anyhow::{anyhow, Result};
 use serde::Serialize;
@@ -295,13 +295,13 @@ pub fn true_duration(path: &Path, seen: f64) -> f64 {
 }
 
 /// Durée d'un son ou d'une vidéo : AVFoundation sur Mac (MP3 compris).
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "ios"))]
 pub fn duration(path: &Path) -> Option<f64> {
     mac::duration(path)
 }
 
 /// Durée d'un son ou d'une vidéo : l'en-tête des MP4 et M4A (sons de YouTube, leçons allégées).
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", target_os = "ios")))]
 pub fn duration(path: &Path) -> Option<f64> {
     mp4_header(path).map(|(d, _)| d).filter(|d| d.is_finite() && *d > 0.0)
 }
@@ -417,7 +417,7 @@ async fn run(src: &Path, level: Level, part: Part, cancel: &AtomicBool, mut prog
     }
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "ios"))]
 fn lighten(src: &Path, level: Level, part: Part, cancel: &AtomicBool, progress: &mut dyn FnMut(f64)) -> Result<Option<Lighter>> {
     let probe = mac::probe(src)?;
     let before = size(src);
@@ -526,7 +526,7 @@ fn lighten(src: &Path, level: Level, part: Part, cancel: &AtomicBool, progress: 
     }
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", target_os = "ios")))]
 fn lighten(_src: &Path, _level: Level, _part: Part, _cancel: &AtomicBool, _progress: &mut dyn FnMut(f64)) -> Result<Option<Lighter>> {
     Ok(None)
 }
@@ -555,7 +555,7 @@ pub struct Candidate {
 }
 
 /// Le fichier mérite-t-il d'être allégé, et combien pèserait-il ? (Mac seulement)
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "ios"))]
 pub fn candidate(path: &Path, level: Level, role: Role) -> Option<Candidate> {
     if level == Level::Original || !readable(path) || path.to_string_lossy().contains(".light.") {
         return None;
@@ -581,7 +581,7 @@ pub fn candidate(path: &Path, level: Level, role: Role) -> Option<Candidate> {
     kept(bytes, estimate).then(|| Candidate { path: path.to_string_lossy().into_owned(), video: role != Role::Sound, bytes, estimate })
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", target_os = "ios")))]
 pub fn candidate(_path: &Path, _level: Level, _role: Role) -> Option<Candidate> {
     None
 }
@@ -760,7 +760,7 @@ pub async fn lighten_lessons(
 
 // ---------- macOS : AVFoundation et AudioToolbox ----------
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "ios"))]
 #[allow(deprecated)]
 mod mac {
     use super::{Mix, VideoPlan};
@@ -1099,6 +1099,87 @@ mod mac {
         Ok((reader, output))
     }
 
+    /// Le son entier, décodé en mono à la fréquence `rate` (AVFoundation rééchantillonne et
+    /// mélange les voies) : ce qu'écoutent les modèles de transcription (16 kHz).
+    #[cfg_attr(target_os = "macos", allow(dead_code))]
+    pub fn pcm_mono(src: &Path, rate: f64) -> Result<Vec<f32>> {
+        autoreleasepool(|_| unsafe {
+            let asset = AVURLAsset::URLAssetWithURL_options(&url(src), None);
+            let track = first_track(&asset, AVMediaTypeAudio).ok_or_else(|| anyhow!("pas de son"))?;
+            let reader = AVAssetReader::assetReaderWithAsset_error(&asset).map_err(|e| ns_err(Some(e)))?;
+            let (id, bits, yes, no, sr, one) = (
+                NSNumber::new_u32(kAudioFormatLinearPCM),
+                NSNumber::new_u32(32),
+                NSNumber::new_bool(true),
+                NSNumber::new_bool(false),
+                NSNumber::new_f64(rate),
+                NSNumber::new_u32(1),
+            );
+            let settings = dict(&[
+                (&NSString::from_str("AVFormatIDKey"), &id),
+                (&NSString::from_str("AVLinearPCMBitDepthKey"), &bits),
+                (&NSString::from_str("AVLinearPCMIsFloatKey"), &yes),
+                (&NSString::from_str("AVLinearPCMIsNonInterleaved"), &no),
+                (&NSString::from_str("AVLinearPCMIsBigEndianKey"), &no),
+                (&NSString::from_str("AVSampleRateKey"), &sr),
+                (&NSString::from_str("AVNumberOfChannelsKey"), &one),
+            ]);
+            let output = AVAssetReaderTrackOutput::assetReaderTrackOutputWithTrack_outputSettings(&track, Some(&settings));
+            output.setAlwaysCopiesSampleData(false);
+            if !reader.canAddOutput(&output) {
+                bail!("lecture du son impossible");
+            }
+            reader.addOutput(&output);
+            if !reader.startReading() {
+                return Err(ns_err(reader.error()));
+            }
+            let mut out = Vec::new();
+            let mut buf = Vec::new();
+            while let Some(sample) = output.copyNextSampleBuffer() {
+                if samples(&sample, &mut buf).is_some() {
+                    out.extend_from_slice(&buf);
+                }
+            }
+            if reader.status() == AVAssetReaderStatus::Failed {
+                return Err(ns_err(reader.error()));
+            }
+            Ok(out)
+        })
+    }
+
+    /// Écrit un son mono (PCM 16 bits) en AAC dans un fichier m4a : le son des leçons
+    /// (voix, podcasts) sur iPhone et iPad, où `afconvert` n'existe pas.
+    #[cfg_attr(target_os = "macos", allow(dead_code))]
+    pub fn write_aac(dst: &Path, rate: u32, pcm: &[i16], bitrate: u32) -> Result<()> {
+        let _ = std::fs::remove_file(dst);
+        unsafe {
+            let file = create_aac(dst, rate as f64, 1, bitrate)?;
+            let mut res = Ok(());
+            let mut buf: Vec<f32> = Vec::with_capacity(8192);
+            for chunk in pcm.chunks(8192) {
+                buf.clear();
+                buf.extend(chunk.iter().map(|&v| v as f32 / 32768.0));
+                let mut list = AudioBufferList {
+                    mNumberBuffers: 1,
+                    mBuffers: [AudioBuffer { mNumberChannels: 1, mDataByteSize: (buf.len() * 4) as u32, mData: buf.as_mut_ptr() as *mut c_void }],
+                };
+                let status = ExtAudioFileWrite(file, buf.len() as u32, NonNull::from(&mut list));
+                if status != 0 {
+                    res = Err(anyhow!("écriture du son ({status})"));
+                    break;
+                }
+            }
+            let closed = ExtAudioFileDispose(file);
+            if res.is_ok() && closed != 0 {
+                res = Err(anyhow!("fermeture du son ({closed})"));
+            }
+            if res.is_err() {
+                let _ = std::fs::remove_file(dst);
+            }
+            res
+        }
+    }
+
     /// Échantillons d'un morceau de son, avec leur fréquence et leur nombre de voies.
     unsafe fn samples(sample: &CMSampleBuffer, buf: &mut Vec<f32>) -> Option<(f64, u32)> {
         let fd = sample.format_description()?;
@@ -1319,8 +1400,23 @@ mod mac {
     }
 }
 
-#[cfg(all(test, target_os = "macos"))]
+#[cfg(all(test, any(target_os = "macos", target_os = "ios")))]
 use mac::probe;
+
+/// Le son entier d'un fichier, en mono à `rate` Hz (voir `mac::pcm_mono`) : la
+/// transcription sur iPhone et iPad (sur Mac, `lumen-whisper` décode lui-même).
+#[cfg(any(target_os = "macos", target_os = "ios"))]
+#[cfg_attr(target_os = "macos", allow(dead_code))]
+pub fn pcm_mono(src: &Path, rate: f64) -> Result<Vec<f32>> {
+    mac::pcm_mono(src, rate)
+}
+
+/// Un son mono en AAC (voir `mac::write_aac`) : iPhone et iPad (sur Mac, `afconvert`).
+#[cfg(any(target_os = "macos", target_os = "ios"))]
+#[cfg_attr(target_os = "macos", allow(dead_code))]
+pub fn write_aac(dst: &Path, rate: u32, pcm: &[i16], bitrate: u32) -> Result<()> {
+    mac::write_aac(dst, rate, pcm, bitrate)
+}
 
 #[cfg(test)]
 mod tests {
@@ -1425,7 +1521,7 @@ mod tests {
     /// « Alléger » (rien n'est touché dans les données d'origine) :
     /// `LUMEN_LIGHTEN_DATA="$HOME/Library/Application Support/app.lumen.reader" cargo test --lib lighten_live -- --ignored --nocapture`
     /// Vérifie que chaque leçon cite un fichier qui existe, de même durée.
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
     #[tokio::test]
     #[ignore]
     async fn lighten_live() {
@@ -1511,7 +1607,7 @@ mod tests {
     /// `LUMEN_TEST_VIDEO=film.mp4 LUMEN_TEST_AUDIO=son.mp3 cargo test --release --lib compress_live -- --ignored --nocapture`
     /// (`LUMEN_TEST_QUALITY=compact` pour l'autre réglage). Les fichiers allégés
     /// restent dans un dossier jetable, affiché.
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
     #[tokio::test]
     #[ignore]
     async fn compress_live() {

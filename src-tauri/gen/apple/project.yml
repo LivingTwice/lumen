@@ -56,8 +56,14 @@ targets:
           - UIInterfaceOrientationPortraitUpsideDown
           - UIInterfaceOrientationLandscapeLeft
           - UIInterfaceOrientationLandscapeRight
-        CFBundleShortVersionString: 1.1.0
-        CFBundleVersion: "1.1.0"
+        CFBundleShortVersionString: 1.2.0
+        CFBundleVersion: "1.2.0"
+        CFBundleLocalizations: [en, fr]
+        # le son d'une leçon continue écran verrouillé, comme un podcast
+        UIBackgroundModes: [audio]
+        # pas de chiffrement propre à déclarer (seulement HTTPS)
+        ITSAppUsesNonExemptEncryption: false
+        NSFileProviderDomainUsageDescription: Lumen backs up your progress (words, lessons, settings) to your iCloud Drive or the folder you chose, so that it's never lost.
     entitlements:
       path: lumen_iOS/lumen_iOS.entitlements
     scheme:
@@ -67,6 +73,8 @@ targets:
     settings:
       base:
         ENABLE_BITCODE: false
+        # pont natif en Swift (Sources/lumen/LumenNative.swift)
+        SWIFT_VERSION: "5.0"
         ARCHS: [arm64]
         VALID_ARCHS: arm64 
         LIBRARY_SEARCH_PATHS[arch=x86_64]: $(inherited) $(PROJECT_DIR)/Externals/x86_64/$(CONFIGURATION) $(SDKROOT)/usr/lib/swift $(DEVELOPER_DIR)/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/$(PLATFORM_NAME) $(DEVELOPER_DIR)/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift-5.0/$(PLATFORM_NAME)
@@ -77,7 +85,16 @@ targets:
     dependencies:
       - framework: libapp.a
         embed: false
+      # sherpa-onnx (voix naturelle, Parakeet) : copié dans src-tauri/ par le crate sherpa-onnx
+      - framework: ../../sherpa-onnx.xcframework
+        embed: true
+        codeSign: true
       - sdk: Accelerate.framework
+      # son et vidéo (src/compress.rs : AAC, décodage pour la transcription, HEVC)
+      - sdk: AVFoundation.framework
+      - sdk: AudioToolbox.framework
+      - sdk: CoreMedia.framework
+      - sdk: CoreAudio.framework
       - sdk: CoreGraphics.framework
       - sdk: Metal.framework
       - sdk: MetalKit.framework

@@ -8,6 +8,8 @@ use chrono::{Datelike, Months, NaiveDate};
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 
+use sha2::{Digest, Sha256};
+
 use crate::text;
 
 pub const STATUS_KNOWN: i64 = 4;
@@ -135,6 +137,16 @@ pub fn open(path: &Path) -> Result<Connection> {
         CREATE INDEX IF NOT EXISTS chat_messages_chat ON chat_messages(chat_id, id);
         "#,
     )?;
+    // synchronisation entre appareils (sync.rs) : identifiant d'une leçon, le même sur
+    // chaque appareil (tiré de la leçon elle-même), et trace de ce qui a été supprimé
+    add_column(&conn, "lessons", "uid", "TEXT")?;
+    conn.execute_batch(
+        r#"
+        CREATE INDEX IF NOT EXISTS lessons_uid ON lessons(uid);
+        CREATE TABLE IF NOT EXISTS tombstones(kind TEXT NOT NULL, key TEXT NOT NULL, at INTEGER NOT NULL, PRIMARY KEY(kind, key));
+        "#,
+    )?;
+    ensure_uids(&conn)?;
     // progrès : temps actif passé dans les leçons, et jours où l'objectif est atteint (série)
     add_column(&conn, "activity", "learn_secs", "INTEGER NOT NULL DEFAULT 0")?;
     if add_column(&conn, "activity", "goal_met", "INTEGER NOT NULL DEFAULT 0")? {
@@ -305,12 +317,76 @@ fn hue_for(title: &str) -> i64 {
 
 pub fn lesson_create(c: &Connection, l: &NewLesson) -> Result<i64> {
     let wc = text::word_count(&l.text, &l.lang) as i64;
+    let at = now();
     c.execute(
-        "INSERT INTO lessons(lang,title,collection,kind,source,text,media_path,timings,hue,word_count,created_at,video_path)
-         VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)",
-        params![l.lang, l.title, l.collection, l.kind, l.source, l.text, l.media_path, l.timings, hue_for(&l.title), wc, now(), l.video_path],
+        "INSERT INTO lessons(lang,title,collection,kind,source,text,media_path,timings,hue,word_count,created_at,video_path,uid)
+         VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)",
+        params![l.lang, l.title, l.collection, l.kind, l.source, l.text, l.media_path, l.timings, hue_for(&l.title), wc, at, l.video_path, lesson_uid(&l.lang, at, &l.title, None)],
     )?;
     Ok(c.last_insert_rowid())
+}
+
+/// Identifiant d'une leçon, le même sur chaque appareil : tiré de ce qui ne change pas
+/// (langue, instant de création, titre de départ, origine LingQ). Une leçon d'avant les
+/// identifiants, restaurée sur un autre appareil, y retrouve ainsi le même.
+pub fn lesson_uid(lang: &str, created_at: i64, title: &str, ext_id: Option<&str>) -> String {
+    let mut h = Sha256::new();
+    h.update(format!("lumen-lecon\u{1f}{lang}\u{1f}{created_at}\u{1f}{title}\u{1f}{}", ext_id.unwrap_or("")).as_bytes());
+    hex::encode(&h.finalize()[..10])
+}
+
+/// Chemins des médias ramenés dans le dossier de données actuel, quand le fichier n'est
+/// plus à l'ancien chemin mais bien dans `media_dir` : sur iPhone et iPad, iOS change
+/// le dossier de l'app à chaque mise à jour (le simulateur, à chaque installation).
+/// Renvoie le nombre de chemins corrigés.
+pub fn rebase_media(c: &Connection, media_dir: &Path) -> Result<usize> {
+    let rows: Vec<(i64, [Option<String>; 3])> = c
+        .prepare("SELECT id, media_path, video_path, cover_path FROM lessons WHERE media_path IS NOT NULL OR video_path IS NOT NULL OR cover_path IS NOT NULL")?
+        .query_map([], |r| Ok((r.get(0)?, [r.get(1)?, r.get(2)?, r.get(3)?])))?
+        .collect::<rusqlite::Result<_>>()?;
+    let mut fixed = 0;
+    for (id, paths) in rows {
+        let mut new = paths.clone();
+        for p in new.iter_mut().flatten() {
+            if Path::new(p.as_str()).exists() {
+                continue;
+            }
+            // un chemin écrit sur un autre système peut avoir l'une ou l'autre forme
+            let name = p.rsplit(['/', '\\']).next().unwrap_or_default();
+            let here = media_dir.join(name);
+            if !name.is_empty() && here.is_file() {
+                *p = here.display().to_string();
+                fixed += 1;
+            }
+        }
+        if new != paths {
+            c.execute("UPDATE lessons SET media_path=?1, video_path=?2, cover_path=?3 WHERE id=?4", params![new[0], new[1], new[2], id])?;
+        }
+    }
+    Ok(fixed)
+}
+
+/// Donne leur identifiant aux leçons qui n'en ont pas encore (bases d'avant).
+pub fn ensure_uids(c: &Connection) -> Result<()> {
+    let rows: Vec<(i64, String, i64, String, Option<String>)> = c
+        .prepare("SELECT id, lang, created_at, title, ext_id FROM lessons WHERE uid IS NULL OR uid=''")?
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)))?
+        .collect::<rusqlite::Result<_>>()?;
+    let mut st = c.prepare("UPDATE lessons SET uid=?1 WHERE id=?2")?;
+    for (id, lang, at, title, ext) in rows {
+        st.execute(params![lesson_uid(&lang, at, &title, ext.as_deref()), id])?;
+    }
+    Ok(())
+}
+
+/// Trace d'une suppression (« lesson » : identifiant de la leçon ; « term » :
+/// « langue|mot ») : la synchronisation ne fait pas revenir ce qui a été supprimé.
+pub fn tombstone(c: &Connection, kind: &str, key: &str) -> Result<()> {
+    c.execute(
+        "INSERT INTO tombstones(kind,key,at) VALUES(?1,?2,?3) ON CONFLICT(kind,key) DO UPDATE SET at=excluded.at",
+        params![kind, key, now()],
+    )?;
+    Ok(())
 }
 
 pub fn status_map(c: &Connection, lang: &str) -> Result<HashMap<String, i64>> {
@@ -481,6 +557,10 @@ pub fn lesson_delete(c: &Connection, id: i64) -> Result<Vec<String>> {
     let files: Option<(Option<String>, Option<String>, Option<String>)> = c
         .query_row("SELECT media_path, video_path, cover_path FROM lessons WHERE id=?1", [id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
         .optional()?;
+    let uid: Option<String> = c.query_row("SELECT uid FROM lessons WHERE id=?1", [id], |r| r.get(0)).optional()?.flatten();
+    if let Some(u) = uid.filter(|u| !u.is_empty()) {
+        tombstone(c, "lesson", &u)?;
+    }
     c.execute("DELETE FROM lessons WHERE id=?1", [id])?;
     let mut out = Vec::new();
     if let Some((a, v, cover)) = files {
@@ -1069,6 +1149,9 @@ pub fn term_set(c: &Connection, u: &TermUpdate) -> Result<()> {
         .optional()?;
     if u.status == 0 {
         c.execute("DELETE FROM terms WHERE lang=?1 AND term=?2", params![u.lang, term])?;
+        if prev.is_some() {
+            tombstone(c, "term", &format!("{}|{}", u.lang, term))?;
+        }
         if prev == Some(STATUS_KNOWN) {
             bump(c, &u.lang, "known_added", -1)?;
         }
@@ -1546,12 +1629,20 @@ pub fn goal_refresh(c: &Connection) -> Result<()> {
 
 // ---------- cache de traduction ----------
 
+/// Une réponse sans une seule lettre (« !!!! » d'un calcul faux) n'est ni gardée ni
+/// relue : le mot sera retraduit.
+fn has_letters(v: &str) -> bool {
+    v.chars().any(char::is_alphabetic)
+}
+
 pub fn cache_get(c: &Connection, k: &str) -> Option<String> {
-    c.query_row("SELECT v FROM tcache WHERE k=?1", [k], |r| r.get(0)).optional().ok().flatten()
+    c.query_row("SELECT v FROM tcache WHERE k=?1", [k], |r| r.get(0)).optional().ok().flatten().filter(|v: &String| has_letters(v))
 }
 
 pub fn cache_put(c: &Connection, k: &str, v: &str) {
-    let _ = c.execute("INSERT OR REPLACE INTO tcache(k,v,created_at) VALUES(?1,?2,?3)", params![k, v, now()]);
+    if has_letters(v) {
+        let _ = c.execute("INSERT OR REPLACE INTO tcache(k,v,created_at) VALUES(?1,?2,?3)", params![k, v, now()]);
+    }
 }
 
 pub fn export_csv(c: &Connection, lang: &str) -> Result<String> {

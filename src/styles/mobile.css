@@ -1095,6 +1095,64 @@
 :root.compact .disc-search-go {
   display: none;
 }
+/* catégories sur une ligne qui défile, le tri et les filtres dessous, à pleine largeur */
+:root.compact .disc-search-row {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
+}
+:root.compact .disc-search-tabs {
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  margin: 0 -18px;
+  padding: 0 18px;
+  scrollbar-width: none;
+}
+:root.compact .disc-search-tabs::-webkit-scrollbar {
+  display: none;
+}
+:root.compact .search-tab {
+  flex-shrink: 0;
+}
+:root.compact .filter-tools {
+  margin-left: 0;
+  width: 100%;
+  min-width: 0;
+}
+:root.compact .filter-tools .menu-anchor {
+  flex: 1;
+  min-width: 0;
+}
+:root.compact .filter-tools .menu-anchor .filter-btn {
+  width: 100%;
+}
+:root.compact .filter-btn {
+  height: 38px;
+}
+:root.compact .filter-btn-label {
+  flex: 1;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+:root.compact .filter-panel-inner {
+  padding: 14px;
+}
+:root.compact .filter-row {
+  flex-direction: column;
+  align-items: flex-start;
+}
+:root.compact .filter-row .ideas-label {
+  width: auto;
+}
+:root.compact .filter-chips .idea {
+  height: 34px;
+}
+:root.compact .filter-foot {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0;
+}
 
 /* vocabulaire : le champ de recherche prend la largeur */
 :root.compact .vocab-toolbar .search {
@@ -1189,4 +1247,86 @@
 :root.compact .import-tab br,
 :root.compact .import-tab span {
   display: none;
+}
+
+/* menus « … » : une feuille au bas de l'écran, de grandes lignes faciles à toucher */
+.menu.menu-sheet {
+  position: fixed;
+  z-index: 81;
+  left: calc(var(--safe-left) + 8px);
+  right: calc(var(--safe-right) + 8px);
+  bottom: calc(var(--safe-bottom) + 8px);
+  top: auto;
+  min-width: 0;
+  max-height: 72vh;
+  padding: 6px 8px 8px;
+  border-radius: 24px;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 -10px 40px rgba(30, 20, 8, 0.22);
+  touch-action: none;
+}
+.menu.menu-sheet .m-grabber {
+  margin: 4px auto 6px;
+}
+.menu.menu-sheet .menu-item {
+  min-height: 50px;
+  padding: 0 12px;
+  border-radius: 14px;
+  font-size: 16px;
+  gap: 14px;
+}
+.menu.menu-sheet .menu-note {
+  padding: 4px 12px 6px;
+  font-size: 13px;
+}
+.menu.menu-sheet .menu-sep {
+  margin: 4px 10px;
+}
+.m-scrim.menu-scrim {
+  z-index: 80;
+}
+
+/* vocabulaire : une fiche sans lignes vides (sens ou phrase pas encore connus) */
+:root.compact .vocab-row .vocab-tr.empty,
+:root.compact .vocab-row .vocab-ctx.empty {
+  display: none;
+}
+
+/* lecteur : un titre à la mesure du téléphone (trois lignes au plus), le fil d'Ariane sur
+   une ligne ; le texte commence plus haut sur la première page */
+:root.compact .reader-head {
+  gap: 8px;
+  margin-bottom: 18px;
+}
+:root.compact .reader-head h1 {
+  font-size: 30px;
+  line-height: 1.12;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+:root.compact .reader-crumb {
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+}
+:root.compact .reader-crumb > * {
+  flex-shrink: 0;
+}
+:root.compact .reader-crumb > :last-child {
+  flex-shrink: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* lecteur au doigt : la page ne défile pas (le balayage la tourne, l'appui long sélectionne),
+   et iOS ne propose ni loupe ni menu de copie sur les mots */
+:root.ios .reader-leaves {
+  touch-action: none;
+}
+:root.ios .page {
+  -webkit-touch-callout: none;
 }

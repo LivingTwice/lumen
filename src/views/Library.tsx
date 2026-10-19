@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { AddToPlaylist } from "../components/AddToPlaylist";
 import { BookCover, Cover } from "../components/Cover";
 import { Icon } from "../components/Icon";
+import { useCompact } from "../components/MobileNav";
 import { Orb, ScrollTop, Segmented, Sheet, useGlow } from "../components/ui";
 import { api, errorText } from "../lib/api";
 import { confirmAsk } from "../lib/dialogs";
@@ -281,6 +282,7 @@ export function Library() {
   const sort = parseSort(useApp((s) => s.settings.library_sort));
   const setSetting = useApp((s) => s.setSetting);
   const name = useUserName();
+  const compact = useCompact();
   const [lessons, setLessons] = useState<LessonSummary[] | null>(null);
   const [playlists, setPlaylists] = useState<Playlist[]>([]);
   const [filter, setFilter] = useState<Filter>("all");
@@ -653,9 +655,10 @@ export function Library() {
                 options={[
                   { value: "all", label: t("Tout", "All") },
                   { value: "text", label: t("Textes", "Texts") },
-                  { value: "audio", label: t("Audio et vidéo", "Audio and video") },
+                  // sur iPhone, des libellés courts : les cinq tiennent sur la largeur
+                  { value: "audio", label: compact ? t("Audio", "Audio") : t("Audio et vidéo", "Audio and video") },
                   { value: "book", label: t("Livres", "Books") },
-                  { value: "done", label: t("Terminées", "Finished") },
+                  { value: "done", label: compact ? t("Lues", "Read") : t("Terminées", "Finished") },
                 ]}
               />
               <div className="lib-tools">

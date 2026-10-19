@@ -69,10 +69,130 @@ pub struct SearchPage {
     pub hits: Vec<Hit>,
     /// il y a d'autres résultats (page suivante)
     pub more: bool,
+    /// période retenue pour un tri par date sur YouTube (« up:3 », « before:2014-01-01 ») :
+    /// l'interface la renvoie pour les pages suivantes (`Filters::window`)
+    pub window: String,
+}
+
+/// Ordre des résultats.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Sort {
+    #[default]
+    Relevance,
+    Recent,
+    Popular,
+    Old,
+}
+
+/// Date de publication.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum When {
+    #[default]
+    Any,
+    Day,
+    Week,
+    Month,
+    Year,
+    /// il y a plus d'un an
+    Older,
+}
+
+impl When {
+    /// Ancienneté la plus grande admise, en secondes (`Older` : la plus petite).
+    fn secs(self) -> i64 {
+        match self {
+            When::Any => 0,
+            When::Day => 86_400,
+            When::Week => 7 * 86_400,
+            When::Month => 31 * 86_400,
+            When::Year | When::Older => 366 * 86_400,
+        }
+    }
+
+    /// Publié à `ts` (secondes) : dans la période ? Une date inconnue n'y est pas.
+    fn admits(self, ts: i64, now: i64) -> bool {
+        match self {
+            When::Any => true,
+            _ if ts <= 0 => false,
+            When::Older => now - ts >= self.secs(),
+            _ => now - ts <= self.secs(),
+        }
+    }
+}
+
+/// Filtres de la recherche, tels que l'interface les envoie : « sort=recent;when=week;len=short;cc=1 ».
+/// Une interface plus ancienne n'envoie que la durée (« short »).
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Filters {
+    pub sort: Sort,
+    pub when: When,
+    /// durée : "short" (moins de 4 min), "medium" (4 à 20), "long" (plus de 20), sinon toutes
+    pub length: String,
+    /// vidéos sous-titrées (YouTube)
+    pub subtitles: bool,
+    /// période déjà retenue à la première page (voir `SearchPage::window`)
+    pub window: Option<String>,
+}
+
+impl Filters {
+    pub fn parse(s: &str) -> Filters {
+        let mut f = Filters::default();
+        for part in s.split(';').map(str::trim).filter(|p| !p.is_empty()) {
+            let (k, v) = part.split_once('=').unwrap_or(("len", part));
+            match k {
+                "sort" => {
+                    f.sort = match v {
+                        "recent" => Sort::Recent,
+                        "popular" => Sort::Popular,
+                        "old" => Sort::Old,
+                        _ => Sort::Relevance,
+                    }
+                }
+                "when" => {
+                    f.when = match v {
+                        "day" => When::Day,
+                        "week" => When::Week,
+                        "month" => When::Month,
+                        "year" => When::Year,
+                        "older" => When::Older,
+                        _ => When::Any,
+                    }
+                }
+                "len" if matches!(v, "short" | "medium" | "long") => f.length = v.to_string(),
+                "cc" => f.subtitles = v == "1",
+                "win" => f.window = Some(v.to_string()),
+                _ => {}
+            }
+        }
+        f
+    }
+
+    /// La durée `secs` convient (inconnue : oui).
+    fn fits_length(&self, secs: f64) -> bool {
+        if secs <= 0.0 {
+            return true;
+        }
+        match self.length.as_str() {
+            "short" => secs < 240.0,
+            "medium" => (240.0..=1200.0).contains(&secs),
+            "long" => secs > 1200.0,
+            _ => true,
+        }
+    }
+}
+
+/// Maintenant, en secondes depuis 1970.
+fn now_secs() -> i64 {
+    chrono::Utc::now().timestamp()
+}
+
+/// « 2014-01-01 » pour une date donnée en secondes.
+fn day_of(ts: i64) -> String {
+    chrono::DateTime::from_timestamp(ts, 0).map(|d| d.format("%Y-%m-%d").to_string()).unwrap_or_default()
 }
 
 /// Cherche `query` sur une plateforme, dans la langue `lang`. `page` : 0, 1, 2…
-/// `filter` : durée des vidéos ("short", "medium", "long", sinon toutes).
+/// `filter` : tri, date, durée, sous-titres (voir `Filters::parse`).
 pub async fn search(
     data_dir: &Path,
     lang: &str,
@@ -86,12 +206,13 @@ pub async fn search(
     if q.is_empty() {
         return Ok(SearchPage::default());
     }
+    let f = Filters::parse(filter);
     match platform {
-        "youtube" => youtube(data_dir, lang, q, page, filter, on_event).await,
-        "dailymotion" => dailymotion(lang, q, page, filter).await,
-        "podcast" => podcasts(lang, q).await,
-        "music" => music(lang, q, page).await,
-        "wiki" => wiki(lang, q, page).await,
+        "youtube" => youtube(data_dir, lang, q, page, &f, on_event).await,
+        "dailymotion" => dailymotion(lang, q, page, &f).await,
+        "podcast" => podcasts(lang, q, &f).await,
+        "music" => music(lang, q, page, &f).await,
+        "wiki" => wiki(lang, q, page, &f).await,
         _ => Err(anyhow!(t("Plateforme inconnue.", "Unknown platform."))),
     }
 }
@@ -216,46 +337,115 @@ pub(crate) fn youtube_hits(v: &Value, lang: &str, shorts: bool) -> Vec<Hit> {
         .collect()
 }
 
-async fn youtube(data_dir: &Path, lang: &str, q: &str, page: usize, filter: &str, on_event: &mut (dyn FnMut(ImportEvent) + Send)) -> Result<SearchPage> {
+/// Paramètre `sp` des recherches YouTube (protobuf en base64) : ordre (1), puis les
+/// filtres (2) : date de mise en ligne (1), type (2, toujours « vidéo »), durée (3),
+/// sous-titres (5). `upload` : 2 aujourd'hui, 3 cette semaine, 4 ce mois-ci, 5 cette année.
+fn yt_sp(popular: bool, upload: u8, length: &str, subtitles: bool) -> String {
+    use base64::Engine;
+    let mut filters: Vec<u8> = Vec::new();
+    if upload > 0 {
+        filters.extend([0x08, upload]);
+    }
+    filters.extend([0x10, 0x01]);
+    match length {
+        "short" => filters.extend([0x18, 0x01]),
+        "long" => filters.extend([0x18, 0x02]),
+        "medium" => filters.extend([0x18, 0x03]),
+        _ => {}
+    }
+    if subtitles {
+        filters.extend([0x28, 0x01]);
+    }
+    let mut out: Vec<u8> = Vec::new();
+    // 3 : nombre de vues ; YouTube ne trie plus par date de mise en ligne (essayé en octobre 2026)
+    if popular {
+        out.extend([0x08, 0x03]);
+    }
+    out.push(0x12);
+    out.push(filters.len() as u8);
+    out.extend(filters);
+    base64::engine::general_purpose::STANDARD.encode(out)
+}
+
+/// Périodes à essayer, dans l'ordre, pour une recherche YouTube. YouTube ne trie plus par
+/// date : « les plus récents » cherche dans la semaine, puis le mois, puis l'année, jusqu'à
+/// trouver assez de vidéos ; « les plus anciens », avant 2014, puis avant 2019 (opérateur
+/// `before:` de YouTube). « up:N » : date de mise en ligne dans les filtres ; vide : aucune.
+fn yt_windows(f: &Filters, now: i64) -> Vec<String> {
+    match f.when {
+        When::Day => return vec!["up:2".into()],
+        When::Week => return vec!["up:3".into()],
+        When::Month => return vec!["up:4".into()],
+        When::Year => return vec!["up:5".into()],
+        When::Older => return vec![format!("before:{}", day_of(now - When::Older.secs()))],
+        When::Any => {}
+    }
+    match f.sort {
+        Sort::Recent => vec!["up:3".into(), "up:4".into(), "up:5".into()],
+        Sort::Old => vec!["before:2014-01-01".into(), "before:2019-01-01".into(), format!("before:{}", day_of(now - 3 * 366 * 86_400))],
+        _ => vec![String::new()],
+    }
+}
+
+async fn youtube(data_dir: &Path, lang: &str, q: &str, page: usize, f: &Filters, on_event: &mut (dyn FnMut(ImportEvent) + Send)) -> Result<SearchPage> {
     let bin = ytdlp(data_dir, on_event).await?;
     on_event(ImportEvent::Stage { stage: "search".into() });
-    // filtres de YouTube : vidéos seulement, et leur durée
-    let sp = match filter {
-        "short" => "EgQQARgB",
-        "medium" => "EgQQARgD",
-        "long" => "EgQQARgC",
-        _ => "EgIQAQ==",
+    let windows = match &f.window {
+        Some(w) => vec![w.clone()],
+        None => yt_windows(f, now_secs()),
     };
-    let url = Url::parse_with_params("https://www.youtube.com/results", &[("search_query", q), ("sp", sp)])?;
     let (from, to) = (page * PER_PAGE + 1, (page + 1) * PER_PAGE);
-    let v = tokio::time::timeout(Duration::from_secs(45), media::yt_flat(data_dir, &bin, url.as_str(), from, to, Some(lang)))
-        .await
-        .map_err(|_| anyhow!(t("YouTube ne répond pas.", "YouTube isn't responding.")))??;
-    let listed = v.get("entries").and_then(Value::as_array).map_or(0, Vec::len);
-    let hits = youtube_hits(&v, lang, filter == "short");
-    Ok(SearchPage { hits, more: listed >= PER_PAGE })
+    let last = windows.len() - 1;
+    for (i, w) in windows.iter().enumerate() {
+        let upload = w.strip_prefix("up:").and_then(|n| n.parse::<u8>().ok()).unwrap_or(0);
+        let query = if w.starts_with("before:") { format!("{q} {w}") } else { q.to_string() };
+        let sp = yt_sp(f.sort == Sort::Popular, upload, &f.length, f.subtitles);
+        let url = Url::parse_with_params("https://www.youtube.com/results", &[("search_query", query.as_str()), ("sp", sp.as_str())])?;
+        let v = tokio::time::timeout(Duration::from_secs(45), media::yt_flat(data_dir, &bin, url.as_str(), from, to, Some(lang)))
+            .await
+            .map_err(|_| anyhow!(t("YouTube ne répond pas.", "YouTube isn't responding.")))??;
+        let listed = v.get("entries").and_then(Value::as_array).map_or(0, Vec::len);
+        let hits = youtube_hits(&v, lang, f.length == "short");
+        // assez de vidéos dans cette période, ou plus rien à élargir
+        if hits.len() >= 6 || i == last || page > 0 {
+            return Ok(SearchPage { hits, more: listed >= PER_PAGE, window: w.clone() });
+        }
+    }
+    Ok(SearchPage::default())
 }
 
 // ---------- Dailymotion ----------
 
-async fn dailymotion(lang: &str, q: &str, page: usize, filter: &str) -> Result<SearchPage> {
+async fn dailymotion(lang: &str, q: &str, page: usize, f: &Filters) -> Result<SearchPage> {
     let c = link::client()?;
     let page_s = (page + 1).to_string();
     let limit = PER_PAGE.to_string();
+    let sort = match f.sort {
+        Sort::Recent => "recent",
+        Sort::Popular => "visited",
+        Sort::Old => "old",
+        Sort::Relevance => "relevance",
+    };
     let mut params: Vec<(&str, &str)> = vec![
         ("search", q),
         ("languages", lang),
         ("fields", "id,title,duration,thumbnail_720_url,owner.screenname,created_time,views_total,url,description,language"),
         ("limit", limit.as_str()),
         ("page", page_s.as_str()),
-        ("sort", "relevance"),
+        ("sort", sort),
         ("flags", "no_live"),
     ];
-    match filter {
+    match f.length.as_str() {
         "short" => params.push(("shorter_than", "4")),
         "medium" => params.extend([("longer_than", "4"), ("shorter_than", "20")]),
         "long" => params.push(("longer_than", "20")),
         _ => params.push(("longer_than", "1")),
+    }
+    let bound = (now_secs() - f.when.secs()).to_string();
+    match f.when {
+        When::Any => {}
+        When::Older => params.push(("created_before", bound.as_str())),
+        _ => params.push(("created_after", bound.as_str())),
     }
     let url = Url::parse_with_params("https://api.dailymotion.com/videos", &params)?;
     let v = link::get_json(&c, url.as_str()).await?;
@@ -294,7 +484,7 @@ async fn dailymotion(lang: &str, q: &str, page: usize, filter: &str) -> Result<S
                 .collect()
         })
         .unwrap_or_default();
-    Ok(SearchPage { hits, more: v.get("has_more").and_then(Value::as_bool).unwrap_or(false) })
+    Ok(SearchPage { hits, more: v.get("has_more").and_then(Value::as_bool).unwrap_or(false), ..Default::default() })
 }
 
 // ---------- podcasts (annuaire d'Apple) ----------
@@ -391,25 +581,54 @@ fn show_hit(r: &Value) -> Option<Hit> {
     })
 }
 
-async fn podcasts(lang: &str, q: &str) -> Result<SearchPage> {
+/// Range des résultats datés : les plus récents ou les plus anciens d'abord (date inconnue en dernier).
+fn by_date(hits: &mut [Hit], sort: Sort) {
+    match sort {
+        Sort::Recent => hits.sort_by_key(|h| std::cmp::Reverse(h.published)),
+        Sort::Old => hits.sort_by_key(|h| if h.published > 0 { h.published } else { i64::MAX }),
+        _ => {}
+    }
+}
+
+async fn podcasts(lang: &str, q: &str, f: &Filters) -> Result<SearchPage> {
     let c = link::client()?;
     let cc = country(lang);
-    let episodes = itunes(&[("term", q), ("media", "podcast"), ("entity", "podcastEpisode"), ("limit", "40"), ("country", cc)])?;
+    // l'annuaire d'Apple ne filtre ni ne trie : Lumen le fait, sur une liste plus longue
+    let filtered = f.when != When::Any || !f.length.is_empty() || matches!(f.sort, Sort::Recent | Sort::Old);
+    let limit = if filtered { "120" } else { "40" };
+    let episodes = itunes(&[("term", q), ("media", "podcast"), ("entity", "podcastEpisode"), ("limit", limit), ("country", cc)])?;
     let shows = itunes(&[("term", q), ("media", "podcast"), ("entity", "podcast"), ("limit", "10"), ("country", cc)])?;
     let (e, s) = tokio::join!(link::get_json(&c, episodes.as_str()), link::get_json(&c, shows.as_str()));
     let rows = |v: &Result<Value>| v.as_ref().ok().and_then(|v| v.get("results").and_then(Value::as_array).cloned()).unwrap_or_default();
     if e.is_err() && s.is_err() {
         return Err(e.err().unwrap());
     }
-    let mut hits: Vec<Hit> = rows(&s).iter().filter_map(show_hit).take(8).collect();
-    let eps: Vec<Hit> = rows(&e).iter().filter_map(|r| episode_hit(r, lang)).collect();
-    hits.extend(by_language(eps, 8));
-    Ok(SearchPage { hits, more: false })
+    let now = now_secs();
+    let mut shows: Vec<Hit> = rows(&s).iter().filter_map(show_hit).filter(|h| f.when.admits(h.published, now)).take(8).collect();
+    let mut eps: Vec<Hit> = rows(&e)
+        .iter()
+        .filter_map(|r| episode_hit(r, lang))
+        .filter(|h| f.when.admits(h.published, now) && f.fits_length(h.duration))
+        .collect();
+    by_date(&mut shows, f.sort);
+    by_date(&mut eps, f.sort);
+    let mut hits = shows;
+    let mut eps = by_language(eps, 8);
+    // la langue d'abord, puis la date demandée
+    if matches!(f.sort, Sort::Recent | Sort::Old) {
+        let (mut mine, rest): (Vec<Hit>, Vec<Hit>) = eps.into_iter().partition(|h| h.in_lang != Some(false));
+        by_date(&mut mine, f.sort);
+        mine.extend(rest);
+        eps = mine;
+    }
+    eps.truncate(40);
+    hits.extend(eps);
+    Ok(SearchPage { hits, ..Default::default() })
 }
 
 // ---------- chansons (Deezer pour trouver, LRCLIB pour les paroles) ----------
 
-async fn music(lang: &str, q: &str, page: usize) -> Result<SearchPage> {
+async fn music(lang: &str, q: &str, page: usize, f: &Filters) -> Result<SearchPage> {
     let c = link::client()?;
     let index = (page * PER_PAGE).to_string();
     let limit = PER_PAGE.to_string();
@@ -457,18 +676,21 @@ async fn music(lang: &str, q: &str, page: usize) -> Result<SearchPage> {
         .buffered(6)
         .collect()
         .await;
-    // des paroles dans la langue étudiée d'abord ; une chanson sans paroles en dernier
+    // des paroles dans la langue étudiée d'abord ; une chanson sans paroles en dernier ;
+    // « les plus populaires » : selon le classement de Deezer, dans chaque groupe
     let mut hits = found;
+    let popular = f.sort == Sort::Popular;
     hits.sort_by_key(|h| {
         let has = h.lyrics.is_some();
-        match (has, h.in_lang) {
+        let group = match (has, h.in_lang) {
             (true, Some(true)) => 0,
             (true, None) => 1,
             (true, Some(false)) => 3,
             (false, _) => 2,
-        }
+        };
+        (group, if popular { -h.count } else { 0 })
     });
-    Ok(SearchPage { hits, more })
+    Ok(SearchPage { hits, more, ..Default::default() })
 }
 
 /// La chanson sur YouTube Music (version de l'album, dont le minutage suit celui
@@ -517,16 +739,25 @@ fn encyclopedias(lang: &str) -> Vec<(String, &'static str, u8, u8)> {
     out
 }
 
-async fn wiki_site(c: &reqwest::Client, base: &str, name: &str, lo: u8, hi: u8, q: &str, page: usize) -> Result<(Vec<Hit>, bool)> {
+async fn wiki_site(c: &reqwest::Client, base: &str, name: &str, lo: u8, hi: u8, q: &str, page: usize, sort: Sort) -> Result<(Vec<Hit>, bool)> {
     let per = 10usize;
     let offset = (page * per).to_string();
     let limit = per.to_string();
+    // tri de la recherche de MediaWiki (CirrusSearch) : date de création de l'article, ou
+    // nombre de liens qui y mènent pour les plus populaires
+    let order = match sort {
+        Sort::Recent => "create_timestamp_desc",
+        Sort::Old => "create_timestamp_asc",
+        Sort::Popular => "incoming_links_desc",
+        Sort::Relevance => "relevance",
+    };
     let url = Url::parse_with_params(
         &format!("{base}/w/api.php"),
         &[
             ("action", "query"),
             ("generator", "search"),
             ("gsrsearch", q),
+            ("gsrsort", order),
             ("gsrlimit", limit.as_str()),
             ("gsroffset", offset.as_str()),
             ("gsrnamespace", "0"),
@@ -543,6 +774,10 @@ async fn wiki_site(c: &reqwest::Client, base: &str, name: &str, lo: u8, hi: u8, 
         ],
     )?;
     let v = link::get_json(c, url.as_str()).await?;
+    // une encyclopédie qui ne connaît pas ce tri : sans tri
+    if v.get("error").is_some() && sort != Sort::Relevance {
+        return Box::pin(wiki_site(c, base, name, lo, hi, q, page, Sort::Relevance)).await;
+    }
     let more = v.get("continue").is_some();
     let mut pages: Vec<Value> = v.pointer("/query/pages").and_then(Value::as_array).cloned().unwrap_or_default();
     pages.sort_by_key(|p| p.get("index").and_then(Value::as_i64).unwrap_or(0));
@@ -581,10 +816,10 @@ async fn wiki_site(c: &reqwest::Client, base: &str, name: &str, lo: u8, hi: u8, 
     Ok((hits, more))
 }
 
-async fn wiki(lang: &str, q: &str, page: usize) -> Result<SearchPage> {
+async fn wiki(lang: &str, q: &str, page: usize, f: &Filters) -> Result<SearchPage> {
     let c = lyrics::client()?;
     let sites = encyclopedias(lang);
-    let results = futures_util::future::join_all(sites.iter().map(|(base, name, lo, hi)| wiki_site(&c, base, name, *lo, *hi, q, page))).await;
+    let results = futures_util::future::join_all(sites.iter().map(|(base, name, lo, hi)| wiki_site(&c, base, name, *lo, *hi, q, page, f.sort))).await;
     let mut lists: Vec<Vec<Hit>> = Vec::new();
     let mut more = false;
     let mut error = None;
@@ -612,7 +847,7 @@ async fn wiki(lang: &str, q: &str, page: usize) -> Result<SearchPage> {
             }
         }
     }
-    Ok(SearchPage { hits, more })
+    Ok(SearchPage { hits, more, ..Default::default() })
 }
 
 /// Sections de fin d'article (références, liens) : le texte s'arrête avant.
@@ -775,6 +1010,13 @@ pub async fn stream(data_dir: &Path, url: &str, audio_only: bool, browser: Optio
     Ok(s)
 }
 
+/// Image et son d'une réponse de yt-dlp, pour les essais de ytnative.rs.
+#[cfg(test)]
+pub fn stream_of_for_tests(v: &Value) -> (String, String) {
+    let s = stream_of(v);
+    (s.video, s.audio)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -823,6 +1065,42 @@ mod tests {
     }
 
     #[test]
+    fn filters() {
+        // l'ancienne forme : la durée seule
+        assert_eq!(Filters::parse("short"), Filters { length: "short".into(), ..Default::default() });
+        let f = Filters::parse("sort=popular;when=week;len=long;cc=1;win=up:4");
+        assert_eq!((f.sort, f.when, f.length.as_str(), f.subtitles, f.window.as_deref()), (Sort::Popular, When::Week, "long", true, Some("up:4")));
+        assert_eq!(Filters::parse(""), Filters::default());
+        // les paramètres de YouTube, tels que son site les écrit
+        assert_eq!(yt_sp(false, 0, "", false), "EgIQAQ==");
+        assert_eq!(yt_sp(false, 0, "short", false), "EgQQARgB");
+        assert_eq!(yt_sp(false, 0, "medium", false), "EgQQARgD");
+        assert_eq!(yt_sp(false, 3, "", false), "EgQIAxAB");
+        assert_eq!(yt_sp(true, 0, "", false), "CAMSAhAB");
+        assert_eq!(yt_sp(false, 0, "", true), "EgQQASgB");
+        // périodes : « les plus récents » s'élargit, une date choisie l'emporte
+        let now = 1_790_000_000;
+        assert_eq!(yt_windows(&Filters::parse("sort=recent"), now), ["up:3", "up:4", "up:5"]);
+        assert_eq!(yt_windows(&Filters::parse("sort=recent;when=month"), now), ["up:4"]);
+        assert_eq!(yt_windows(&Filters::parse("sort=old"), now)[0], "before:2014-01-01");
+        assert!(yt_windows(&Filters::parse("when=older"), now)[0].starts_with("before:2025-"));
+        assert_eq!(yt_windows(&Filters::default(), now), [""]);
+        // dates et durées
+        assert!(When::Week.admits(now - 3 * 86_400, now));
+        assert!(!When::Week.admits(now - 9 * 86_400, now));
+        assert!(When::Older.admits(now - 400 * 86_400, now));
+        assert!(!When::Day.admits(0, now));
+        let f = Filters::parse("len=medium");
+        assert!(f.fits_length(600.0) && !f.fits_length(60.0) && f.fits_length(0.0));
+        let mk = |id: &str, p: i64| Hit { id: id.into(), published: p, ..Default::default() };
+        let mut h = vec![mk("a", 10), mk("b", 0), mk("c", 30)];
+        by_date(&mut h, Sort::Recent);
+        assert_eq!(h.iter().map(|x| x.id.as_str()).collect::<Vec<_>>(), ["c", "a", "b"]);
+        by_date(&mut h, Sort::Old);
+        assert_eq!(h.iter().map(|x| x.id.as_str()).collect::<Vec<_>>(), ["a", "c", "b"]);
+    }
+
+    #[test]
     fn languages_first() {
         let mk = |id: &str, l: Option<bool>| Hit { id: id.into(), in_lang: l, ..Default::default() };
         let h = by_language(vec![mk("a", Some(false)), mk("b", None), mk("c", Some(true))], 8);
@@ -833,7 +1111,8 @@ mod tests {
     }
 
     /// Recherches réelles sur chaque plateforme (titres et nombres seulement) :
-    /// `LUMEN_SEARCH="it:cucina" cargo test --lib search_live -- --ignored --nocapture`.
+    /// `LUMEN_SEARCH="it:cucina" cargo test --lib search_live -- --ignored --nocapture`
+    /// (`LUMEN_SEARCH_FILTER="sort=recent"`, `LUMEN_SEARCH_ONLY=youtube,wiki` pour essayer les filtres).
     #[tokio::test]
     #[ignore]
     async fn search_live() {
@@ -841,19 +1120,34 @@ mod tests {
         let (lang, q) = spec.split_once(':').unwrap();
         let dir = std::env::temp_dir().join("lumen-search-live");
         std::fs::create_dir_all(&dir).unwrap();
+        // filtres (« sort=recent;when=week ») et plateformes à essayer (« youtube,wiki ») ; sans eux : tout
+        let filter = std::env::var("LUMEN_SEARCH_FILTER").unwrap_or_default();
+        let only = std::env::var("LUMEN_SEARCH_ONLY").unwrap_or_default();
         for p in ["youtube", "dailymotion", "podcast", "music", "wiki"] {
+            if !only.is_empty() && !only.split(',').any(|o| o == p) {
+                continue;
+            }
             let started = Instant::now();
-            match search(&dir, lang, p, q, 0, "", &mut |_| {}).await {
+            match search(&dir, lang, p, q, 0, &filter, &mut |_| {}).await {
                 Ok(r) => {
                     let ok = r.hits.iter().filter(|h| h.in_lang == Some(true)).count();
                     let lyr = r.hits.iter().filter(|h| h.lyrics.is_some()).count();
-                    println!("{p:<12} {:>2} résultats ({ok} dans la langue, {lyr} avec paroles) en {:.1} s", r.hits.len(), started.elapsed().as_secs_f64());
+                    println!(
+                        "{p:<12} {:>2} résultats ({ok} dans la langue, {lyr} avec paroles) en {:.1} s{}",
+                        r.hits.len(),
+                        started.elapsed().as_secs_f64(),
+                        if r.window.is_empty() { String::new() } else { format!(" · période {}", r.window) }
+                    );
                     for h in r.hits.iter().take(4) {
-                        println!("   · [{}] {} — {}", h.kind, h.title.chars().take(60).collect::<String>(), h.author);
+                        let when = chrono::DateTime::from_timestamp(h.published, 0).filter(|_| h.published > 0).map(|d| d.format("%Y-%m-%d").to_string()).unwrap_or_default();
+                        println!("   · [{}] {} — {} {when} {}", h.kind, h.title.chars().take(60).collect::<String>(), h.author, if h.count > 0 { h.count.to_string() } else { String::new() });
                     }
                 }
                 Err(e) => println!("{p:<12} erreur : {e}"),
             }
+        }
+        if !only.is_empty() {
+            return;
         }
         let first = search(&dir, lang, "youtube", q, 0, "", &mut |_| {}).await.unwrap();
         let started = Instant::now();
@@ -876,7 +1170,7 @@ mod music_check {
     #[ignore]
     async fn music_live() {
         for (lang, q) in [("it", "Laura Pausini"), ("fr", "Stromae"), ("es", "Rosalía"), ("de", "Mark Forster")] {
-            let r = super::music(lang, q, 0).await.unwrap();
+            let r = super::music(lang, q, 0, &super::Filters::default()).await.unwrap();
             let lyr = r.hits.iter().filter(|h| h.lyrics.is_some()).count();
             let synced = r.hits.iter().filter(|h| h.lyrics.as_ref().is_some_and(|l| !l.synced.is_empty())).count();
             let ok = r.hits.iter().filter(|h| h.in_lang == Some(true)).count();

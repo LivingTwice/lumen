@@ -1531,7 +1531,7 @@ pub async fn fetch_cover(data_dir: &Path, url: &str) -> Option<PathBuf> {
     let out = dir.join(format!("{stem}.cover.jpg"));
     std::fs::write(&raw, &bytes).ok()?;
     // outil d'images de macOS : réduit et convertit en JPEG
-    #[cfg(not(windows))]
+    #[cfg(not(any(windows, target_os = "ios")))]
     let shrunk = tokio::process::Command::new("/usr/bin/sips")
         .args(["-Z", "1280", "-s", "format", "jpeg", "-s", "formatOptions", "85"])
         .arg(&raw)
@@ -1540,8 +1540,8 @@ pub async fn fetch_cover(data_dir: &Path, url: &str) -> Option<PathBuf> {
         .output()
         .await
         .is_ok_and(|o| o.status.success());
-    // Windows : la même chose, ici
-    #[cfg(windows)]
+    // Windows, iPhone et iPad : la même chose, ici
+    #[cfg(any(windows, target_os = "ios"))]
     let shrunk = shrink_image(&bytes).is_some_and(|jpg| std::fs::write(&out, jpg).is_ok());
     if shrunk && out.exists() {
         let _ = std::fs::remove_file(&raw);
@@ -1576,7 +1576,7 @@ fn image_kind(b: &[u8]) -> Option<&'static str> {
 
 /// Réduit une image à 1 280 px au plus et la convertit en JPEG (qualité 85),
 /// comme `sips` sur Mac.
-#[cfg(any(windows, test))]
+#[cfg(any(windows, target_os = "ios", test))]
 pub(crate) fn shrink_image(bytes: &[u8]) -> Option<Vec<u8>> {
     let img = image::load_from_memory(bytes).ok()?;
     let img = if img.width() > 1280 || img.height() > 1280 { img.resize(1280, 1280, image::imageops::FilterType::Lanczos3) } else { img };

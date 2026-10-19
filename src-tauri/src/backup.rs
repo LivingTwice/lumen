@@ -49,18 +49,24 @@ const HISTORY_DAYS: usize = 14;
 /// Réglages qui ne quittent pas ce Mac : les clés LingQ et Gemini (promis :
 /// « elle reste sur ce Mac »), l'emplacement de la sauvegarde, propre à ce disque,
 /// et le choix de la carte graphique d'un PC.
-const LOCAL_ONLY: [&str; 4] = ["lingq_key", "gemini_key", "backup_dir", "ai_gpu"];
+const LOCAL_ONLY: [&str; 5] = ["lingq_key", "gemini_key", "backup_dir", "backup_bookmark", "ai_gpu"];
 /// Réglages de ce Mac conservés quand on restaure une sauvegarde (la langue de
 /// l'interface aussi : celle qu'on vient de choisir à l'accueil reste).
-const KEEP_ON_RESTORE: [&str; 9] = ["lingq_key", "gemini_key", "backup_dir", "backup_on", "backup_audio", "backup_video", "backup_snooze", "ui_lang", "ai_gpu"];
+const KEEP_ON_RESTORE: [&str; 10] =
+    ["lingq_key", "gemini_key", "backup_dir", "backup_bookmark", "backup_on", "backup_audio", "backup_video", "backup_snooze", "ui_lang", "ai_gpu"];
 /// IA en ligne (`online_*` : clés, fournisseur, modèle, adresse) : ni sauvegardée
 /// ni remplacée par une restauration, comme les réglages ci-dessus.
 const LOCAL_PREFIX: &str = "online_";
+/// Réglages de la synchronisation (`sync_<clé>` : dernière sauvegarde d'un autre
+/// appareil déjà fusionnée) : propres à chaque appareil, comme `online_`.
+const SYNC_PREFIX: &str = "sync_";
 /// Leçons d'accueil : un profil qui n'a qu'elles n'a encore rien à sauvegarder.
 /// Leur collection dépend de la langue de l'interface au premier lancement.
 const STARTER_COLLECTIONS: [&str; 2] = ["Pour commencer", "Getting started"];
 /// Écart minimal entre deux sauvegardes automatiques (secondes).
 const AUTO_EVERY: i64 = 10 * 60;
+/// Écart entre deux regards sur les sauvegardes des autres appareils (secondes).
+const SYNC_EVERY: i64 = 5 * 60;
 
 // ---------- état de la session ----------
 
@@ -77,6 +83,8 @@ pub struct Tracker {
     checked: AtomicBool,
     /// dernière erreur, effacée par une sauvegarde réussie
     error: Mutex<Option<String>>,
+    /// dernier regard sur les sauvegardes des autres appareils (secondes)
+    last_sync: AtomicI64,
 }
 
 /// Une seule sauvegarde (ou restauration) à la fois.
@@ -433,6 +441,14 @@ pub fn place_of(custom: &str) -> Place {
     }
     let p = Path::new(custom);
     let parts: Vec<String> = p.components().map(|c| c.as_os_str().to_string_lossy().to_string()).collect();
+    // iCloud Drive tel que le voit l'iPhone (dossier choisi dans l'app Fichiers)
+    if parts.iter().any(|x| x == "com~apple~CloudDocs") {
+        return Place { kind: "icloud".into(), name: "iCloud Drive".into(), account: None, path: custom.to_string() };
+    }
+    // un autre nuage vu par l'app Fichiers (Google Drive, Dropbox…) : son nom n'est pas dans le chemin
+    if cfg!(target_os = "ios") {
+        return Place { kind: "cloud".into(), name: crate::i18n::t("le dossier choisi", "the chosen folder").into(), account: None, path: custom.to_string() };
+    }
     // …/Library/CloudStorage/<service>-<compte>/…
     if let Some(i) = parts.windows(2).position(|w| w[0] == "Library" && w[1] == "CloudStorage") {
         if let Some(entry) = parts.get(i + 2) {
@@ -599,7 +615,11 @@ fn device_name() -> String {
                 }
             }
         }
+        // iPhone et iPad : « iPhone », « iPad »
+        #[cfg(target_os = "ios")]
+        return crate::ios::device_word().to_string();
         // Windows : le nom de l'appareil (Paramètres › Système › Informations système)
+        #[allow(unreachable_code)]
         std::env::var("COMPUTERNAME").unwrap_or_else(|_| if cfg!(windows) { crate::i18n::t("Ce PC", "This PC") } else { crate::i18n::t("Ce Mac", "This Mac") }.into())
     })
     .clone()
@@ -679,6 +699,12 @@ fn placeholder(p: &Path) -> PathBuf {
 /// Rapatrie un fichier resté dans iCloud. Depuis macOS 14, la simple lecture
 /// suffit ; avant, le fichier n'existe que sous forme de « .nom.icloud ».
 fn ensure_local(p: &Path, wait: Duration) -> Result<()> {
+    // iPhone et iPad : le dossier vient de l'app Fichiers ; une lecture coordonnée fait
+    // descendre le fichier, d'iCloud Drive comme de Google Drive ou de Dropbox
+    #[cfg(target_os = "ios")]
+    if crate::ios::materialize(p) {
+        return Ok(());
+    }
     if p.exists() {
         return Ok(());
     }
@@ -854,7 +880,9 @@ fn run_in(data_dir: &Path, opts: &Options, device: &str, scratch: &Path) -> Resu
         for k in LOCAL_ONLY {
             c.execute("DELETE FROM settings WHERE key=?1", [k])?;
         }
-        c.execute("DELETE FROM settings WHERE substr(key, 1, ?2) = ?1", params![LOCAL_PREFIX, LOCAL_PREFIX.len() as i64])?;
+        for prefix in [LOCAL_PREFIX, SYNC_PREFIX] {
+            c.execute("DELETE FROM settings WHERE substr(key, 1, ?2) = ?1", params![prefix, prefix.len() as i64])?;
+        }
         let out = (counts(&c)?, media_refs(&c)?);
         c.execute_batch("VACUUM;")?;
         out
@@ -1044,6 +1072,9 @@ fn versions(folder: &Path) -> Vec<Version> {
 
 /// Sauvegardes trouvées dans `root`, de la plus récente à la plus ancienne.
 pub fn list(data_dir: &Path, root: &Path, profile: Option<&str>) -> Result<Vec<Info>> {
+    // iPhone et iPad : un dossier d'un nuage vu par l'app Fichiers se lit d'abord ainsi
+    #[cfg(target_os = "ios")]
+    crate::ios::materialize(root);
     if !root.exists() {
         return Ok(Vec::new());
     }
@@ -1051,6 +1082,8 @@ pub fn list(data_dir: &Path, root: &Path, profile: Option<&str>) -> Result<Vec<I
     let mut out = Vec::new();
     for folder in device_folders(root)? {
         let Some(key) = folder_key(&folder) else { continue };
+        #[cfg(target_os = "ios")]
+        crate::ios::materialize(&folder);
         let mf = folder.join(MANIFEST);
         if ensure_local(&mf, Duration::from_secs(15)).is_err() {
             continue;
@@ -1167,9 +1200,11 @@ fn restore_in(live: &Mutex<Connection>, data_dir: &Path, root: &Path, snap: &Pat
                 db::setting_set(&c, k, &v)?;
             }
         }
-        c.execute("DELETE FROM settings WHERE substr(key, 1, ?2) = ?1", params![LOCAL_PREFIX, LOCAL_PREFIX.len() as i64])?;
+        for prefix in [LOCAL_PREFIX, SYNC_PREFIX] {
+            c.execute("DELETE FROM settings WHERE substr(key, 1, ?2) = ?1", params![prefix, prefix.len() as i64])?;
+        }
         for (k, v) in db::settings_all(&l)? {
-            if k.starts_with(LOCAL_PREFIX) {
+            if k.starts_with(LOCAL_PREFIX) || k.starts_with(SYNC_PREFIX) {
                 db::setting_set(&c, &k, &v)?;
             }
         }
@@ -1190,8 +1225,8 @@ fn restore_in(live: &Mutex<Connection>, data_dir: &Path, root: &Path, snap: &Pat
 
 // ---------- état iCloud d'un fichier ----------
 
-/// Le fichier est-il arrivé dans iCloud ? (macOS seulement)
-#[cfg(target_os = "macos")]
+/// Le fichier est-il arrivé dans iCloud ? (Mac, iPhone et iPad)
+#[cfg(any(target_os = "macos", target_os = "ios"))]
 fn cloud_state(path: &Path) -> (String, Option<String>) {
     use objc2::rc::{autoreleasepool, Retained};
     use objc2::runtime::AnyObject;
@@ -1234,7 +1269,7 @@ fn cloud_state(path: &Path) -> (String, Option<String>) {
     })
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", target_os = "ios")))]
 fn cloud_state(_path: &Path) -> (String, Option<String>) {
     ("unknown".into(), None)
 }
@@ -1244,6 +1279,8 @@ fn cloud_state(_path: &Path) -> (String, Option<String>) {
 struct Prefs {
     on: String,
     dir: String,
+    /// iPhone et iPad : signet du dossier choisi dans l'app Fichiers
+    bookmark: String,
     audio: bool,
     video: bool,
     profile: Option<String>,
@@ -1254,6 +1291,7 @@ fn prefs(c: &Connection) -> Prefs {
     Prefs {
         on: get("backup_on"),
         dir: get("backup_dir"),
+        bookmark: get("backup_bookmark"),
         audio: get("backup_audio") != "0",
         video: get("backup_video") == "1",
         profile: db::setting(c, "profile_id").filter(|p| !p.is_empty()),
@@ -1261,6 +1299,13 @@ fn prefs(c: &Connection) -> Prefs {
 }
 
 fn no_place() -> String {
+    if cfg!(target_os = "ios") {
+        return crate::i18n::t(
+            "Choisissez le dossier « Lumen » où votre Mac sauvegarde (iCloud Drive, Google Drive, Dropbox…), dans Réglages › Sauvegarde.",
+            "Choose the “Lumen” folder your Mac backs up to (iCloud Drive, Google Drive, Dropbox…), in Settings › Backup.",
+        )
+        .into();
+    }
     if cfg!(windows) {
         return crate::i18n::t(
             "Choisissez où sauvegarder : OneDrive, un autre nuage ou un dossier (Réglages › Sauvegarde).",
@@ -1321,6 +1366,52 @@ fn friendly(e: &anyhow::Error, place: &Place, what: (&'static str, &'static str)
     e.to_string()
 }
 
+/// Dossier « Lumen » de la sauvegarde, avec l'accès qu'il demande. Sur iPhone et
+/// iPad, le dossier vient de l'app Fichiers : iOS n'y laisse entrer que par son
+/// signet, le temps du travail (l'accès se referme avec `Root`).
+struct Root {
+    path: PathBuf,
+    #[cfg(target_os = "ios")]
+    _access: crate::ios::Access,
+}
+
+#[cfg(not(target_os = "ios"))]
+fn open_root(_state: &AppState, p: &Prefs) -> Option<Root> {
+    root(&p.dir).map(|path| Root { path })
+}
+
+#[cfg(target_os = "ios")]
+fn open_root(state: &AppState, p: &Prefs) -> Option<Root> {
+    if p.bookmark.is_empty() {
+        return None;
+    }
+    let (access, dir, fresh) = crate::ios::access(&p.bookmark)?;
+    // signet périmé (dossier déplacé, renommé) : on garde le nouveau ; chemin à jour
+    let c = state.db.lock();
+    if let Some(m) = fresh {
+        let _ = db::setting_set(&c, "backup_bookmark", &m);
+    }
+    let shown = dir.display().to_string();
+    if p.dir != shown {
+        let _ = db::setting_set(&c, "backup_dir", &shown);
+    }
+    drop(c);
+    root(&shown).map(|path| Root { path, _access: access })
+}
+
+/// iPhone et iPad : le dossier choisi dans l'app Fichiers devient l'emplacement de
+/// la sauvegarde (signet gardé sur cet appareil). Renvoie son chemin.
+#[cfg(target_os = "ios")]
+pub async fn pick_place(state: &AppState) -> Result<Option<String>, String> {
+    let Some((mark, path)) = crate::ios::pick_folder().await else { return Ok(None) };
+    let c = state.db.lock();
+    db::setting_set(&c, "backup_bookmark", &mark).map_err(|e| e.to_string())?;
+    db::setting_set(&c, "backup_dir", &path).map_err(|e| e.to_string())?;
+    drop(c);
+    *state.backup.error.lock() = None;
+    Ok(Some(path))
+}
+
 /// Sauvegarde maintenant (bouton, activation, minuterie ou fermeture).
 pub fn run_now(state: &AppState) -> Result<(), String> {
     let _running = state.backup.wait();
@@ -1330,9 +1421,9 @@ pub fn run_now(state: &AppState) -> Result<(), String> {
     };
     state.backup.last_try.store(db::now(), Ordering::SeqCst);
     let place = place_of(&p.dir);
-    let res = match root(&p.dir) {
+    let res = match open_root(state, &p) {
         None => Err(no_place()),
-        Some(root) => run(&state.data_dir, &Options { root, audio: p.audio, video: p.video }).map_err(|e| friendly(&e, &place, ("Sauvegarde impossible", "Backup failed"))),
+        Some(r) => run(&state.data_dir, &Options { root: r.path.clone(), audio: p.audio, video: p.video }).map_err(|e| friendly(&e, &place, ("Sauvegarde impossible", "Backup failed"))),
     };
     let mut error = state.backup.error.lock();
     match res {
@@ -1376,7 +1467,13 @@ fn dirty(state: &AppState, changes: u64) -> bool {
 /// quelque chose a changé.
 pub async fn auto_loop(app: tauri::AppHandle) {
     use tauri::{Emitter, Manager};
-    tokio::time::sleep(Duration::from_secs(120)).await;
+    // un premier regard sur les autres appareils peu après le lancement
+    tokio::time::sleep(Duration::from_secs(20)).await;
+    {
+        let st = app.state::<AppState>();
+        st.backup.last_sync.store(db::now() - SYNC_EVERY, Ordering::SeqCst);
+        st.backup.last_try.store(db::now() - AUTO_EVERY + 100, Ordering::SeqCst);
+    }
     loop {
         let h = app.clone();
         let _ = tauri::async_runtime::spawn_blocking(move || {
@@ -1389,6 +1486,15 @@ pub async fn auto_loop(app: tauri::AppHandle) {
             if on && waited && !st.backup.running.load(Ordering::SeqCst) && dirty(&st, changes) {
                 let _ = run_now(&st);
                 let _ = h.emit("backup", status(&st));
+            }
+            // la progression des autres appareils (sur iPhone et iPad : dès que le dossier est choisi)
+            let reachable = on || (cfg!(target_os = "ios") && !prefs(&st.db.lock()).bookmark.is_empty());
+            if reachable && db::now() - st.backup.last_sync.load(Ordering::SeqCst) >= SYNC_EVERY && !st.backup.running.load(Ordering::SeqCst) {
+                if let Ok(Some(done)) = sync_now(&st) {
+                    if !done.report.is_empty() {
+                        let _ = h.emit("synced", &done);
+                    }
+                }
             }
         })
         .await;
@@ -1429,14 +1535,18 @@ fn local_sizes(state: &AppState) -> (u64, u64) {
 
 pub fn status(state: &AppState) -> Status {
     let p = prefs(&state.db.lock());
-    let root = root(&p.dir);
+    // le dossier n'est lu qu'une fois la sauvegarde acceptée (macOS demande l'accès à iCloud Drive)
+    let opened = if p.on == "1" { open_root(state, &p) } else { None };
+    // iPhone et iPad : un emplacement seulement une fois le dossier choisi dans l'app Fichiers
+    let root = if cfg!(target_os = "ios") && p.bookmark.is_empty() { None } else { root(&p.dir) };
+    let _ = &opened;
     let (local_audio, local_video) = local_sizes(state);
     let mut s = Status {
         enabled: p.on == "1",
         decided: !p.on.is_empty(),
         dir: root.as_ref().map(|r| r.display().to_string()),
         icloud: p.dir.trim().is_empty() && root.is_some(),
-        icloud_available: icloud_drive().is_some(),
+        icloud_available: icloud_drive().is_some() || cfg!(target_os = "ios"),
         place: place_of(&p.dir),
         running: state.backup.running.load(Ordering::SeqCst),
         cloud: "unknown".into(),
@@ -1461,17 +1571,176 @@ pub fn status(state: &AppState) -> Status {
     s
 }
 
+// ---------- synchronisation : la progression des autres appareils ----------
+
+/// Ce qu'a apporté la synchronisation, et de quel appareil (événement « synced »).
+#[derive(Serialize, Clone, Debug, Default)]
+pub struct Synced {
+    /// « MacBook Pro », « iPhone » (le premier, s'il y en a plusieurs)
+    pub device_name: String,
+    pub report: crate::sync::Report,
+}
+
+/// Fusionne la sauvegarde d'un autre appareil (son dossier) dans la base de celui-ci.
+/// Les médias des leçons nouvelles descendent d'abord, base libre ; puis la fusion,
+/// d'un seul geste. Une copie de la base d'avant (une par jour) reste ici.
+fn merge_folder(state: &AppState, root: &Path, folder: &Path) -> Result<crate::sync::Report> {
+    let snap = folder.join(SNAPSHOT);
+    ensure_local(&snap, Duration::from_secs(300))?;
+    let scratch = state.data_dir.join("synchro.tmp");
+    let _ = fs::remove_dir_all(&scratch);
+    fs::create_dir_all(&scratch)?;
+    let res = (|| -> Result<crate::sync::Report> {
+        let tmp = scratch.join("autre.db");
+        gunzip(&snap, &tmp)?;
+        // à jour (migrations), avec les identifiants des leçons
+        let other = db::open(&tmp)?;
+        let wanted: Vec<(String, Vec<String>)> = other
+            .prepare("SELECT uid, media_path, video_path, cover_path FROM lessons WHERE uid IS NOT NULL")?
+            .query_map([], |r| Ok((r.get::<_, String>(0)?, [r.get::<_, Option<String>>(1)?, r.get(2)?, r.get(3)?])))?
+            .filter_map(|r| r.ok())
+            .map(|(u, ps)| (u, ps.into_iter().flatten().map(|p| stored_name(&p)).filter(|n| !n.is_empty()).collect()))
+            .collect();
+        drop(other);
+        // médias des leçons qui n'existent pas ici (copiés avant de bloquer la base)
+        let here: HashSet<String> = {
+            let c = state.db.lock();
+            db::ensure_uids(&c)?;
+            let mut st = c.prepare("SELECT uid FROM lessons WHERE uid IS NOT NULL UNION SELECT key FROM tombstones WHERE kind='lesson'")?;
+            let rows = st.query_map([], |r| r.get::<_, String>(0))?;
+            rows.filter_map(|r| r.ok()).collect()
+        };
+        let local_media = media::media_dir(&state.data_dir);
+        fs::create_dir_all(&local_media)?;
+        let cloud_media = root.join(MEDIA);
+        for name in wanted.iter().filter(|(u, _)| !here.contains(u)).flat_map(|(_, n)| n.iter()) {
+            let dest = local_media.join(name);
+            if dest.is_file() {
+                continue;
+            }
+            let remote = cloud_media.join(name);
+            if ensure_local(&remote, Duration::from_secs(300)).is_err() {
+                continue;
+            }
+            let staged = scratch.join(name);
+            let _ = copy_file(&remote, &staged).and_then(|_| fs::rename(&staged, &dest));
+        }
+        let fetch = |name: &str| -> Option<String> {
+            let dest = local_media.join(name);
+            dest.is_file().then(|| dest.display().to_string())
+        };
+        let mut live = state.db.lock();
+        // filet de sécurité, une fois par jour : la base d'avant la synchronisation
+        let safety = state.data_dir.join("lumen.avant-synchro.db");
+        let old = fs::metadata(&safety).and_then(|m| m.modified()).ok().and_then(|t| t.elapsed().ok()).is_none_or(|d| d > Duration::from_secs(86_400));
+        if old {
+            remove_db(&safety);
+            live.execute("VACUUM INTO ?1", [safety.to_string_lossy()])?;
+        }
+        let (report, files) = crate::sync::merge(&mut live, &tmp, &fetch)?;
+        drop(live);
+        // fichiers des leçons supprimées sur l'autre appareil
+        for f in files {
+            let p = PathBuf::from(&f);
+            if p.starts_with(&local_media) {
+                let _ = fs::remove_file(p);
+            }
+        }
+        Ok(report)
+    })();
+    let _ = fs::remove_dir_all(&scratch);
+    res
+}
+
+/// Regarde les sauvegardes des autres appareils de la même personne (même profil) et
+/// fusionne celles qui ont changé depuis la dernière fois. `None` : rien de nouveau.
+pub fn sync_now(state: &AppState) -> Result<Option<Synced>, String> {
+    let _running = state.backup.wait();
+    state.backup.last_sync.store(db::now(), Ordering::SeqCst);
+    let (p, sync_off) = {
+        let c = state.db.lock();
+        (prefs(&c), db::setting(&c, "backup_sync").as_deref() == Some("0"))
+    };
+    let Some(profile) = p.profile.clone() else { return Ok(None) };
+    if sync_off {
+        return Ok(None);
+    }
+    let root = open_root(state, &p).ok_or_else(no_place)?;
+    #[cfg(target_os = "ios")]
+    crate::ios::materialize(&root.path);
+    let device = device_id(&state.data_dir);
+    let folders = device_folders(&root.path).unwrap_or_default();
+    let mut out: Option<Synced> = None;
+    let mut error = None;
+    for folder in folders {
+        let Some(key) = folder_key(&folder) else { continue };
+        #[cfg(target_os = "ios")]
+        crate::ios::materialize(&folder);
+        let mf = folder.join(MANIFEST);
+        if ensure_local(&mf, Duration::from_secs(20)).is_err() {
+            continue;
+        }
+        let Some(m) = read_manifest(&mf) else { continue };
+        if m.profile != profile || m.device == device || m.format > FORMAT {
+            continue;
+        }
+        let seen_key = format!("{SYNC_PREFIX}{key}");
+        let seen: i64 = db::setting(&state.db.lock(), &seen_key).and_then(|v| v.parse().ok()).unwrap_or(0);
+        if m.saved_at <= seen {
+            continue;
+        }
+        match merge_folder(state, &root.path, &folder) {
+            Ok(r) => {
+                let _ = db::setting_set(&state.db.lock(), &seen_key, &m.saved_at.to_string());
+                let s = out.get_or_insert_with(|| Synced { device_name: m.device_name.clone(), report: Default::default() });
+                s.report.terms += r.terms;
+                s.report.known += r.known;
+                s.report.lessons += r.lessons;
+                s.report.progress += r.progress;
+                s.report.removed += r.removed;
+            }
+            Err(e) => error = Some(friendly(&e, &place_of(&p.dir), ("Synchronisation impossible", "Sync failed"))),
+        }
+    }
+    match (out, error) {
+        (None, Some(e)) => Err(e),
+        (out, _) => Ok(out),
+    }
+}
+
+/// Fusionne une sauvegarde choisie (Réglages › Sauvegarde, « Ajouter à ma progression ») :
+/// sa progression rejoint celle de cet appareil, sans la remplacer.
+pub fn merge_for(state: &AppState, key: &str) -> Result<crate::sync::Report, String> {
+    let _running = state.backup.wait();
+    let p = prefs(&state.db.lock());
+    let root = open_root(state, &p).ok_or_else(no_place)?;
+    let folder = find_folder(&root.path, key).ok_or_else(|| crate::i18n::t("Cette sauvegarde est introuvable.", "This backup can't be found.").to_string())?;
+    let r = merge_folder(state, &root.path, &folder).map_err(|e| friendly(&e, &place_of(&p.dir), ("Fusion impossible", "Merge failed")))?;
+    if let Some(m) = read_manifest(&folder.join(MANIFEST)) {
+        let c = state.db.lock();
+        let _ = db::setting_set(&c, &format!("{SYNC_PREFIX}{key}"), &m.saved_at.to_string());
+        // les deux appareils sont désormais ceux d'une même personne : la synchronisation
+        // les réunit d'elle-même (chacun fusionne les sauvegardes de l'autre)
+        let _ = db::setting_set(&c, "profile_id", &m.profile);
+    }
+    Ok(r)
+}
+
 pub fn list_for(state: &AppState) -> Result<Vec<Info>, String> {
     let p = prefs(&state.db.lock());
-    let root = root(&p.dir).ok_or_else(no_place)?;
-    list(&state.data_dir, &root, p.profile.as_deref()).map_err(|e| friendly(&e, &place_of(&p.dir), ("Lecture des sauvegardes impossible", "Couldn't read the backups")))
+    let root = open_root(state, &p).ok_or_else(no_place)?;
+    list(&state.data_dir, &root.path, p.profile.as_deref()).map_err(|e| friendly(&e, &place_of(&p.dir), ("Lecture des sauvegardes impossible", "Couldn't read the backups")))
 }
 
 pub fn restore_for(state: &AppState, key: &str, day: Option<&str>, on: impl Fn(ImportEvent)) -> Result<Restored, String> {
     let _running = state.backup.wait();
     let p = prefs(&state.db.lock());
-    let root = root(&p.dir).ok_or_else(no_place)?;
-    let out = restore(&state.db, &state.data_dir, &root, key, day, on).map_err(|e| friendly(&e, &place_of(&p.dir), ("Restauration impossible", "Restore failed")))?;
+    let root = open_root(state, &p).ok_or_else(no_place)?;
+    let out = restore(&state.db, &state.data_dir, &root.path, key, day, on).map_err(|e| friendly(&e, &place_of(&p.dir), ("Restauration impossible", "Restore failed")))?;
+    // cette sauvegarde est désormais la base : la synchronisation repartira de la suivante
+    if let Some(m) = find_folder(&root.path, key).and_then(|f| read_manifest(&f.join(MANIFEST))) {
+        let _ = db::setting_set(&state.db.lock(), &format!("{SYNC_PREFIX}{key}"), &m.saved_at.to_string());
+    }
     // la progression restaurée rejoint la sauvegarde de ce Mac à la prochaine occasion
     state.backup.seen.store(u64::MAX, Ordering::SeqCst);
     state.backup.last_try.store(0, Ordering::SeqCst);

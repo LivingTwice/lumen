@@ -1,6 +1,7 @@
 // Chercher en ligne, depuis Découvrir : YouTube, chansons, podcasts, articles,
 // Dailymotion. Le natif interroge chaque plateforme (search.rs) ; ici, les
 // résultats par plateforme, les pages suivantes et les recherches récentes.
+import { useMemo } from "react";
 import { create } from "zustand";
 import { api, errorText } from "./api";
 import { t } from "./i18n";
@@ -9,8 +10,122 @@ import type { LangCode, LinkInfo, SearchHit, SearchPlatform } from "./types";
 
 /** « Tout » montre un aperçu de chaque plateforme. */
 export type SearchTab = "all" | SearchPlatform;
-/** Durée des vidéos (YouTube, Dailymotion). */
+/** Durée des vidéos et des épisodes. */
 export type Length = "" | "short" | "medium" | "long";
+/** Ordre des résultats. */
+export type SortBy = "relevance" | "recent" | "popular" | "old";
+/** Date de publication (« older » : il y a plus d'un an). */
+export type When = "" | "day" | "week" | "month" | "year" | "older";
+
+/** Filtres de la recherche (et des trouvailles de Découvrir), gardés dans le réglage `search_filters`. */
+export interface SearchFilters {
+  sort: SortBy;
+  when: When;
+  length: Length;
+  /** vidéos sous-titrées (YouTube) */
+  subtitles: boolean;
+  /** cacher ce qui semble être dans une autre langue */
+  onlyLang: boolean;
+  /** cacher ce qui est déjà dans la bibliothèque */
+  hideKnown: boolean;
+}
+
+export const NO_FILTERS: SearchFilters = { sort: "relevance", when: "", length: "", subtitles: false, onlyLang: false, hideKnown: false };
+
+const SORTS: SortBy[] = ["relevance", "recent", "popular", "old"];
+const WHENS: When[] = ["", "day", "week", "month", "year", "older"];
+const LENGTHS: Length[] = ["", "short", "medium", "long"];
+
+/** Filtres lus dans le réglage (une valeur inconnue revient à la valeur par défaut). */
+export function filtersOf(raw: string | undefined): SearchFilters {
+  let v: Partial<SearchFilters> = {};
+  try {
+    v = raw ? JSON.parse(raw) : {};
+  } catch {
+    /* réglage illisible : les valeurs par défaut */
+  }
+  return {
+    sort: SORTS.includes(v.sort as SortBy) ? (v.sort as SortBy) : "relevance",
+    when: WHENS.includes(v.when as When) ? (v.when as When) : "",
+    length: LENGTHS.includes(v.length as Length) ? (v.length as Length) : "",
+    subtitles: v.subtitles === true,
+    onlyLang: v.onlyLang === true,
+    hideKnown: v.hideKnown === true,
+  };
+}
+
+export function useFilters(): SearchFilters {
+  const raw = useApp((s) => s.settings.search_filters);
+  return useMemo(() => filtersOf(raw), [raw]);
+}
+
+/** Filtres choisis en plus du tri (pastille du bouton « Filtres »). */
+export function activeFilters(f: SearchFilters): number {
+  return [f.when !== "", f.length !== "", f.subtitles, f.onlyLang, f.hideKnown].filter(Boolean).length;
+}
+
+/** Ce qu'un tri ou un filtre demande à une plateforme. */
+export type Ability = "recent" | "old" | "popular" | "when" | "length" | "subtitles";
+
+/**
+ * Ce que chaque plateforme sait faire. « feed » : les trouvailles de Découvrir, sans
+ * popularité connue. Les chansons ne se classent que par popularité (Deezer), les
+ * articles par date de création ou par nombre de liens (Wikipédia).
+ */
+export function supports(p: SearchPlatform | "feed", what: Ability): boolean {
+  switch (p) {
+    case "youtube":
+      return true;
+    case "dailymotion":
+      return what !== "subtitles";
+    case "podcast":
+    case "feed":
+      return what !== "popular" && what !== "subtitles";
+    case "music":
+      return what === "popular";
+    case "wiki":
+      return what === "recent" || what === "old" || what === "popular";
+  }
+}
+
+/** Ce que l'onglet permet : au moins une de ses plateformes. */
+export function tabSupports(tab: SearchTab | "feed", what: Ability): boolean {
+  if (tab === "feed") return supports("feed", what);
+  return (tab === "all" ? PLATFORMS : [tab]).some((p) => supports(p, what));
+}
+
+/** Le filtre envoyé au natif (`search::Filters`) : seulement ce que la plateforme sait faire. */
+function nativeFilter(p: SearchPlatform, f: SearchFilters, window?: string): string {
+  const parts: string[] = [];
+  if (f.sort !== "relevance" && supports(p, f.sort)) parts.push(`sort=${f.sort}`);
+  if (f.when && supports(p, "when")) parts.push(`when=${f.when}`);
+  if (f.length && supports(p, "length")) parts.push(`len=${f.length}`);
+  if (f.subtitles && supports(p, "subtitles")) parts.push("cc=1");
+  if (window !== undefined && parts.length) parts.push(`win=${window}`);
+  return parts.join(";");
+}
+
+/** La période qu'a retenue YouTube pour un tri par date, dite simplement. */
+export function windowText(w: string): string {
+  switch (w) {
+    case "up:2":
+      return t("Vidéos publiées aujourd'hui", "Videos published today");
+    case "up:3":
+      return t("Vidéos publiées cette semaine", "Videos published this week");
+    case "up:4":
+      return t("Vidéos publiées ce mois-ci", "Videos published this month");
+    case "up:5":
+      return t("Vidéos publiées cette année", "Videos published this year");
+  }
+  const before = w.match(/^before:(\d{4})-(\d{2})-(\d{2})$/);
+  if (before) {
+    const [, y, m, d] = before;
+    if (m === "01" && d === "01") return t(`Vidéos publiées avant ${y}`, `Videos published before ${y}`);
+    const day = new Date(Number(y), Number(m) - 1, Number(d)).toLocaleDateString(t("fr-FR", "en-US"), { day: "numeric", month: "long", year: "numeric" });
+    return t(`Vidéos publiées avant le ${day}`, `Videos published before ${day}`);
+  }
+  return "";
+}
 
 export const PLATFORMS: SearchPlatform[] = ["youtube", "music", "podcast", "wiki", "dailymotion"];
 
@@ -37,6 +152,8 @@ export interface Bucket {
   more: boolean;
   loading: boolean;
   error: string | null;
+  /** période retenue par YouTube pour un tri par date (voir `SearchPage.window`) */
+  window: string;
 }
 
 /** Une adresse collée dans le champ : on regarde ce qu'il y a derrière. */
@@ -47,7 +164,6 @@ interface SearchStore {
   query: string;
   lang: LangCode | null;
   tab: SearchTab;
-  length: Length;
   buckets: Partial<Record<SearchPlatform, Bucket>>;
   /** composants vidéo en cours d'installation (première recherche YouTube) */
   installing: boolean;
@@ -56,7 +172,8 @@ interface SearchStore {
   /** `tab` : la catégorie choisie en même temps (un onglet touché avec du texte tapé) */
   run(lang: LangCode, query: string, tab?: SearchTab): void;
   setTab(tab: SearchTab): void;
-  setLength(length: Length): void;
+  /** change des filtres (gardés dans les réglages) ; les plateformes concernées cherchent de nouveau */
+  setFilters(patch: Partial<SearchFilters>): void;
   more(platform: SearchPlatform): void;
   clear(): void;
 }
@@ -67,14 +184,16 @@ function bump(keys: (SearchPlatform | "link")[]) {
   for (const k of keys) turns[k] = (turns[k] ?? 0) + 1;
 }
 
-const empty = (): Bucket => ({ hits: [], page: 0, more: false, loading: true, error: null });
+const empty = (): Bucket => ({ hits: [], page: 0, more: false, loading: true, error: null, window: "" });
 
 async function fetchBucket(platform: SearchPlatform, page: number) {
   const mine = turns[platform];
-  const { lang, query, length } = useSearch.getState();
+  const { lang, query, buckets } = useSearch.getState();
   if (!lang) return;
+  // les pages suivantes gardent la période retenue à la première
+  const filter = nativeFilter(platform, filtersOf(useApp.getState().settings.search_filters), page ? (buckets[platform]?.window ?? "") : undefined);
   try {
-    const r = await api().searchOnline(lang, platform, query, page, length, (e) => {
+    const r = await api().searchOnline(lang, platform, query, page, filter, (e) => {
       if (e.type === "stage" && e.stage === "tools") useSearch.setState({ installing: true });
     });
     if (mine !== turns[platform]) return;
@@ -83,7 +202,8 @@ async function fetchBucket(platform: SearchPlatform, page: number) {
       // pas deux fois le même résultat d'une page à l'autre
       const seen = new Set(page ? cur.hits.map((h) => h.id) : []);
       const hits = page ? [...cur.hits, ...r.hits.filter((h) => !seen.has(h.id))] : r.hits;
-      return { installing: false, buckets: { ...s.buckets, [platform]: { hits, page, more: r.more, loading: false, error: null } } };
+      const window = page ? cur.window : (r.window ?? "");
+      return { installing: false, buckets: { ...s.buckets, [platform]: { hits, page, more: r.more, loading: false, error: null, window } } };
     });
   } catch (e) {
     if (mine !== turns[platform]) return;
@@ -109,7 +229,6 @@ export const useSearch = create<SearchStore>((set, get) => ({
   query: "",
   lang: null,
   tab: "all",
-  length: "",
   buckets: {},
   installing: false,
   link: null,
@@ -142,17 +261,22 @@ export const useSearch = create<SearchStore>((set, get) => ({
     if (get().query && !get().link) start(wanted(tab));
   },
 
-  setLength(length) {
-    if (length === get().length) return;
-    bump(["youtube", "dailymotion"]);
-    // la durée ne concerne que les vidéos : les autres résultats restent
+  setFilters(patch) {
+    const app = useApp.getState();
+    const cur = filtersOf(app.settings.search_filters);
+    const next = { ...cur, ...patch };
+    void app.setSetting("search_filters", JSON.stringify(next));
+    // seules les plateformes dont la demande change cherchent de nouveau (« Seulement en
+    // italien », « Masquer ma bibliothèque » se font à l'affichage)
+    const changed = PLATFORMS.filter((p) => nativeFilter(p, cur) !== nativeFilter(p, next));
+    if (!changed.length) return;
+    bump(changed);
     set((s) => {
       const buckets = { ...s.buckets };
-      delete buckets.youtube;
-      delete buckets.dailymotion;
-      return { length, buckets };
+      for (const p of changed) delete buckets[p];
+      return { buckets };
     });
-    if (get().query && !get().link) start(wanted(get().tab).filter((p) => p === "youtube" || p === "dailymotion"));
+    if (get().query && !get().link) start(wanted(get().tab).filter((p) => changed.includes(p)));
   },
 
   more(platform) {

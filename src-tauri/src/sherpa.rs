@@ -17,8 +17,15 @@ const VERSION: &str = "1.13.8";
 /// Archive du moteur pour ce système : macOS (puce Apple) ou Windows (x64,
 /// bibliothèque C++ intégrée : rien à installer à côté).
 const FLAVOR: &str = if cfg!(windows) { "win-x64-shared-MT-Release" } else { "osx-arm64-shared" };
-/// Taille de cette archive, pour la progression.
-pub const SIZE: u64 = if cfg!(windows) { 24_805_859 } else { 20_314_448 };
+/// Taille de cette archive, pour la progression (iPhone et iPad : rien à télécharger,
+/// la bibliothèque est dans l'app, sherpa_ios.rs).
+pub const SIZE: u64 = if cfg!(target_os = "ios") {
+    0
+} else if cfg!(windows) {
+    24_805_859
+} else {
+    20_314_448
+};
 /// Bibliothèques que chargent les outils (sous Windows, à côté d'eux) ; la
 /// seconde, facultative, peut manquer.
 const LIBS: &[&str] = if cfg!(windows) { &["bin/onnxruntime.dll", "bin/onnxruntime_providers_shared.dll"] } else { &["lib/libonnxruntime.dylib"] };
@@ -65,11 +72,15 @@ pub fn bin(data_dir: &Path, tool: Tool) -> PathBuf {
 }
 
 pub fn ready(data_dir: &Path, tool: Tool) -> bool {
-    bin(data_dir, tool).exists() && file(data_dir, LIBS[0]).exists()
+    // iPhone et iPad : le moteur est dans l'app
+    cfg!(target_os = "ios") || (bin(data_dir, tool).exists() && file(data_dir, LIBS[0]).exists())
 }
 
 /// Supprime le moteur, quand plus aucun modèle ne s'en sert.
 pub fn remove(data_dir: &Path) {
+    // iPhone et iPad : rien à supprimer, mais la voix chargée se libère
+    #[cfg(target_os = "ios")]
+    crate::sherpa_ios::release_voice();
     let _ = std::fs::remove_dir_all(dir(data_dir));
 }
 

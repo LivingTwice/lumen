@@ -515,6 +515,8 @@ export interface SearchHit {
 export interface SearchPage {
   hits: SearchHit[];
   more: boolean;
+  /** période retenue pour un tri par date sur YouTube (« up:3 », « before:2014-01-01 »), renvoyée pour les pages suivantes */
+  window: string;
 }
 
 /** Adresses de lecture d'une vidéo ou d'un son, pour l'aperçu (miroir de `search::Stream`). */
@@ -699,6 +701,38 @@ export interface BackupInfo {
   name: string;
   avatar: string;
   photo: string;
+}
+
+/** L'appareil : modèle, mémoire, chaleur (miroir de `proc::DeviceInfo`). */
+export interface DeviceInfo {
+  /** « iPhone17,1 », « Mac15,9 » */
+  machine: string;
+  /** octets */
+  memory: number;
+  /** octets que le système laisse encore à Lumen (iPhone et iPad ; 0 ailleurs) */
+  available: number;
+  /** "nominal", "fair", "serious", "critical" ; vide si inconnue */
+  thermal: string;
+}
+
+/** Ce qu'a apporté une synchronisation (miroir de `sync::Report`). */
+export interface SyncReport {
+  /** mots ajoutés ou mis à jour */
+  terms: number;
+  /** mots connus de plus */
+  known: number;
+  /** leçons arrivées */
+  lessons: number;
+  /** leçons dont l'avancement a été repris */
+  progress: number;
+  /** leçons et mots supprimés ici parce qu'ils l'ont été là-bas */
+  removed: number;
+}
+
+/** Synchronisation faite : de quel appareil, et ce qu'elle a apporté (événement « synced »). */
+export interface Synced {
+  device_name: string;
+  report: SyncReport;
 }
 
 export interface BackupRestored {

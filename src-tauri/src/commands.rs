@@ -542,14 +542,16 @@ pub async fn ai_sentence(
     let native = i18n::native();
     let version = if native == "en" { "s1en" } else { "s1" };
     let key_of = |b: &Brain| hash(&[version, &b.id(), &lang, sentence.trim()]);
-    if let Some(v) = db::cache_get(&state.db.lock(), &key_of(&brain)) {
+    // une phrase recopiée telle quelle (petit modèle) n'est pas une traduction : ni relue ni gardée
+    let echo = |v: &str| v.trim() == sentence.trim();
+    if let Some(v) = db::cache_get(&state.db.lock(), &key_of(&brain)).filter(|v| !echo(v)) {
         return Ok(v);
     }
     let epoch = state.ai.next_epoch();
     let messages = ai::sentence_messages(native, &lang, &sentence);
     let (out, by) = translate(state.inner(), brain, &messages, 260, epoch, &on_event).await?;
     let out = out.trim().trim_matches(['«', '»', '"']).trim().to_string();
-    if !out.is_empty() {
+    if !out.is_empty() && !echo(&out) {
         db::cache_put(&state.db.lock(), &key_of(&by), &out);
     }
     Ok(out)
@@ -1454,7 +1456,7 @@ pub async fn media_usage(state: State<'_, AppState>) -> R<MediaUsage> {
             candidates: 0,
             candidate_bytes: 0,
             candidate_after: 0,
-            supported: cfg!(target_os = "macos"),
+            supported: cfg!(any(target_os = "macos", target_os = "ios")),
         };
         for compress::LessonFile { path, role, .. } in &files {
             let p = std::path::Path::new(path);
@@ -1529,13 +1531,30 @@ pub fn chatgpt_status() -> crate::chatgpt::Status {
 /// plus). Annulable avec `model_cancel("chatgpt")`.
 #[tauri::command]
 pub async fn chatgpt_sign_in(app: tauri::AppHandle, state: State<'_, AppState>) -> R<crate::chatgpt::Status> {
+    #[cfg(not(target_os = "ios"))]
     use tauri_plugin_opener::OpenerExt;
     let cancel = Arc::new(AtomicBool::new(false));
     state.downloads.lock().insert("chatgpt".into(), cancel.clone());
+    #[cfg(not(target_os = "ios"))]
     let open = |url: &str| app.opener().open_url(url, None::<&str>).map_err(|e| anyhow::anyhow!(e.to_string()));
+    // iPhone et iPad : la page de connexion s'ouvre dans Lumen, qui reste au premier
+    // plan (dans Safari, iOS endormirait l'adresse locale qui attend la réponse) ;
+    // la fermer annule la connexion
+    #[cfg(target_os = "ios")]
+    let (_, stop) = (&app, cancel.clone());
+    #[cfg(target_os = "ios")]
+    let open = move |url: &str| {
+        if crate::ios::web_open(url, stop) {
+            Ok(())
+        } else {
+            Err(anyhow::anyhow!(t("La page de connexion n'a pas pu s'ouvrir.", "The sign-in page couldn't open.")))
+        }
+    };
     // retour du navigateur : Lumen repasse devant (Windows le permet ; macOS, depuis
     // la version 14, peut laisser le navigateur devant, sa page dit alors de revenir)
     let back = || {
+        #[cfg(target_os = "ios")]
+        crate::ios::web_close();
         #[cfg(desktop)]
         {
             use tauri::Manager;
@@ -1710,6 +1729,54 @@ pub async fn backup_places() -> R<Vec<backup::Place>> {
 #[tauri::command]
 pub async fn backup_place_dir(path: String) -> R<String> {
     tokio::task::block_in_place(|| backup::place_dir(&path))
+}
+
+/// Synchronise maintenant : fusionne les sauvegardes des autres appareils de la même
+/// personne qui ont changé (aussi diffusé par l'événement « synced »). `null` : rien de nouveau.
+#[tauri::command]
+pub async fn backup_sync(app: tauri::AppHandle, state: State<'_, AppState>) -> R<Option<backup::Synced>> {
+    let st = state.inner();
+    let out = tokio::task::block_in_place(|| backup::sync_now(st))?;
+    if let Some(done) = out.as_ref().filter(|d| !d.report.is_empty()) {
+        let _ = app.emit("synced", done);
+    }
+    Ok(out)
+}
+
+/// Ajoute la progression d'une sauvegarde (un autre appareil) à celle de cet appareil, sans la remplacer.
+#[tauri::command]
+pub async fn backup_merge(state: State<'_, AppState>, key: String) -> R<crate::sync::Report> {
+    let st = state.inner();
+    tokio::task::block_in_place(|| backup::merge_for(st, &key))
+}
+
+/// iPhone et iPad : choisir dans l'app Fichiers le dossier de la sauvegarde (le dossier
+/// « Lumen » d'iCloud Drive, où le Mac sauvegarde). Renvoie son chemin ; rien si
+/// l'apprenant renonce. Ailleurs, l'emplacement se choisit autrement (`backup_places`).
+#[tauri::command]
+pub async fn backup_pick_folder(state: State<'_, AppState>) -> R<Option<String>> {
+    #[cfg(target_os = "ios")]
+    return backup::pick_place(state.inner()).await;
+    #[cfg(not(target_os = "ios"))]
+    {
+        let _ = state;
+        Err(crate::i18n::t("Seulement sur iPhone et iPad.", "Only on iPhone and iPad.").into())
+    }
+}
+
+/// L'appareil (modèle, mémoire, chaleur) : le modèle d'IA recommandé en dépend sur iPhone et iPad.
+#[tauri::command]
+pub fn device_info() -> crate::proc::DeviceInfo {
+    crate::proc::device_info()
+}
+
+/// Retour haptique (iPhone et iPad) : 0 sélection, 1 léger, 2 moyen, 3 réussite.
+#[tauri::command]
+pub fn haptic(kind: i32) {
+    #[cfg(target_os = "ios")]
+    crate::ios::haptic(kind);
+    #[cfg(not(target_os = "ios"))]
+    let _ = kind;
 }
 
 /// Remplace la progression de ce Mac par une sauvegarde (`day` : version d'un jour précédent).

@@ -199,6 +199,11 @@ function Row({
           ) : (
             e.l.collection && <span>{e.l.collection}</span>
           )}
+          {/* écran étroit (iPhone) : la longueur et l'avancement, sous le titre */}
+          <span className="lib-mini num">
+            {lengthText(e)}
+            {completedOf(e) ? t(" · Lu", " · Read") : progress > 0.005 ? t(` · ${Math.round(progress * 100)} %`, ` · ${Math.round(progress * 100)}%`) : ""}
+          </span>
         </span>
       </span>
       <span className="c-kind" role="cell">

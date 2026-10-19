@@ -1,4 +1,63 @@
-import type { AppInfo, BackupInfo, BackupPlace, BackupRestored, BackupStatus, ChatEvent, ChatGptStatus, CreatedBook, ChatOptions, ChatPatch, ChatReply, ChatSummary, ChatThread, DictResult, DictStatus, DiscoverFeed, DiscoverReport, DownloadEvent, GeminiModels, GoalReached, GpuInfo, ImportEvent, LangCode, LessonLink, LessonSummary, LevelEstimate, LightenProgress, LightenReport, LinkInfo, LinkMedia, LingqEvent, LingqLang, LingqPlan, LingqReport, Lyrics, MediaStream, MediaUsage, ModelRow, NewBook, NewLesson, OnlineCheck, OpenedLesson, Playlist, PlaylistPatch, PodcastRequest, Resynced, SearchPage, SearchPlatform, SongItem, Stats, Term, TermQuery, TextStats, WordAnswer, VoicedLesson } from "./types";
+import type {
+  AppInfo,
+  BackupInfo,
+  BackupPlace,
+  BackupRestored,
+  BackupStatus,
+  ChatEvent,
+  ChatGptStatus,
+  ChatOptions,
+  ChatPatch,
+  ChatReply,
+  ChatSummary,
+  ChatThread,
+  CreatedBook,
+  DeviceInfo,
+  DictResult,
+  DictStatus,
+  DiscoverFeed,
+  DiscoverReport,
+  DownloadEvent,
+  GeminiModels,
+  GoalReached,
+  GpuInfo,
+  ImportEvent,
+  LangCode,
+  LessonLink,
+  LessonSummary,
+  LevelEstimate,
+  LightenProgress,
+  LightenReport,
+  LingqEvent,
+  LingqLang,
+  LingqPlan,
+  LingqReport,
+  LinkInfo,
+  LinkMedia,
+  Lyrics,
+  MediaStream,
+  MediaUsage,
+  ModelRow,
+  NewBook,
+  NewLesson,
+  OnlineCheck,
+  OpenedLesson,
+  Playlist,
+  PlaylistPatch,
+  PodcastRequest,
+  Resynced,
+  SearchPage,
+  SearchPlatform,
+  SongItem,
+  Stats,
+  SyncReport,
+  Synced,
+  Term,
+  TermQuery,
+  TextStats,
+  VoicedLesson,
+  WordAnswer,
+} from "./types";
 
 export const isTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
@@ -119,10 +178,22 @@ export interface Api {
   backupRestore(key: string, day: string | null, onEvent: (e: ImportEvent) => void): Promise<BackupRestored>;
   /** suit les sauvegardes automatiques ; renvoie de quoi arrêter l'écoute */
   backupListen(onStatus: (s: BackupStatus) => void): Promise<() => void>;
+  /** fusionne maintenant les sauvegardes des autres appareils qui ont changé (null : rien de nouveau) */
+  backupSync(): Promise<Synced | null>;
+  /** ajoute la progression d'une sauvegarde à celle de cet appareil, sans la remplacer */
+  backupMerge(key: string): Promise<SyncReport>;
+  /** progression arrivée d'un autre appareil (synchronisation automatique) */
+  syncListen(onSynced: (s: Synced) => void): Promise<() => void>;
   /** nuages installés sur ce Mac, iCloud Drive en tête */
   backupPlaces(): Promise<BackupPlace[]>;
   /** dossier à retenir pour un nuage choisi (« Mon Drive » pour Google Drive) */
   backupPlaceDir(path: string): Promise<string>;
+  /** iPhone et iPad : choisir dans l'app Fichiers le dossier de la sauvegarde (null : renoncé) */
+  backupPickFolder(): Promise<string | null>;
+  /** retour haptique (iPhone et iPad) : 0 sélection, 1 léger, 2 moyen, 3 réussite */
+  haptic(kind: number): Promise<void>;
+  /** l'appareil : modèle, mémoire, chaleur */
+  deviceInfo(): Promise<DeviceInfo>;
   /** Découvrir : ce que les sources de la langue proposent (dernière lecture) */
   discoverList(lang: LangCode): Promise<DiscoverFeed>;
   /** relit les sources de la langue qui sont à relire (`force` : toutes, à la demande) ; étapes « tools » et « found » */
@@ -133,7 +204,7 @@ export interface Api {
   discoverHide(id: string): Promise<void>;
   /** une langue vient d'être relue (lecture du jour ou demandée) */
   discoverListen(onChange: (lang: string) => void): Promise<() => void>;
-  /** cherche en ligne sur une plateforme, dans la langue étudiée (`filter` : durée des vidéos) */
+  /** cherche en ligne sur une plateforme, dans la langue étudiée (`filter` : « sort=recent;when=week;len=short;cc=1 », voir `search::Filters`) */
   searchOnline(lang: LangCode, platform: SearchPlatform, query: string, page: number, filter: string, onEvent: (e: ImportEvent) => void): Promise<SearchPage>;
   /** adresses de lecture d'une vidéo (ou du seul son) pour l'aperçu */
   mediaStream(url: string, audio: boolean): Promise<MediaStream>;
@@ -242,6 +313,15 @@ async function createTauriApi(): Promise<Api> {
     backupRestore: (key, day, onEvent) => invoke("backup_restore", { key, day, onEvent: ch<ImportEvent>(onEvent) }),
     backupPlaces: () => invoke("backup_places"),
     backupPlaceDir: (path) => invoke("backup_place_dir", { path }),
+    backupPickFolder: () => invoke("backup_pick_folder"),
+    haptic: (kind) => invoke("haptic", { kind }),
+    deviceInfo: () => invoke("device_info"),
+    backupSync: () => invoke("backup_sync"),
+    backupMerge: (key) => invoke("backup_merge", { key }),
+    syncListen: async (onSynced) => {
+      const { listen } = await import("@tauri-apps/api/event");
+      return listen<Synced>("synced", (e) => onSynced(e.payload));
+    },
     backupListen: async (onStatus) => {
       const { listen } = await import("@tauri-apps/api/event");
       return listen<BackupStatus>("backup", (e) => onStatus(e.payload));

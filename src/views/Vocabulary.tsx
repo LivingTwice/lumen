@@ -1,6 +1,7 @@
 import { motion } from "motion/react";
 import { useEffect, useState } from "react";
 import { Icon } from "../components/Icon";
+import { useCompact } from "../components/MobileNav";
 import { Orb, Segmented } from "../components/ui";
 import { api, errorText, isTauri } from "../lib/api";
 import { exportVocabulary } from "../lib/menu";
@@ -15,6 +16,7 @@ const PAGE = 60;
 export function Vocabulary() {
   const lang = useApp((s) => s.lang)();
   const settings = useApp((s) => s.settings);
+  const compact = useCompact();
   const toast = useApp((s) => s.toast);
   const refreshKnown = useApp((s) => s.refreshKnown);
   const [filter, setFilter] = useState<TermQuery["filter"]>("learning");
@@ -74,7 +76,7 @@ export function Vocabulary() {
               value={filter}
               onChange={(v) => setFilter(v as TermQuery["filter"])}
               options={[
-                { value: "learning", label: t("En apprentissage", "Learning") },
+                { value: "learning", label: compact ? t("À l'étude", "Learning") : t("En apprentissage", "Learning") },
                 { value: "known", label: t("Connus", "Known") },
                 { value: "phrases", label: t("Expressions", "Phrases") },
                 { value: "ignored", label: t("Ignorés", "Ignored") },
@@ -126,8 +128,8 @@ export function Vocabulary() {
                       <Icon name="speaker" size={14} />
                     </button>
                   </span>
-                  <span className="vocab-tr">{tm.translation || <span className="muted">·</span>}</span>
-                  <span className="vocab-ctx" title={tm.context}>
+                  <span className={`vocab-tr ${tm.translation ? "" : "empty"}`}>{tm.translation || <span className="muted">·</span>}</span>
+                  <span className={`vocab-ctx ${tm.context ? "" : "empty"}`} title={tm.context}>
                     {tm.context || "·"}
                   </span>
                   <span className="status-dots" role="radiogroup" aria-label={t(`Statut de ${tm.term}`, `Status of ${tm.term}`)}>

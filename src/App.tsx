@@ -14,7 +14,7 @@ import { MEDIA_EXT, TEXT_EXT, extOf } from "./lib/importers";
 import { startBackupEvents } from "./lib/backup";
 import { setUiLang, t, type UiLang } from "./lib/i18n";
 import { useAppMenu, useWindowsKeys } from "./lib/menu";
-import { playableCodecs } from "./lib/platform";
+import { isMobile, playableCodecs } from "./lib/platform";
 import { useApp } from "./lib/store";
 import { startUpdateChecks } from "./lib/updater";
 import { ImportSheet } from "./views/ImportSheet";
@@ -39,7 +39,8 @@ function useTheme() {
     };
     apply();
     mq.addEventListener("change", apply);
-    if (isTauri) {
+    // la fenêtre suit le thème choisi (sur iPhone et iPad, pas de fenêtre : le système décide)
+    if (isTauri && !isMobile) {
       import("@tauri-apps/api/window")
         .then(({ getCurrentWindow }) => getCurrentWindow().setTheme(theme === "system" ? null : (theme as "light" | "dark")))
         .catch(() => {});
@@ -53,7 +54,8 @@ function useFileDrop(enabled: boolean) {
   const toast = useApp((s) => s.toast);
   const [over, setOver] = useState(false);
   useEffect(() => {
-    if (!isTauri || !enabled) return;
+    // glisser-déposer : Mac et Windows (sur iPhone et iPad, l'import passe par l'app Fichiers)
+    if (!isTauri || isMobile || !enabled) return;
     let unlisten: (() => void) | undefined;
     import("@tauri-apps/api/webview").then(async ({ getCurrentWebview }) => {
       unlisten = await getCurrentWebview().onDragDropEvent((e) => {
@@ -113,7 +115,8 @@ export function App() {
   useNewsOnUpdate();
 
   useEffect(() => {
-    if (isTauri && navigator.userAgent.includes("Mac")) document.documentElement.classList.add("vibrant");
+    // vibrance de la fenêtre : Mac seulement (l'iPhone se dit aussi « like Mac OS X »)
+    if (isTauri && !isMobile && navigator.userAgent.includes("Mac")) document.documentElement.classList.add("vibrant");
     // formats d'image que cette fenêtre lit : les vidéos en ligne arrivent dans le plus léger
     api()
       .mediaCodecs(playableCodecs())

@@ -3,11 +3,12 @@ import { useEffect, useState } from "react";
 import { Avatar } from "../components/Avatar";
 import { Icon, type IconName } from "../components/Icon";
 import { Orb, Switch } from "../components/ui";
-import { isTauri } from "../lib/api";
-import { isWindows } from "../lib/platform";
+import { api, errorText, isTauri } from "../lib/api";
+import { isIOS, isWindows } from "../lib/platform";
 import {
   dayLabel,
   formatWhen,
+  joinOtherDevice,
   isPlaceOf,
   pickBackupFolder,
   placeDir,
@@ -18,6 +19,7 @@ import {
   restoredText,
   revealBackup,
   statusLine,
+  syncedText,
   useBackup,
 } from "../lib/backup";
 import { confirmAsk } from "../lib/dialogs";
@@ -45,6 +47,21 @@ function BackupRow({ info }: { info: BackupInfo }) {
   const pct = progress ? (progress.stage === "media" ? progress.value * 100 : progress.stage === "apply" ? 100 : 6) : 0;
   // le profil de cette sauvegarde : on reconnaît la sienne à son nom et à son avatar
   const who = userFrom(info.name, info.avatar, info.photo);
+
+  // fusionner : sa progression rejoint celle-ci, rien n'est remplacé
+  const [merging, setMerging] = useState(false);
+  const merge = async () => {
+    setMerging(true);
+    try {
+      const r = await api().backupMerge(info.key);
+      await reloadProgress();
+      toast(syncedText({ device_name: info.device_name, report: r }), "light");
+    } catch (e) {
+      toast(errorText(e), "error");
+    } finally {
+      setMerging(false);
+    }
+  };
 
   const go = async () => {
     const when = version ? dayLabel(version.day) : formatWhen(info.saved_at);
@@ -115,8 +132,13 @@ function BackupRow({ info }: { info: BackupInfo }) {
           ))}
         </select>
       )}
-      <button className="btn sm soft" disabled={!!restoring || info.newer} onClick={go}>
-        {progress ? t("Restauration…", "Restoring…") : t("Restaurer…", "Restore…")}
+      {!info.this_device && !progress && !day && (
+        <button className="btn sm soft" disabled={!!restoring || info.newer || merging} onClick={() => void merge()} title={t("Ajouter sa progression à la vôtre, sans rien remplacer", "Add its progress to yours, without replacing anything")}>
+          {merging ? t("Fusion…", "Merging…") : t("Fusionner", "Merge")}
+        </button>
+      )}
+      <button className={`btn sm ${info.this_device ? "soft" : "ghost"}`} disabled={!!restoring || info.newer || merging} onClick={go}>
+        {progress ? t("Restauration…", "Restoring…") : info.this_device ? t("Restaurer…", "Restore…") : t("Remplacer…", "Replace…")}
       </button>
     </motion.div>
   );
@@ -248,6 +270,87 @@ function PlacePicker({ s, onPick }: { s: BackupStatus; onPick(dir: string): Prom
   );
 }
 
+/**
+ * iPhone et iPad : un seul emplacement, le dossier « Lumen » d'iCloud Drive choisi dans
+ * l'app Fichiers (celui où le Mac sauvegarde déjà ; chaque appareil y a son dossier).
+ */
+function IosPlace({ s, onPick }: { s: BackupStatus; onPick(dir: string): Promise<void> }) {
+  const [busy, setBusy] = useState(false);
+  const choose = async () => {
+    setBusy(true);
+    try {
+      const first = !s.dir;
+      const dir = await pickBackupFolder();
+      if (dir) {
+        await onPick(dir);
+        // premier dossier choisi : la progression du Mac qui s'y trouve arrive ici
+        if (first) await joinOtherDevice();
+      }
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="ios-place">
+      <span className="place-glyph">{busy ? <Orb size={16} /> : <Icon name="cloud" size={20} />}</span>
+      <div className="grow">
+        <strong>{s.dir ? placeLabel(s) : t("Le dossier « Lumen » de votre sauvegarde", "The “Lumen” folder of your backup")}</strong>
+        <span>
+          {s.dir
+            ? t("Choisi dans l'app Fichiers. Vos autres appareils y sauvegardent aussi.", "Chosen in the Files app. Your other devices back up there too.")
+            : t(
+                "Celui où votre\u00a0Mac sauvegarde déjà (iCloud Drive, Google Drive, Dropbox…), choisi dans l'app Fichiers : vous y retrouverez sa progression, et celle de cet appareil y sera à l'abri.",
+                "The one your\u00a0Mac already backs up to (iCloud Drive, Google Drive, Dropbox…), chosen in the Files app: you'll find its progress there, and this device's progress will be safe there too.",
+              )}
+        </span>
+      </div>
+      <button className="btn sm soft" onClick={() => void choose()} disabled={busy}>
+        {s.dir ? t("Changer…", "Change…") : t("Choisir…", "Choose…")}
+      </button>
+    </div>
+  );
+}
+
+/**
+ * Réunir la progression de ses appareils : chacun ajoute à la sienne ce qu'a fait
+ * l'autre (mots, leçons, avancement), par la sauvegarde.
+ */
+function SyncRow({ on, ready, onChange }: { on: boolean; ready: boolean; onChange(v: boolean): void }) {
+  const toast = useApp((s) => s.toast);
+  const [busy, setBusy] = useState(false);
+  const now = async () => {
+    setBusy(true);
+    try {
+      const r = await api().backupSync();
+      if (!r || (!r.report.terms && !r.report.lessons && !r.report.progress && !r.report.removed))
+        toast(t("Tout est à jour : rien de nouveau sur vos autres appareils.", "All up to date: nothing new on your other devices."));
+    } catch (e) {
+      toast(errorText(e), "error");
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="set-row">
+      <div className="grow">
+        <strong>{t("Réunir mes appareils", "Bring my devices together")}</strong>
+        <span>
+          {t(
+            "Ce que vous faites sur votre\u00a0Mac, votre iPhone ou votre iPad (mots appris, leçons, page atteinte) rejoint les autres par la sauvegarde, sans rien écraser. Chaque appareil doit sauvegarder au même endroit.",
+            "What you do on your\u00a0Mac, your iPhone or your iPad (words learned, lessons, page reached) reaches the others through the backup, without overwriting anything. Each device must back up to the same place.",
+          )}
+        </span>
+      </div>
+      {on && ready && (
+        <button className="btn sm ghost" onClick={() => void now()} disabled={busy}>
+          {busy ? t("Synchronisation…", "Syncing…") : t("Synchroniser", "Sync now")}
+        </button>
+      )}
+      <Switch on={on} onChange={onChange} label={t("Réunir mes appareils", "Bring my devices together")} />
+    </div>
+  );
+}
+
 /** Réglages › Sauvegarde : iCloud Drive (ou un autre nuage, un dossier choisi), médias, restauration. */
 export function BackupSection() {
   const s = useBackup((x) => x.status);
@@ -269,7 +372,8 @@ export function BackupSection() {
   }, [refresh]);
 
   // la liste n'est lue qu'une fois la sauvegarde acceptée : macOS demande alors l'accès à iCloud Drive
-  const enabled = !!s?.enabled;
+  // iPhone et iPad : le dossier choisi dans l'app Fichiers se lit sans autre demande
+  const enabled = !!s?.enabled || (isIOS && !!s?.dir);
   useEffect(() => {
     if (enabled && useBackup.getState().list === null) void load();
   }, [enabled, load]);
@@ -292,7 +396,8 @@ export function BackupSection() {
 
   // nouvel emplacement : la sauvegarde y est refaite tout de suite (l'ancien dossier reste intact)
   const moveTo = async (dir: string) => {
-    await setSetting("backup_dir", dir);
+    // iPhone et iPad : le natif a déjà retenu le dossier (et son signet)
+    if (!isIOS) await setSetting("backup_dir", dir);
     useBackup.setState({ list: null });
     if (s.enabled) {
       if (await save()) void load();
@@ -347,7 +452,9 @@ export function BackupSection() {
             <span>
               {s.dir
                 ? placeLabel(s)
-                : isWindows
+                : isIOS
+                  ? t("Choisissez ci-dessous le dossier « Lumen » où votre\u00a0Mac sauvegarde.", "Choose below the “Lumen” folder your\u00a0Mac backs up to.")
+                  : isWindows
                   ? t("Choisissez où sauvegarder : OneDrive, un autre nuage ou un dossier.", "Choose where to back up: OneDrive, another cloud or a folder.")
                   : t(
                       "iCloud Drive n'est pas activé sur ce Mac (Réglages Système › votre nom › iCloud). Choisissez un autre nuage ou un dossier.",
@@ -355,15 +462,14 @@ export function BackupSection() {
                     )}
             </span>
           </div>
-          {s.dir && s.last_at !== null && (
+          {s.dir && s.last_at !== null && !isIOS && (
             <button className="btn sm ghost" onClick={() => void revealBackup(s.dir!)}>
               {t("Afficher", "Show")}
             </button>
           )}
         </div>
-        <div className="set-row backup-places">
-          <PlacePicker s={s} onPick={moveTo} />
-        </div>
+        <div className="set-row backup-places">{isIOS ? <IosPlace s={s} onPick={moveTo} /> : <PlacePicker s={s} onPick={moveTo} />}</div>
+        <SyncRow on={settings.backup_sync !== "0"} ready={!!s.dir} onChange={(v) => void setSetting("backup_sync", v ? "1" : "0")} />
         <div className="set-row backup-foot">
           <span className="backup-note">
             {t(
@@ -381,7 +487,12 @@ export function BackupSection() {
         <div className="set-row">
           <div className="grow">
             <span className="eyebrow">{t("Retrouver une progression", "Get progress back")}</span>
-            <span>{t("Depuis ce Mac ou un autre. La progression de ce Mac est alors remplacée, et gardée en copie.", "From this Mac or another one. The progress on this Mac is then replaced, and kept as a copy.")}</span>
+            <span>
+              {t(
+                "« Fusionner » ajoute la progression d'un autre appareil à celle-ci ; « Remplacer » la prend à la place (celle de ce Mac reste en copie).",
+                "“Merge” adds another device's progress to this one; “Replace” takes it instead (this Mac's progress is kept as a copy).",
+              )}
+            </span>
           </div>
           {list !== null && (
             <button className={`icon-btn ${listing ? "spin" : ""}`} onClick={() => void load()} disabled={listing} aria-label={t("Chercher à nouveau", "Search again")}>
@@ -393,7 +504,11 @@ export function BackupSection() {
           {list === null ? (
             <motion.div key="ask" className="set-row" {...enter}>
               <div className="grow">
-                <span>{t("Vous avez déjà utilisé Lumen sur un autre Mac ?", "Have you used Lumen on another Mac before?")}</span>
+                <span>
+                  {isIOS
+                    ? t("Votre progression est sur votre\u00a0Mac ? Choisissez d'abord le dossier « Lumen » de sa sauvegarde.", "Your progress is on your\u00a0Mac? First choose the “Lumen” folder of its backup.")
+                    : t("Vous avez déjà utilisé Lumen sur un autre Mac ?", "Have you used Lumen on another Mac before?")}
+                </span>
               </div>
               <button className="btn sm soft" disabled={listing || !s.dir} onClick={() => void load()}>
                 {listing ? t("Recherche…", "Searching…") : t("Chercher une sauvegarde", "Look for a backup")}

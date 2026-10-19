@@ -405,7 +405,8 @@
   -webkit-backdrop-filter: blur(8px);
 }
 .lesson-card:hover .lesson-menu,
-.lesson-menu:focus-within {
+.lesson-menu:focus-within,
+.lesson-menu:has(.menu-anchor.open) {
   opacity: 1;
 }
 
@@ -863,6 +864,31 @@
   .lib-row .c-len,
   .lib-row .c-new {
     display: none;
+  }
+}
+
+/* écran de téléphone : le titre sur deux lignes, longueur et avancement dessous */
+.lib-mini {
+  display: none;
+}
+@container (max-width: 440px) {
+  .lib-head,
+  .lib-row {
+    grid-template-columns: 22px minmax(0, 1fr) 34px;
+  }
+  .lib-head .c-prog,
+  .lib-row .c-prog {
+    display: none;
+  }
+  .lib-name strong {
+    white-space: normal;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+  .lib-mini {
+    display: block;
   }
 }
 
@@ -3710,6 +3736,24 @@
 .place.on {
   border-color: transparent;
 }
+/* iPhone et iPad : le dossier « Lumen » d'iCloud Drive, choisi dans l'app Fichiers */
+.ios-place {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+.ios-place .grow {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.ios-place .grow span {
+  font-size: 12.5px;
+  color: var(--muted);
+}
 .place-glyph {
   grid-row: span 2;
   width: 34px;
@@ -4485,4 +4529,17 @@
     flex-direction: column;
     align-items: flex-start;
   }
+}
+
+/* profil d'IA conseillé pour cet iPhone ou cet iPad (d'après sa mémoire) */
+.padvised {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-style: normal;
+  font-size: 11px;
+  font-weight: 650;
+  color: var(--on-light, #3b2104);
+  background: linear-gradient(180deg, var(--light), var(--light-strong));
 }

@@ -6,9 +6,9 @@ import { create } from "zustand";
 import { api, errorText, isTauri } from "./api";
 import { useChat } from "./chat";
 import { count, isEn, locale, t } from "./i18n";
-import { inFolder, isWindows, pathParts } from "./platform";
+import { inFolder, isIOS, isWindows, pathParts } from "./platform";
 import { formatBytes, formatNumber, useApp } from "./store";
-import type { BackupInfo, BackupPlace, BackupRestored, BackupStatus } from "./types";
+import type { BackupInfo, BackupPlace, BackupRestored, BackupStatus, Synced } from "./types";
 
 export function restoreStage(stage: string): string | undefined {
   return {
@@ -121,12 +121,74 @@ export const useBackup = create<BackupState>((set, get) => ({
   },
 }));
 
-/** Suit les sauvegardes automatiques (appelé une fois au démarrage). */
+/** Ce qu'a apporté la synchronisation, dit simplement (« Votre Mac a apporté 12 mots connus et 2 leçons »). */
+export function syncedText(s: Synced): string {
+  const r = s.report;
+  const parts: string[] = [];
+  if (r.known > 0) parts.push(count(r.known, "mot connu", "mots connus", "known word", "known words"));
+  else if (r.terms > 0) parts.push(count(r.terms, "mot", "mots", "word", "words"));
+  if (r.lessons > 0) parts.push(count(r.lessons, "leçon", "leçons", "lesson", "lessons"));
+  const who = s.device_name || t("Votre autre appareil", "Your other device");
+  if (!parts.length)
+    return r.progress > 0
+      ? t(`Votre avancement sur ${who} est repris ici.`, `Your progress on ${who} is picked up here.`)
+      : t(`Progression de ${who} reprise.`, `Progress from ${who} picked up.`);
+  return t(`${who} a apporté ${parts.join(" et ")}.`, `${who} brought ${parts.join(" and ")}.`);
+}
+
+/**
+ * La progression d'un autre appareil vient d'arriver (synchronisation) : la bibliothèque,
+ * le vocabulaire et les compteurs se relisent, sans quitter la page ouverte.
+ */
+async function onSynced(s: Synced) {
+  const app = useApp.getState();
+  await app.init();
+  app.bumpLibrary();
+  useBackup.setState({ list: null });
+  void useBackup.getState().refresh();
+  app.toast(syncedText(s), "light");
+}
+
+/**
+ * iPhone et iPad, dossier tout juste choisi : la progression d'un autre appareil qui
+ * s'y trouve (le Mac) rejoint celle-ci, et les deux appareils restent ensuite réunis.
+ */
+export async function joinOtherDevice() {
+  try {
+    const other = (await api().backupList()).find((b) => !b.this_device && !b.newer);
+    if (!other) return;
+    const report = await api().backupMerge(other.key);
+    await onSynced({ device_name: other.device_name, report });
+  } catch (e) {
+    useApp.getState().toast(errorText(e), "error");
+  }
+}
+
+let lastSync = 0;
+
+/** Synchronise si le dernier regard date de plus de deux minutes (retour dans l'app). */
+export function syncSoon() {
+  if (!isTauri || Date.now() - lastSync < 120_000) return;
+  lastSync = Date.now();
+  void api()
+    .backupSync()
+    .catch(() => null);
+}
+
+/** Suit les sauvegardes automatiques et la synchronisation (appelé une fois au démarrage). */
 export function startBackupEvents() {
   void useBackup.getState().refresh();
   void api()
     .backupListen((status) => useBackup.setState({ status }))
     .catch(() => {});
+  void api()
+    .syncListen((s) => void onSynced(s))
+    .catch(() => {});
+  // iPhone et iPad : de retour dans l'app, la progression du Mac arrive sans attendre
+  if (isIOS)
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible") syncSoon();
+    });
 }
 
 /** Après une restauration : toute l'application relit la base. */
@@ -261,8 +323,13 @@ export function isPlaceOf(s: BackupStatus, p: BackupPlace): boolean {
   return !s.icloud && !!s.dir && inFolder(s.dir, p.path);
 }
 
-/** Choisit un autre dossier (clé USB, disque, NAS, ou un nuage qui n'est pas proposé). */
+/**
+ * Choisit un autre dossier (clé USB, disque, NAS, ou un nuage qui n'est pas proposé).
+ * Sur iPhone et iPad, l'app Fichiers : le natif garde l'accès au dossier (signet) et
+ * l'enregistre lui-même comme emplacement de la sauvegarde.
+ */
 export async function pickBackupFolder(): Promise<string | null> {
+  if (isIOS) return api().backupPickFolder();
   if (!isTauri) return isWindows ? t("C:\\Users\\vous\\Dropbox", "C:\\Users\\you\\Dropbox") : t("/Users/vous/Dropbox", "/Users/you/Dropbox");
   const { open } = await import("@tauri-apps/plugin-dialog");
   const res = await open({ directory: true, multiple: false, title: t("Dossier de sauvegarde de Lumen", "Lumen backup folder") });

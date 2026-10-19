@@ -2,6 +2,7 @@ import { motion, useReducedMotion } from "motion/react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Icon } from "../../components/Icon";
 import { api, errorText, isTauri } from "../../lib/api";
+import { isMobile } from "../../lib/platform";
 import { useApp } from "../../lib/store";
 import { sentenceBounds } from "../../lib/tokenize";
 import type { Lesson, Term, Token } from "../../lib/types";
@@ -209,7 +210,8 @@ export function VideoStage({ lesson, tokens, terms, cursor, playing, onHost, onW
   const fsQueue = useRef(Promise.resolve());
   useEffect(() => {
     document.documentElement.classList.toggle("cinema-mode", cinema);
-    if (!isTauri) return;
+    // iPhone et iPad : pas de fenêtre à agrandir, la scène couvre déjà l'écran
+    if (!isTauri || isMobile) return;
     fsQueue.current = fsQueue.current
       .then(async () => {
         const w = await nativeWindow();
@@ -227,7 +229,7 @@ export function VideoStage({ lesson, tokens, terms, cursor, playing, onHost, onW
   useEffect(
     () => () => {
       document.documentElement.classList.remove("cinema-mode");
-      if (!isTauri) return;
+      if (!isTauri || isMobile) return;
       fsQueue.current = fsQueue.current
         .then(async () => {
           if (!ownFullscreen.current) return;
@@ -241,7 +243,7 @@ export function VideoStage({ lesson, tokens, terms, cursor, playing, onHost, onW
 
   // plein écran quitté par le Mac (bouton vert, ctrl ⌘ F) : la scène revient aussi
   useEffect(() => {
-    if (!isTauri || !cinema) return;
+    if (!isTauri || isMobile || !cinema) return;
     let alive = true;
     let unlisten: (() => void) | undefined;
     nativeWindow()

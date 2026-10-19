@@ -14,7 +14,7 @@ import { pickFiles, pickSavePath } from "./dialogs";
 import { isEn, t } from "./i18n";
 import { MEDIA_EXT, TEXT_EXT } from "./importers";
 import { langInfo } from "./langs";
-import { isWindows, joinPath } from "./platform";
+import { isMobile, isWindows, joinPath } from "./platform";
 import { LOOK_DEFAULTS, PAPERS, playbackRates, READ_FONTS, SIZE_MAX, SIZE_MIN } from "./reading";
 import { useApp, type View } from "./store";
 import { useUpdate } from "./updater";
@@ -557,7 +557,8 @@ async function install() {
 /** Installe la barre des menus et la tient à jour (appelé une fois, dans App). */
 export function useAppMenu() {
   useEffect(() => {
-    if (!isTauri || !navigator.userAgent.includes("Mac")) return;
+    // barre des menus : Mac seulement (l'iPhone se dit aussi « like Mac OS X »)
+    if (!isTauri || isMobile || !navigator.userAgent.includes("Mac")) return;
     let last = "";
     let timer = 0;
     const check = () => {

@@ -52,6 +52,8 @@ pub(crate) fn threads() -> i32 {
     let n = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4);
     #[cfg(windows)]
     let n = crate::win::physical_cores().unwrap_or(n);
+    // iPhone qui chauffe : moitié moins de cœurs
+    let n = if crate::proc::hot() { (n / 2).max(2) } else { n };
     n.min(8) as i32
 }
 
@@ -63,7 +65,12 @@ pub(crate) fn set_gpu(on: bool) {
 }
 
 /// L'IA calcule sur la carte graphique si elle le peut (sur Mac, toujours : Metal).
+/// Le simulateur d'iPhone fait exception : son Metal rend des calculs faux (des « !!!! »
+/// au lieu des mots) ; un vrai iPhone, lui, calcule sur sa puce graphique.
 pub(crate) fn gpu_wanted() -> bool {
+    if cfg!(all(target_os = "ios", target_abi = "sim")) {
+        return false;
+    }
     !cfg!(windows) || GPU.load(Ordering::Relaxed)
 }
 
@@ -94,7 +101,7 @@ fn model_params(gpu: bool) -> LlamaModelParams {
 /// (le fichier, plus environ 1 Go pour le contexte et les calculs ; on ne coupe
 /// pas un modèle en deux). Renvoie aussi s'il est sur la carte. Sur Mac, Metal.
 pub(crate) fn load_model(be: &LlamaBackend, path: &Path) -> Result<(LlamaModel, bool), llama_cpp_2::LlamaModelLoadError> {
-    if !cfg!(windows) {
+    if !cfg!(windows) && gpu_wanted() {
         return LlamaModel::load_from_file(be, path, &model_params(true)).map(|m| (m, true));
     }
     let size = std::fs::metadata(path).map(|m| m.len() as usize).unwrap_or(0);
@@ -667,7 +674,9 @@ pub fn sentence_messages(native: &str, lang: &str, sentence: &str) -> Vec<(&'sta
             ("assistant", "The lighthouse was far from the house, but its light could be seen.".into()),
             ("user", "Sentence in French: J'aurais aimé le savoir avant.".into()),
             ("assistant", "I wish I had known that before.".into()),
-            ("user", format!("Sentence in {}: {sentence}", lang_name_en(lang))),
+            ("user", "Sentence in Italian: Ieri sera siamo rimasti a casa con i nonni.".into()),
+            ("assistant", "Last night we stayed home with our grandparents.".into()),
+            ("user", format!("Sentence in {}: {sentence}\nEnglish translation:", lang_name_en(lang))),
         ];
     }
     vec![
@@ -676,7 +685,10 @@ pub fn sentence_messages(native: &str, lang: &str, sentence: &str) -> Vec<(&'sta
         ("assistant", "Le phare était loin de la maison, mais on voyait sa lumière.".into()),
         ("user", "Phrase en anglais : I wish I had known that before.".into()),
         ("assistant", "J'aurais aimé le savoir avant.".into()),
-        ("user", format!("Phrase en {} : {sentence}", lang_name(lang))),
+        // un petit modèle recopie parfois la phrase : un exemple de plus, et la consigne redite
+        ("user", "Phrase en italien : Ieri sera siamo rimasti a casa con i nonni.".into()),
+        ("assistant", "Hier soir, nous sommes restés à la maison avec les grands-parents.".into()),
+        ("user", format!("Phrase en {} : {sentence}\nTraduction française :", lang_name(lang))),
     ]
 }
 
@@ -1283,7 +1295,7 @@ mod tests {
         // mots et phrases
         let w = word_messages("en", "it", "andavo", "Quando ero piccolo andavo al mare.", "form of andare: to go");
         assert!(w[0].1.contains("English-speaking") && w.last().unwrap().1 == "Language: Italian\nSentence: Quando ero piccolo andavo al mare.\nWord: andavo\nDictionary: form of andare: to go");
-        assert!(sentence_messages("en", "de", "Guten Morgen.").last().unwrap().1 == "Sentence in German: Guten Morgen.");
+        assert!(sentence_messages("en", "de", "Guten Morgen.").last().unwrap().1 == "Sentence in German: Guten Morgen.\nEnglish translation:");
         assert!(simplify_messages("en", "es", "A2", "Hola.")[1].1.starts_with("Rewrite this text in Spanish for a learner at level A2"));
         let (s, n) = parse_word_answer("Meaning: was going\nNote: -");
         assert_eq!((s.as_str(), n.as_str()), ("was going", ""));
@@ -1377,10 +1389,20 @@ mod live {
             println!("[{lang}] {word} -> « {s} » | note : {n} ({:?})\n   brut : {raw:?}", t.elapsed());
             assert!(!s.is_empty());
         }
-        let out = engine
-            .generate(Path::new(&path), &sentence_messages("fr", "en", "If you are reading this, you are not alone."), 120, Priority::Background, |_| true)
-            .unwrap();
-        println!("phrase -> {out}");
+        let sentences = [
+            ("en", "If you are reading this, you are not alone."),
+            ("it", "Domani andiamo al mare con i bambini."),
+            ("it", "Sì, ho un nuovo fidanzato a cui non piace che io condivida il mio appartamento con Giorgio."),
+            ("it", "Ci sono altre ragioni per cui vuole che Giorgio se ne vada?"),
+            ("de", "Gestern ging ich nach der Arbeit in den Park."),
+            ("es", "Cada mañana, Marta subía las escaleras del viejo faro."),
+        ];
+        for native in ["fr", "en"] {
+            for (lang, sentence) in sentences {
+                let out = engine.generate(Path::new(&path), &sentence_messages(native, lang, sentence), 120, Priority::Background, |_| true).unwrap();
+                println!("phrase [{lang} → {native}] -> {out}");
+            }
+        }
     }
 
     /// Carte graphique ou processeur : ce que voit l'IA, où se charge le modèle, et le temps d'un mot.

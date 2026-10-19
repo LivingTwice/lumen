@@ -10,6 +10,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
+#[cfg(not(target_os = "ios"))]
 use std::time::Duration;
 
 use anyhow::{anyhow, Result};
@@ -41,7 +42,19 @@ pub fn cached_path(data_dir: &Path, m: &ModelInfo, lang: &str, text: &str, voice
     cache_dir(data_dir).join(format!("{}.wav", &hex::encode(h.finalize())[..20]))
 }
 
+/// iPhone et iPad : la bibliothèque sherpa-onnx dans l'app (sherpa_ios.rs), même résultat.
+#[cfg(target_os = "ios")]
+async fn run_engine(data_dir: &Path, m: &ModelInfo, lang: &str, text: &str, voice: &str, threads: u32, out: &Path) -> Result<()> {
+    let model = models::path_of(data_dir, m);
+    let (lang, text, sid) = (lang.to_string(), text.to_string(), speaker(voice));
+    let (rate, samples) = tokio::task::spawn_blocking(move || crate::sherpa_ios::tts(&model, &lang, &text, sid, threads.min(4))).await??;
+    let pcm: Vec<i16> = samples.iter().map(|x| (x.clamp(-1.0, 1.0) * 32767.0).round() as i16).collect();
+    tokio::fs::write(out, write_wav(rate, &pcm)).await?;
+    Ok(())
+}
+
 /// Lance le moteur une fois : `text` prononcé dans `out` (WAV PCM 16 bits mono).
+#[cfg(not(target_os = "ios"))]
 async fn run_engine(data_dir: &Path, m: &ModelInfo, lang: &str, text: &str, voice: &str, threads: u32, out: &Path) -> Result<()> {
     let model = models::path_of(data_dir, m);
     let f = |name: &str| model.join(name);
@@ -360,14 +373,14 @@ pub(crate) fn level_volume(all: &mut [i16]) {
 
 /// Enregistre un son assemblé dans `media/<horodatage>.<tag>.m4a`, compressé en
 /// AAC (environ 0,5 Mo par minute au lieu de 5 Mo en WAV) ; en WAV si la compression
-/// échoue (`afconvert` sur Mac, l'encodeur de Windows sur PC).
+/// échoue (`afconvert` sur Mac, l'encodeur de Windows sur PC, AudioToolbox sur iPhone).
 /// `work` : dossier de travail, où passe le WAV intermédiaire.
 pub(crate) async fn save_m4a(work: &Path, media: &Path, tag: &str, rate: u32, samples: &[i16]) -> Result<PathBuf> {
     let wav_path = work.join(format!("{tag}.wav"));
     tokio::fs::write(&wav_path, write_wav(rate, samples)).await?;
     let stem = crate::media::new_stem();
     let m4a = media.join(format!("{stem}.{tag}.m4a"));
-    #[cfg(not(windows))]
+    #[cfg(not(any(windows, target_os = "ios")))]
     let converted = tokio::process::Command::new("afconvert")
         .args(["-f", "m4af", "-d", "aac", "-b", "64000"])
         .arg(&wav_path)
@@ -380,6 +393,12 @@ pub(crate) async fn save_m4a(work: &Path, media: &Path, tag: &str, rate: u32, sa
     let converted = {
         let (out, pcm) = (m4a.clone(), samples.to_vec());
         tokio::task::spawn_blocking(move || crate::win::aac_m4a(rate, &pcm, &out)).await.map(|r| r.is_ok()).unwrap_or(false)
+    };
+    // iPhone et iPad : l'encodeur AAC d'AudioToolbox, appelé ici (compress.rs)
+    #[cfg(target_os = "ios")]
+    let converted = {
+        let (out, pcm) = (m4a.clone(), samples.to_vec());
+        tokio::task::spawn_blocking(move || crate::compress::write_aac(&out, rate, &pcm, 64_000)).await.map(|r| r.is_ok()).unwrap_or(false)
     };
     if converted && m4a.exists() {
         let _ = tokio::fs::remove_file(&wav_path).await;

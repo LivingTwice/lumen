@@ -329,10 +329,10 @@ async fn extract_archive(archive: &Path, dir: &Path, final_path: &Path) -> Resul
     let _ = tokio::fs::remove_dir_all(&tmp).await;
     tokio::fs::create_dir_all(&tmp).await?;
     // compressée ou non : tar s'en aperçoit seul
-    #[cfg(not(windows))]
+    #[cfg(not(any(windows, target_os = "ios")))]
     let ok = tokio::process::Command::new("tar").arg("-xf").arg(archive).arg("-C").arg(&tmp).output().await?.status.success();
-    // Windows : décompressé ici (le tar de Windows 10 ne lit pas toujours le bzip2)
-    #[cfg(windows)]
+    // Windows : décompressé ici (le tar de Windows 10 ne lit pas toujours le bzip2) ; iPhone et iPad aussi
+    #[cfg(any(windows, target_os = "ios"))]
     let ok = {
         let (from, to) = (archive.to_path_buf(), tmp.clone());
         tokio::task::spawn_blocking(move || unpack_tar(&from, &to, None)).await?.is_ok()
@@ -354,7 +354,7 @@ async fn extract_archive(archive: &Path, dir: &Path, final_path: &Path) -> Resul
 /// Décompresse une archive .tar.bz2 ou .tar dans `dest` (`only` : seulement ces
 /// chemins de l'archive). Sous Windows, à la place de `tar` ; les chemins qui
 /// sortiraient de `dest` sont refusés par la bibliothèque.
-#[cfg(any(windows, test))]
+#[cfg(any(windows, target_os = "ios", test))]
 pub(crate) fn unpack_tar(archive: &Path, dest: &Path, only: Option<&[String]>) -> Result<()> {
     use std::io::{BufRead, Read};
     std::fs::create_dir_all(dest)?;

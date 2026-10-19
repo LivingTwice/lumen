@@ -2,6 +2,47 @@
   "_lisezmoi": "Nouveautés montrées après chaque mise à jour (components/News.tsx) et notes de publication. Ajouter ce qui change sous la version \"next\" au fil du travail ; « Publier une version » lui donne son numéro et sa date. Icônes : noms de components/Icon.tsx. Actions : \"tour\" (visite guidée), \"guide\", \"settings:<page>\" (profile, general, langs, reading, voice, discover, podcasts, ai, videos, backup, storage, lingq, about), \"import:<onglet>\" (text, link, file, media, podcast), \"view:<vue>\" (library, discover, playlists, chat, vocab, progress).",
   "releases": [
     {
+      "version": "1.3.0",
+      "date": "2026-10-19",
+      "title": { "fr": "Votre progression partout, les plus récents d'abord", "en": "Your progress everywhere, newest first" },
+      "items": [
+        {
+          "icon": "refresh",
+          "title": { "fr": "Votre progression sur tous vos appareils", "en": "Your progress on all your devices" },
+          "body": {
+            "fr": "Retrouvez une fois votre progression sur un autre Mac ou PC (Réglages › Sauvegarde) : ensuite, ce que vous faites sur l'un rejoint l'autre par la sauvegarde, mots appris, leçons, page atteinte, temps d'étude. Chaque appareil ajoute ce qu'a changé l'autre sans rien écraser, à chaque lancement et toutes les 10 minutes. « Fusionner » réunit aussi deux progressions déjà commencées chacune de leur côté.",
+            "en": "Bring your progress once to another Mac or PC (Settings › Backup): from then on, what you do on one reaches the other through the backup, words learned, lessons, the page you reached, study time. Each device adds what the other changed without overwriting anything, at every launch and every 10 minutes. “Merge” also brings together two progressions started separately."
+          },
+          "action": "settings:backup"
+        },
+        {
+          "icon": "type",
+          "title": { "fr": "Les phrases traduites, même par le plus léger des modèles", "en": "Sentences translated, even by the lightest model" },
+          "body": {
+            "fr": "Avec Qwen3.5 0.8B, la traduction d'une phrase recopiait parfois la phrase d'origine. Elle est désormais traduite, et une phrase simplement recopiée n'est jamais gardée en mémoire.",
+            "en": "With Qwen3.5 0.8B, translating a sentence sometimes copied the original sentence back. It's now translated, and a sentence merely copied back is never kept in memory."
+          }
+        },
+        {
+          "icon": "clock",
+          "title": { "fr": "Trier et filtrer dans Découvrir", "en": "Sort and filter in Discover" },
+          "body": {
+            "fr": "Sous le champ de recherche de Découvrir, choisissez l'ordre des résultats : pertinence, les plus récents, les plus populaires ou les plus anciens. Le bouton « Filtres » ajoute la date de publication (aujourd'hui, cette semaine, ce mois-ci, cette année, il y a plus d'un an), la durée, les vidéos sous-titrées, seulement dans la langue étudiée, sans ce qui est déjà dans votre bibliothèque. Sans recherche, les mêmes filtres rangent les trouvailles de Lumen en une grille, des plus récentes aux plus anciennes. Vos choix restent d'une fois sur l'autre.",
+            "en": "Under Discover's search field, pick the order of the results: relevance, newest, most popular or oldest. The “Filters” button adds the publication date (today, this week, this month, this year, over a year ago), the length, videos with subtitles, only in the language you study, and without what's already in your library. Without a search, the same filters lay out Lumen's finds in a grid, from newest to oldest. Your choices stay from one time to the next."
+          },
+          "action": "view:discover"
+        },
+        {
+          "icon": "more",
+          "title": { "fr": "Les menus passent devant les leçons", "en": "Menus stay in front of the lessons" },
+          "body": {
+            "fr": "Le menu « … » d'une leçon (Supprimer, Renommer, Marquer comme lu…) se cachait parfois derrière la carte voisine avec les petites cartes. Il passe désormais toujours au premier plan, et s'ouvre vers le haut quand la place manque en bas de la fenêtre.",
+            "en": "A lesson's “…” menu (Delete, Rename, Mark as read…) sometimes hid behind the next card with small cards. It now always comes to the front, and opens upward when there's no room at the bottom of the window."
+          }
+        }
+      ]
+    },
+    {
       "version": "1.2.0",
       "date": "2026-10-14",
       "title": { "fr": "Des transcriptions plus justes, des playlists à votre main", "en": "More accurate transcripts, playlists that do what you want" },

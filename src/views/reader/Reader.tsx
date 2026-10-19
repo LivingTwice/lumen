@@ -10,7 +10,7 @@ import { pronounce } from "../../lib/pronounce";
 import { studyTime, useStudyClock } from "../../lib/progress";
 import { formatNumber, useApp } from "../../lib/store";
 import { fitPages, pageOfToken } from "../../lib/pagefit";
-import { isWindows } from "../../lib/platform";
+import { isMobile, isWindows } from "../../lib/platform";
 import { panelMode, readerLook, roomForSidePanel } from "../../lib/reading";
 import { paginate, sentenceBounds, type PageRange } from "../../lib/tokenize";
 import type { LessonSummary, OpenedLesson, Term, Token } from "../../lib/types";
@@ -667,6 +667,12 @@ export function Reader() {
     setRange(null);
   };
   useEffect(() => {
+    // le toucher interrompu (défilement de la page) n'est pas une sélection
+    const cancel = () => (drag.current = null);
+    window.addEventListener("pointercancel", cancel);
+    return () => window.removeEventListener("pointercancel", cancel);
+  }, []);
+  useEffect(() => {
     const up = () => {
       if (!drag.current) return;
       const d = drag.current;
@@ -747,6 +753,69 @@ export function Reader() {
     s.lock = true;
     goPage(pageNow.current + (forward ? 1 : -1));
   };
+
+  // iPhone et iPad : un balayage du doigt tourne la page ; un appui long sur un mot puis
+  // le doigt qui glisse sélectionne une expression (le doigt ne survole pas les mots
+  // comme la souris : le mot sous le doigt se lit à sa position)
+  const touch = useRef<{ x: number; y: number; mode: "" | "swipe" | "select" | "none"; timer: number; before: Range | null; start: number } | null>(null);
+  const onTouchStart = (e: React.TouchEvent) => {
+    if (e.touches.length !== 1 || lookOpen) {
+      touch.current = null;
+      return;
+    }
+    const p = e.touches[0];
+    const el = (e.target as HTMLElement).closest("[data-i]") as HTMLElement | null;
+    const st = { x: p.clientX, y: p.clientY, mode: "" as const, timer: 0, before: rangeRef.current, start: el ? Number(el.dataset.i) : -1 };
+    touch.current = st;
+    if (st.start >= 0)
+      st.timer = window.setTimeout(() => {
+        if (touch.current !== st || st.mode !== "") return;
+        (st as { mode: string }).mode = "select";
+        // le geste est désormais une sélection, validée à la fin du toucher (pas au relâcher du pointeur)
+        drag.current = null;
+        void api().haptic(0);
+      }, 380);
+  };
+  const onTouchMove = (e: React.TouchEvent) => {
+    const st = touch.current;
+    if (!st) return;
+    const p = e.touches[0];
+    const dx = p.clientX - st.x;
+    const dy = p.clientY - st.y;
+    if (st.mode === "select") {
+      const el = document.elementFromPoint(p.clientX, p.clientY)?.closest("[data-i]") as HTMLElement | null;
+      if (!el) return;
+      const i = Number(el.dataset.i);
+      setRange({ a: Math.min(st.start, i), b: Math.max(st.start, i) });
+      return;
+    }
+    if (st.mode === "" && (Math.abs(dx) > 12 || Math.abs(dy) > 12)) {
+      window.clearTimeout(st.timer);
+      st.mode = Math.abs(dx) > Math.abs(dy) * 1.2 ? "swipe" : "none";
+      // un balayage n'est pas un toucher de mot : la sélection d'avant revient
+      if (st.mode === "swipe" && drag.current) {
+        drag.current = null;
+        setRange(st.before);
+      }
+    }
+  };
+  const onTouchEnd = (e: React.TouchEvent) => {
+    const st = touch.current;
+    touch.current = null;
+    if (!st) return;
+    window.clearTimeout(st.timer);
+    if (st.mode === "select") {
+      const r = rangeRef.current;
+      if (r) select(r.a, r.b);
+      return;
+    }
+    if (st.mode !== "swipe") return;
+    const dx = e.changedTouches[0].clientX - st.x;
+    if (Math.abs(dx) < 40) return;
+    // vers la gauche pour avancer (vers la droite en arabe), comme dans Livres
+    goPage(pageNow.current + ((dx < 0) !== !!langInfo(lang).rtl ? 1 : -1));
+  };
+  const touchProps = isMobile ? { onTouchStart, onTouchMove, onTouchEnd, onTouchCancel: () => (touch.current = null) } : {};
 
   const findNext = async () => {
     if (!lesson) return null;
@@ -1488,7 +1557,7 @@ export function Reader() {
         )}
 
         {paged ? (
-          <div className="reader-leaves" onWheel={onSwipe} onPointerDown={onVoidDown}>
+          <div className="reader-leaves" onWheel={onSwipe} onPointerDown={onVoidDown} {...touchProps}>
             {arrow("left")}
             <div className="leaf">
               <div className="leaf-view" ref={viewRef}>
@@ -1541,7 +1610,7 @@ export function Reader() {
             {arrow("right")}
           </div>
         ) : (
-          <div className="reader-scroll" ref={scrollRef} onScroll={onReaderScroll} onPointerDown={onVoidDown}>
+          <div className="reader-scroll" ref={scrollRef} onScroll={onReaderScroll} onPointerDown={onVoidDown} {...touchProps}>
             <div className="reader-inner">
               {header}
 
