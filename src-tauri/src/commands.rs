@@ -833,7 +833,7 @@ pub async fn models_list(state: State<'_, AppState>) -> R<Vec<ModelRow>> {
     let llm = settings.get("llm_model").cloned().unwrap_or_else(|| "qwen3.5-2b".into());
     let asr = settings.get("asr_model").cloned().unwrap_or_else(|| "whisper-turbo".into());
     let dl = state.downloads.lock();
-    Ok(models::CATALOG
+    let mut rows: Vec<ModelRow> = models::CATALOG
         .iter()
         .map(|m| {
             let part = models::part_of(&state.data_dir, m);
@@ -847,7 +847,23 @@ pub async fn models_list(state: State<'_, AppState>) -> R<Vec<ModelRow>> {
                 partial: std::fs::metadata(part).map(|x| x.len()).unwrap_or(0),
             }
         })
-        .collect())
+        .collect();
+    // Linux : la voix chinoise vit hors du catalogue commun
+    #[cfg(target_os = "linux")]
+    {
+        let m = &models::ZH_VOICE;
+        let part = models::part_of(&state.data_dir, m);
+        let mut info = m.clone();
+        info.detail = t(m.detail, m.detail_en);
+        rows.push(ModelRow {
+            info,
+            installed: models::installed(&state.data_dir, m),
+            active: false,
+            downloading: dl.contains_key(m.id),
+            partial: std::fs::metadata(part).map(|x| x.len()).unwrap_or(0),
+        });
+    }
+    Ok(rows)
 }
 
 #[tauri::command]
@@ -894,8 +910,21 @@ pub async fn model_delete(state: State<'_, AppState>, id: String) -> R<()> {
     } else if p.exists() {
         std::fs::remove_file(&p).map_err(err)?;
     }
-    // le moteur sherpa-onnx part avec le dernier modèle qui s'en sert (voix, Parakeet, interlocuteurs)
-    if m.engine.is_some() && !models::CATALOG.iter().any(|o| o.engine.is_some() && models::path_of(&state.data_dir, o).exists()) {
+    // le moteur sherpa-onnx part avec le dernier modèle qui s'en sert (voix, Parakeet,
+    // interlocuteurs) ; la voix chinoise de Linux compte aussi
+    if m.engine.is_some()
+        && !models::CATALOG.iter().any(|o| o.engine.is_some() && models::path_of(&state.data_dir, o).exists())
+        && !({
+            #[cfg(target_os = "linux")]
+            {
+                models::installed(&state.data_dir, &models::ZH_VOICE)
+            }
+            #[cfg(not(target_os = "linux"))]
+            {
+                false
+            }
+        })
+    {
         crate::sherpa::remove(&state.data_dir);
     }
     Ok(())
@@ -909,7 +938,13 @@ fn voice_for(state: &AppState, lang: &str) -> R<String> {
     Ok(s.get(&format!("tts_voice_{lang}")).or_else(|| s.get("tts_voice")).cloned().unwrap_or_else(|| "0".into()))
 }
 
-fn voice_model(state: &AppState) -> R<&'static models::ModelInfo> {
+/// Le modèle de voix pour une langue : Supertonic pour ses 31 langues, le
+/// modèle vits chinois pour le chinois (Linux, s'il est installé).
+fn voice_model(state: &AppState, lang: &str) -> R<&'static models::ModelInfo> {
+    #[cfg(target_os = "linux")]
+    if lang == "zh" && models::installed(&state.data_dir, &models::ZH_VOICE) {
+        return Ok(&models::ZH_VOICE);
+    }
     models::CATALOG
         .iter()
         .find(|m| m.kind == "tts" && models::installed(&state.data_dir, m))
@@ -929,8 +964,8 @@ pub struct VoicedLesson {
 /// Annulable avec `model_cancel("voice:<id>")`.
 #[tauri::command]
 pub async fn lesson_voice(state: State<'_, AppState>, id: i64, on_event: Channel<ImportEvent>) -> R<VoicedLesson> {
-    let m = voice_model(&state)?;
     let (lang, text, _) = db::lesson_media(&state.db.lock(), id).map_err(err)?;
+    let m = voice_model(&state, &lang)?;
     let voice = voice_for(&state, &lang)?;
     let key = format!("voice:{id}");
     let cancel = Arc::new(AtomicBool::new(false));
@@ -983,22 +1018,22 @@ pub async fn lesson_voice(state: State<'_, AppState>, id: i64, on_event: Channel
 /// abandonnée si une demande plus récente arrive entre-temps.
 #[tauri::command]
 pub async fn tts_say(state: State<'_, AppState>, lang: String, text: String, prefetch: bool) -> R<String> {
-    // la voix naturelle si elle parle la langue ; sans elle, Linux dit le mot
+    // le modèle de voix qui parle cette langue ; sans lui, Linux dit le mot
     // par espeak-ng (voice::say_any) et les autres gardent l'erreur d'avant
-    let m = voice_model(&state).ok();
+    let m = voice_model(&state, &lang).ok();
     let text: String = text.split_whitespace().collect::<Vec<_>>().join(" ").chars().take(600).collect();
     if text.is_empty() {
         return Err(t("Rien à prononcer.", "Nothing to pronounce.").into());
     }
     let voice = voice_for(&state, &lang)?;
     #[cfg(target_os = "linux")]
-    if !(m.is_some_and(|m| crate::voice::speaks(&lang))) {
+    if m.is_none() {
         let cached = crate::voice::espeak_path(&state.data_dir, &lang, &text, &voice);
         if cached.exists() {
             return Ok(cached.to_string_lossy().into_owned());
         }
     }
-    if let Some(m) = m.filter(|_| crate::voice::speaks(&lang)) {
+    if let Some(m) = m {
         let cached = crate::voice::cached_path(&state.data_dir, m, &lang, &text, &voice);
         if cached.exists() {
             return Ok(cached.to_string_lossy().into_owned());

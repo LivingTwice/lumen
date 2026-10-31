@@ -188,8 +188,38 @@ pub const CATALOG: &[ModelInfo] = &[
     },
 ];
 
+/// Linux : la voix naturelle du chinois, un modèle vits (fanchen-C, 187
+/// locuteurs) dit par le même moteur sherpa-onnx que Supertonic. Les autres
+/// systèmes ont leurs voix système (Tingting sur Mac, Huihui sur Windows) ;
+/// le WebView de Linux, lui, n'en a aucune (voir voice.rs). La licence du
+/// modèle n'est pas précisée par son auteur (Hugging Face, csukuangfj).
+#[cfg(target_os = "linux")]
+pub const ZH_VOICE: ModelInfo = ModelInfo {
+    id: "vits-zh-fanchen-c",
+    kind: "tts",
+    name: "fanchen-C",
+    detail: "Voix naturelle du chinois pour les mots, les expressions et l'audio des leçons",
+    detail_en: "Natural Chinese voice for words, phrases and lesson audio",
+    // modèle (113,8 Mo) + moteur sherpa-onnx, téléchargés ensemble
+    size: 119_326_431 + crate::sherpa::SIZE,
+    url: "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/vits-zh-hf-fanchen-C.tar.bz2",
+    file: "vits-zh-hf-fanchen-C",
+    ram_gb: 2,
+    companion: None,
+    engine: Some(crate::sherpa::Tool::Tts),
+};
+
+/// Un modèle du catalogue, ou la voix chinoise de Linux.
 pub fn find(id: &str) -> Option<&'static ModelInfo> {
-    CATALOG.iter().find(|m| m.id == id)
+    if let Some(m) = CATALOG.iter().find(|m| m.id == id) {
+        return Some(m);
+    }
+    // Linux : la voix chinoise vit hors du catalogue commun
+    #[cfg(target_os = "linux")]
+    if ZH_VOICE.id == id {
+        return Some(&ZH_VOICE);
+    }
+    None
 }
 
 pub fn models_dir(data_dir: &Path) -> PathBuf {

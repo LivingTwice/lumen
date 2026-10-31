@@ -11,8 +11,17 @@ import { useApp } from "./store";
 import { sayWord } from "./tts";
 import type { LangCode } from "./types";
 
-/** Les 10 voix de Supertonic (identifiant = numéro du locuteur), pour toutes les langues. */
-export function naturalVoices() {
+/** Les voix de la voix naturelle (identifiant = numéro du locuteur). Les dix
+ * de Supertonic pour ses langues ; les 187 du modèle vits chinois sous Linux,
+ * sans genre connu : elles se choisissent à l'oreille. */
+export function naturalVoices(lang: string) {
+  if (lang === "zh" && isLinux) {
+    return Array.from({ length: 187 }, (_, k) => ({
+      id: String(k),
+      name: t(`Voix ${k + 1}`, `Voice ${k + 1}`),
+      group: t("Locuteurs du modèle", "Model speakers"),
+    }));
+  }
   return [
     ...[1, 2, 3, 4, 5].map((n) => ({ id: String(n - 1), name: t(`Féminine ${n}`, `Female ${n}`), group: t("Voix féminines", "Female voices") })),
     ...[1, 2, 3, 4, 5].map((n) => ({ id: String(n + 4), name: t(`Masculine ${n}`, `Male ${n}`), group: t("Voix masculines", "Male voices") })),
@@ -32,12 +41,15 @@ const PREPARE_MAX_WORDS = 12;
 const pending = new Map<string, Promise<string>>();
 let player: HTMLAudioElement | null = null;
 
-/** Langues que la voix naturelle ne parle pas (miroir de `text::VOICE_LANGS`) : la voix du système les dit. */
+/** Langues que Supertonic ne parle pas (miroir de `text::VOICE_LANGS`) : la voix du système les dit. */
 const NO_NATURAL_VOICE = new Set(["zh"]);
 
-/** La voix naturelle parle cette langue. */
+/** La voix naturelle parle cette langue. Sous Linux, le chinois se dit par un
+ * modèle à part (vits, fanchen-C, miroir de `models::ZH_VOICE`) : elle le
+ * parle dès qu'il est installé. */
 export function naturalVoiceSpeaks(lang: string): boolean {
-  return !NO_NATURAL_VOICE.has(lang);
+  if (!NO_NATURAL_VOICE.has(lang)) return true;
+  return isLinux && useApp.getState().models.some((m) => m.id === "vits-zh-fanchen-c" && m.installed);
 }
 
 /** La voix naturelle est installée et utilisable (pour cette langue). */

@@ -870,12 +870,12 @@ function VoicePane() {
             <div className="set-row">
               <div className="grow">
                 <strong>{t(`Voix pour ${theLang(lang)}`, `Voice for ${theLang(lang)}`)}</strong>
-                <span>{t("10 voix, comprises dans le téléchargement ; elle lit aussi l'audio créé pour vos leçons", "10 voices, included in the download; it also reads the audio created for your lessons")}</span>
+                <span>{lang === "zh" && isLinux ? t("187 voix, comprises dans le téléchargement ; elle lit aussi l'audio créé pour vos leçons", "187 voices, included in the download; it also reads the audio created for your lessons") : t("10 voix, comprises dans le téléchargement ; elle lit aussi l'audio créé pour vos leçons", "10 voices, included in the download; it also reads the audio created for your lessons")}</span>
               </div>
               <select className="select" value={naturalVoiceFor(lang)} onChange={(e) => setSetting(`tts_voice_${lang}`, e.target.value)} aria-label={t("Voix naturelle", "Natural voice")}>
-                {[...new Set(naturalVoices().map((v) => v.group))].map((g) => (
+                {[...new Set(naturalVoices(lang).map((v) => v.group))].map((g) => (
                   <optgroup key={g} label={g}>
-                    {naturalVoices()
+                    {naturalVoices(lang)
                       .filter((v) => v.group === g)
                       .map((v) => (
                         <option key={v.id} value={v.id}>

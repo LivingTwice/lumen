@@ -21,12 +21,14 @@ use crate::models::{self, ModelInfo};
 /// Les langues de Lumen portent le même code chez Supertonic.
 use crate::text::VOICE_LANGS;
 
-/// Locuteur du modèle : 0 à 4 = voix féminines F1 à F5, 5 à 9 = masculines M1 à M5
-/// (ordre de voice.bin). « f » et « m » (premiers réglages) valent F1 et M1.
+/// Locuteur du modèle : 0 à 4 = voix féminines F1 à F5, 5 à 9 = masculines M1
+/// à M5 (ordre de voice.bin). « f » et « m » (premiers réglages) valent F1 et
+/// M1. Jusqu'à 186 : le modèle vits chinois a 187 locuteurs (Supertonic, lui,
+/// n'en attend que dix : un numéro trop grand y échoue à la synthèse).
 fn speaker(voice: &str) -> u32 {
     match voice {
         "m" => 5,
-        v => v.parse::<u32>().ok().filter(|n| *n <= 9).unwrap_or(0),
+        v => v.parse::<u32>().ok().filter(|n| *n <= 186).unwrap_or(0),
     }
 }
 
@@ -138,21 +140,43 @@ async fn run_engine(data_dir: &Path, m: &ModelInfo, lang: &str, text: &str, voic
     let mut cmd = engine_command(data_dir).unwrap_or_else(|| crate::proc::tokio_command(crate::sherpa::bin(data_dir, crate::sherpa::Tool::Tts)));
     #[cfg(not(target_os = "linux"))]
     let mut cmd = crate::proc::tokio_command(crate::sherpa::bin(data_dir, crate::sherpa::Tool::Tts));
-    cmd.arg(format!("--supertonic-duration-predictor={}", f("duration_predictor.int8.onnx").display()))
-        .arg(format!("--supertonic-text-encoder={}", f("text_encoder.int8.onnx").display()))
-        .arg(format!("--supertonic-vector-estimator={}", f("vector_estimator.int8.onnx").display()))
-        .arg(format!("--supertonic-vocoder={}", f("vocoder.int8.onnx").display()))
-        .arg(format!("--supertonic-tts-json={}", f("tts.json").display()))
-        .arg(format!("--supertonic-unicode-indexer={}", f("unicode_indexer.bin").display()))
-        .arg(format!("--supertonic-voice-style={}", f("voice.bin").display()))
-        .arg(format!("--lang={lang}"))
-        .arg(format!("--sid={}", speaker(voice)))
-        // 8 étapes : la meilleure qualité (5 n'irait que 0,2 s plus vite)
-        .arg("--num-steps=8")
-        .arg(format!("--num-threads={threads}"))
-        .arg(format!("--output-filename={}", out.display()))
-        .arg(text)
-        .kill_on_drop(true);
+    // Supertonic dit les 31 langues ; le chinois a son modèle vits (fanchen-C)
+    // : autres drapeaux. Les fst réécrivent dates et nombres, les homonymes
+    // se lisent par contexte.
+    let supertonic = |cmd: &mut tokio::process::Command| {
+        cmd.arg(format!("--supertonic-duration-predictor={}", f("duration_predictor.int8.onnx").display()))
+            .arg(format!("--supertonic-text-encoder={}", f("text_encoder.int8.onnx").display()))
+            .arg(format!("--supertonic-vector-estimator={}", f("vector_estimator.int8.onnx").display()))
+            .arg(format!("--supertonic-vocoder={}", f("vocoder.int8.onnx").display()))
+            .arg(format!("--supertonic-tts-json={}", f("tts.json").display()))
+            .arg(format!("--supertonic-unicode-indexer={}", f("unicode_indexer.bin").display()))
+            .arg(format!("--supertonic-voice-style={}", f("voice.bin").display()))
+            .arg(format!("--lang={lang}"))
+            .arg(format!("--sid={}", speaker(voice)))
+            // 8 étapes : la meilleure qualité (5 n'irait que 0,2 s plus vite)
+            .arg("--num-steps=8")
+            .arg(format!("--num-threads={threads}"))
+            .arg(format!("--output-filename={}", out.display()))
+            .arg(text)
+            .kill_on_drop(true);
+    };
+    #[cfg(target_os = "linux")]
+    if m.id == crate::models::ZH_VOICE.id {
+        cmd.arg(format!("--vits-model={}", f("vits-zh-hf-fanchen-C.onnx").display()))
+            .arg(format!("--vits-lexicon={}", f("lexicon.txt").display()))
+            .arg(format!("--vits-tokens={}", f("tokens.txt").display()))
+            .arg(format!("--tts-rule-fsts={},{}", f("date.fst").display(), f("number.fst").display()))
+            .arg(format!("--tts-rule-fars={}", f("new_heteronym.fst").display()))
+            .arg(format!("--sid={}", speaker(voice)))
+            .arg(format!("--num-threads={threads}"))
+            .arg(format!("--output-filename={}", out.display()))
+            .arg(text)
+            .kill_on_drop(true);
+    } else {
+        supertonic(&mut cmd);
+    }
+    #[cfg(not(target_os = "linux"))]
+    supertonic(&mut cmd);
     // LUMEN_DEBUG_VOICE=1 : l'appel exact sur la console, pour le rejouer à la main
     // et comparer
     if std::env::var_os("LUMEN_DEBUG_VOICE").is_some() {
@@ -174,7 +198,7 @@ async fn run_engine(data_dir: &Path, m: &ModelInfo, lang: &str, text: &str, voic
 
 /// Prononce `text` et renvoie le chemin du fichier WAV (déjà en cache, ou créé).
 pub async fn say(data_dir: &Path, m: &ModelInfo, lang: &str, text: &str, voice: &str) -> Result<PathBuf> {
-    if !VOICE_LANGS.contains(&lang) {
+    if !model_speaks(m, lang) {
         return Err(anyhow!(crate::i18n::t("Cette langue n'a pas encore de voix naturelle.", "This language has no natural voice yet.")));
     }
     let dest = cached_path(data_dir, m, lang, text, voice);
@@ -196,18 +220,30 @@ pub fn speaks(lang: &str) -> bool {
     VOICE_LANGS.contains(&lang)
 }
 
+/// Ce modèle de voix installé dit-il cette langue ? Supertonic dit les 31
+/// langues de `VOICE_LANGS` ; sous Linux, le modèle vits chinois dit le chinois.
+pub fn model_speaks(m: &ModelInfo, lang: &str) -> bool {
+    #[cfg(target_os = "linux")]
+    if m.id == crate::models::ZH_VOICE.id {
+        return lang == "zh";
+    }
+    #[cfg(not(target_os = "linux"))]
+    let _ = m;
+    VOICE_LANGS.contains(&lang)
+}
+
 /// Prononce `text` et renvoie le WAV : la voix naturelle si elle parle la
 /// langue et est installée (`m`), sinon la voix du système de Linux, espeak-ng
 /// (le WebView de Linux n'en a pas : WebKitGTK embarque flite, anglais seul).
 pub async fn say_any(data_dir: &Path, m: Option<&ModelInfo>, lang: &str, text: &str, voice: &str) -> Result<PathBuf> {
     // LUMEN_DEBUG_VOICE=1 : la voix choisie sur la console (naturelle ou espeak-ng)
     if std::env::var_os("LUMEN_DEBUG_VOICE").is_some() {
-        eprintln!("lumen voix : {} pour « {text} »", match m.filter(|_| speaks(lang)) {
+        eprintln!("lumen voix : {} pour « {text} »", match m.filter(|m| model_speaks(m, lang)) {
             Some(m) => format!("voix naturelle ({})", m.id),
             None => "espeak-ng".to_string(),
         });
     }
-    if let Some(m) = m.filter(|_| speaks(lang)) {
+    if let Some(m) = m.filter(|m| model_speaks(m, lang)) {
         return say(data_dir, m, lang, text, voice).await;
     }
     #[cfg(target_os = "linux")]
@@ -240,7 +276,9 @@ fn espeak_bin() -> Option<PathBuf> {
 #[cfg(target_os = "linux")]
 fn espeak_voice(lang: &str, voice: &str) -> String {
     let n = speaker(voice);
-    let variant = if n >= 5 { format!("m{}", n - 4) } else { format!("f{}", n + 1) };
+    // espeak-ng n'a que quelques variantes : les grands numéros (les 187
+    // locuteurs du vits chinois) s'y replient sur la dernière de chaque genre
+    let variant = if n >= 5 { format!("m{}", (n - 4).min(5)) } else { format!("f{}", (n + 1).min(5)) };
     let lang = if lang == "zh" { "cmn" } else { lang };
     format!("{lang}+{variant}")
 }
@@ -448,7 +486,7 @@ pub async fn lesson_audio(
 ) -> Result<LessonAudio> {
     use futures_util::StreamExt;
     use std::sync::atomic::Ordering;
-    if !VOICE_LANGS.contains(&lang) {
+    if !model_speaks(m, lang) {
         return Err(anyhow!(crate::i18n::t("Cette langue n'a pas encore de voix naturelle.", "This language has no natural voice yet.")));
     }
     let chunks = chunks_of(text, lang);
@@ -730,6 +768,17 @@ mod tests {
         assert_eq!(espeak_voice("it", "3"), "it+f4");
         // un réglage inconnu retombe sur la première voix féminine
         assert_eq!(espeak_voice("fr", "non"), "fr+f1");
+        // les grands numéros (187 locuteurs du vits chinois) se replient
+        assert_eq!(espeak_voice("zh", "150"), "cmn+m5");
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn chinese_speakers_have_their_own_cache() {
+        // avant, les numéros au-delà de 9 se confondaient dans le cache
+        let a = cached_path(Path::new("/tmp"), &crate::models::ZH_VOICE, "zh", "你", "10");
+        let b = cached_path(Path::new("/tmp"), &crate::models::ZH_VOICE, "zh", "你", "150");
+        assert_ne!(a, b);
     }
 
     #[cfg(target_os = "linux")]
@@ -740,6 +789,20 @@ mod tests {
         assert_eq!(espeak_path(Path::new("/tmp"), "zh", "你好", "0"), a);
         assert_ne!(espeak_path(Path::new("/tmp"), "zh", "你好", "5"), a);
         assert!(a.to_string_lossy().contains("media/voice"));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn chinese_voice_model_speaks_chinese_only() {
+        // Supertonic dit les 31 langues, le modèle vits dit le chinois seul
+        let zh = &crate::models::ZH_VOICE;
+        let super3 = crate::models::CATALOG.iter().find(|m| m.id == "supertonic-3").unwrap();
+        assert!(model_speaks(super3, "fr"));
+        assert!(!model_speaks(super3, "zh"));
+        assert!(model_speaks(zh, "zh"));
+        assert!(!model_speaks(zh, "it"));
+        // il se trouve comme les autres modèles (téléchargement, suppression)
+        assert_eq!(crate::models::find("vits-zh-fanchen-c").map(|m| m.id), Some("vits-zh-fanchen-c"));
     }
 }
 
@@ -872,5 +935,37 @@ mod live {
         let c = say_any(&dir, None, "it", "buongiorno", "0").await.unwrap();
         assert!(c.is_file());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // Linux : la voix naturelle du chinois (vits, fanchen-C) dit les mots et
+    // les leçons. `LUMEN_ZH_VOICE=/chemin/vits-zh-hf-fanchen-C cargo test
+    // --lib voice_zh_live -- --ignored --nocapture` (sans la variable, le
+    // modèle se télécharge, 114 Mo ; le moteur vient avec).
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    #[ignore]
+    async fn voice_zh_live() {
+        let m = &crate::models::ZH_VOICE;
+        let data = std::env::temp_dir().join("lumen-voice-zh-live");
+        let _ = std::fs::remove_dir_all(&data);
+        std::fs::create_dir_all(data.join("models")).unwrap();
+        if let Ok(src) = std::env::var("LUMEN_ZH_VOICE") {
+            std::os::unix::fs::symlink(src, models::path_of(&data, m)).unwrap();
+        } else {
+            models::download(&data, m, Arc::new(AtomicBool::new(false)), |_| {}).await.unwrap();
+        }
+        crate::sherpa::ensure(&data, crate::sherpa::Tool::Tts, Arc::new(AtomicBool::new(false)), |_, _| {}).await.unwrap();
+        assert!(models::installed(&data, m));
+        let t = Instant::now();
+        let p = say(&data, m, "zh", "我们是学生，每天早上学习中文。", "0").await.unwrap();
+        println!("premier mot en {:.1} s", t.elapsed().as_secs_f32());
+        let wav = std::fs::read(&p).unwrap();
+        assert_eq!(&wav[0..4], b"RIFF");
+        let (rate, samples) = read_pcm(&wav).unwrap();
+        assert!(samples.len() > 20_000, "{} échantillons à {rate} Hz", samples.len());
+        // une autre voix : un autre fichier, une autre locutrice
+        let q = say(&data, m, "zh", "我们是学生，每天早上学习中文。", "5").await.unwrap();
+        assert_ne!(p, q);
+        let _ = std::fs::remove_dir_all(&data);
     }
 }
