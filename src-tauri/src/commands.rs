@@ -983,22 +983,33 @@ pub async fn lesson_voice(state: State<'_, AppState>, id: i64, on_event: Channel
 /// abandonnée si une demande plus récente arrive entre-temps.
 #[tauri::command]
 pub async fn tts_say(state: State<'_, AppState>, lang: String, text: String, prefetch: bool) -> R<String> {
-    let m = voice_model(&state)?;
+    // la voix naturelle si elle parle la langue ; sans elle, Linux dit le mot
+    // par espeak-ng (voice::say_any) et les autres gardent l'erreur d'avant
+    let m = voice_model(&state).ok();
     let text: String = text.split_whitespace().collect::<Vec<_>>().join(" ").chars().take(600).collect();
     if text.is_empty() {
         return Err(t("Rien à prononcer.", "Nothing to pronounce.").into());
     }
     let voice = voice_for(&state, &lang)?;
-    let cached = crate::voice::cached_path(&state.data_dir, m, &lang, &text, &voice);
-    if cached.exists() {
-        return Ok(cached.to_string_lossy().into_owned());
+    #[cfg(target_os = "linux")]
+    if !(m.is_some_and(|m| crate::voice::speaks(&lang))) {
+        let cached = crate::voice::espeak_path(&state.data_dir, &lang, &text, &voice);
+        if cached.exists() {
+            return Ok(cached.to_string_lossy().into_owned());
+        }
+    }
+    if let Some(m) = m.filter(|_| crate::voice::speaks(&lang)) {
+        let cached = crate::voice::cached_path(&state.data_dir, m, &lang, &text, &voice);
+        if cached.exists() {
+            return Ok(cached.to_string_lossy().into_owned());
+        }
     }
     let my = state.voice_epoch.fetch_add(1, Ordering::SeqCst) + 1;
     let _turn = state.voice_lock.lock().await;
     if prefetch && state.voice_epoch.load(Ordering::SeqCst) != my {
         return Err("interrompu".into());
     }
-    let path = crate::voice::say(&state.data_dir, m, &lang, &text, &voice).await.map_err(err)?;
+    let path = crate::voice::say_any(&state.data_dir, m, &lang, &text, &voice).await.map_err(err)?;
     Ok(path.to_string_lossy().into_owned())
 }
 

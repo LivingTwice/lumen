@@ -191,6 +191,99 @@ pub async fn say(data_dir: &Path, m: &ModelInfo, lang: &str, text: &str, voice: 
     Ok(dest)
 }
 
+/// La voix naturelle parle cette langue (miroir de `NO_NATURAL_VOICE` côté interface).
+pub fn speaks(lang: &str) -> bool {
+    VOICE_LANGS.contains(&lang)
+}
+
+/// Prononce `text` et renvoie le WAV : la voix naturelle si elle parle la
+/// langue et est installée (`m`), sinon la voix du système de Linux, espeak-ng
+/// (le WebView de Linux n'en a pas : WebKitGTK embarque flite, anglais seul).
+pub async fn say_any(data_dir: &Path, m: Option<&ModelInfo>, lang: &str, text: &str, voice: &str) -> Result<PathBuf> {
+    // LUMEN_DEBUG_VOICE=1 : la voix choisie sur la console (naturelle ou espeak-ng)
+    if std::env::var_os("LUMEN_DEBUG_VOICE").is_some() {
+        eprintln!("lumen voix : {} pour « {text} »", match m.filter(|_| speaks(lang)) {
+            Some(m) => format!("voix naturelle ({})", m.id),
+            None => "espeak-ng".to_string(),
+        });
+    }
+    if let Some(m) = m.filter(|_| speaks(lang)) {
+        return say(data_dir, m, lang, text, voice).await;
+    }
+    #[cfg(target_os = "linux")]
+    return espeak_say(data_dir, lang, text, voice).await;
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = (lang, text, voice);
+        match m {
+            None => Err(anyhow!(crate::i18n::t("NO_VOICE: aucune voix naturelle n'est installée", "NO_VOICE: no natural voice is installed"))),
+            _ => Err(anyhow!(crate::i18n::t("Cette langue n'a pas encore de voix naturelle.", "This language has no natural voice yet."))),
+        }
+    }
+}
+
+/// La voix du système de Linux : espeak-ng, repéré par la variable
+/// `LUMEN_ESPEAK` (posée par le paquet nix), sinon dans le PATH. Sans lui,
+/// l'erreur laisse la parole au WebView.
+#[cfg(target_os = "linux")]
+fn espeak_bin() -> Option<PathBuf> {
+    if let Some(p) = std::env::var_os("LUMEN_ESPEAK") {
+        return (p.as_os_str() != "").then(|| PathBuf::from(p));
+    }
+    let path = std::env::var_os("PATH")?;
+    std::env::split_paths(&path).map(|d| d.join("espeak-ng")).find(|p| p.is_file())
+}
+
+/// Voix et variante d'espeak-ng pour un réglage de Lumen : la même locutrice
+/// que la voix naturelle (0 à 4 = féminines, 5 à 9 = masculines, « f » et « m »
+/// en premières). Le mandarin s'appelle « cmn » chez espeak-ng.
+#[cfg(target_os = "linux")]
+fn espeak_voice(lang: &str, voice: &str) -> String {
+    let n = speaker(voice);
+    let variant = if n >= 5 { format!("m{}", n - 4) } else { format!("f{}", n + 1) };
+    let lang = if lang == "zh" { "cmn" } else { lang };
+    format!("{lang}+{variant}")
+}
+
+/// Cache d'une prononciation d'espeak-ng, à part de celui de la voix naturelle
+/// (une voix téléchargée ensuite doit se faire entendre).
+#[cfg(target_os = "linux")]
+pub(crate) fn espeak_path(data_dir: &Path, lang: &str, text: &str, voice: &str) -> PathBuf {
+    let mut h = Sha256::new();
+    h.update(format!("espeak\u{1}{lang}\u{1}{}\u{1}{text}", speaker(voice)));
+    cache_dir(data_dir).join(format!("{}.wav", &hex::encode(h.finalize())[..20]))
+}
+
+/// Dit `text` par espeak-ng, WAV mis en cache comme la voix naturelle (mêmes
+/// silences taillés, même nivellement du volume).
+#[cfg(target_os = "linux")]
+async fn espeak_say(data_dir: &Path, lang: &str, text: &str, voice: &str) -> Result<PathBuf> {
+    let dest = espeak_path(data_dir, lang, text, voice);
+    if dest.exists() {
+        return Ok(dest);
+    }
+    let bin = espeak_bin().ok_or_else(|| anyhow!(crate::i18n::t("espeak-ng est introuvable", "espeak-ng cannot be found")))?;
+    tokio::fs::create_dir_all(cache_dir(data_dir)).await?;
+    let tmp = dest.with_extension("tmp.wav");
+    let mut cmd = crate::proc::tokio_command(&bin);
+    cmd.arg("-v").arg(espeak_voice(lang, voice))
+        .arg("-w").arg(&tmp)
+        .arg(text);
+    // LUMEN_DEBUG_VOICE=1 : l'appel exact, comme pour le moteur de la voix naturelle
+    if std::env::var_os("LUMEN_DEBUG_VOICE").is_some() {
+        eprintln!("lumen voix : {:?}", cmd.as_std());
+    }
+    let out = cmd.output().await?;
+    let raw = tokio::fs::read(&tmp).await?;
+    let _ = tokio::fs::remove_file(&tmp).await;
+    if !out.status.success() || raw.is_empty() {
+        return Err(anyhow!(crate::i18n::t("espeak-ng n'a pas pu dire ce mot", "espeak-ng couldn't speak this word")));
+    }
+    let clean = polish_wav(&raw).unwrap_or(raw);
+    tokio::fs::write(&dest, clean).await?;
+    Ok(dest)
+}
+
 /// Échantillons d'un WAV PCM 16 bits mono, avec leur fréquence.
 pub(crate) fn read_pcm(wav: &[u8]) -> Option<(u32, Vec<i16>)> {
     if wav.len() < 12 || &wav[0..4] != b"RIFF" || &wav[8..12] != b"WAVE" {
@@ -625,6 +718,29 @@ mod tests {
         assert!(elf_interpreter(b"\x7fEL\x00").is_none()); // magie incomplète
         assert!(elf_interpreter(&[]).is_none());
     }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn espeak_voices_follow_the_speaker() {
+        // la même locutrice que Supertonic : 0 à 4 féminines, 5 à 9 masculines
+        assert_eq!(espeak_voice("zh", "0"), "cmn+f1");
+        assert_eq!(espeak_voice("zh", "f"), "cmn+f1");
+        assert_eq!(espeak_voice("zh", "m"), "cmn+m1");
+        assert_eq!(espeak_voice("zh", "7"), "cmn+m3");
+        assert_eq!(espeak_voice("it", "3"), "it+f4");
+        // un réglage inconnu retombe sur la première voix féminine
+        assert_eq!(espeak_voice("fr", "non"), "fr+f1");
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn espeak_cache_is_its_own() {
+        // même texte, même voix : même fichier ; la voix change le fichier
+        let a = espeak_path(Path::new("/tmp"), "zh", "你好", "0");
+        assert_eq!(espeak_path(Path::new("/tmp"), "zh", "你好", "0"), a);
+        assert_ne!(espeak_path(Path::new("/tmp"), "zh", "你好", "5"), a);
+        assert!(a.to_string_lossy().contains("media/voice"));
+    }
 }
 
 /// Test réel (télécharge le moteur dans un dossier jetable) :
@@ -728,5 +844,33 @@ mod live {
         let p = say(&data, m, "it", "buongiorno", "m").await.unwrap();
         assert!(std::fs::metadata(p).unwrap().len() > 10_000);
         let _ = std::fs::remove_dir_all(&data);
+    }
+
+    // Linux : espeak-ng dit les langues sans voix naturelle (chinois, ou avant
+    // le téléchargement). Repéré par LUMEN_ESPEAK ou le PATH.
+    // `LUMEN_ESPEAK=/chemin/espeak-ng cargo test --lib espeak_live -- --ignored --nocapture`
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    #[ignore]
+    async fn espeak_live() {
+        if espeak_bin().is_none() {
+            println!("espeak-ng introuvable : test sauté (LUMEN_ESPEAK=/chemin/espeak-ng)");
+            return;
+        }
+        let dir = std::env::temp_dir().join(format!("lumen-espeak-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        // un mot chinois, une voix féminine puis masculine : deux fichiers distincts
+        let a = espeak_say(&dir, "zh", "你好", "0").await.unwrap();
+        let b = espeak_say(&dir, "zh", "你好", "5").await.unwrap();
+        assert_ne!(a, b);
+        let wav = std::fs::read(&a).unwrap();
+        assert_eq!(&wav[0..4], b"RIFF");
+        let (rate, samples) = read_pcm(&wav).unwrap();
+        assert!(rate > 0 && samples.len() > 2000, "{} échantillons à {rate} Hz", samples.len());
+        println!("你好 : {:.2} s en chinois", samples.len() as f32 / rate as f32);
+        // sans voix naturelle installée, say_any tombe sur espeak-ng
+        let c = say_any(&dir, None, "it", "buongiorno", "0").await.unwrap();
+        assert!(c.is_file());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

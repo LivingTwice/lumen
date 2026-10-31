@@ -1,7 +1,8 @@
 // Prononciation d'un mot ou d'une expression : la voix naturelle locale
-// (Supertonic, calculée sur le Mac) si elle est installée, sinon la voix du
-// système. La voix naturelle ne tourne qu'à la demande ; chaque prononciation
-// est gardée en cache côté natif, et préparée dès qu'un mot est touché.
+// (Supertonic) si elle est installée, sinon la voix du système — sous Linux,
+// espeak-ng tient ce rôle côté natif (le WebView n'offre aucune voix). La
+// voix naturelle ne tourne qu'à la demande ; chaque prononciation est gardée
+// en cache côté natif, et préparée dès qu'un mot est touché.
 
 import { api, isTauri } from "./api";
 import { isLinux } from "./platform";
@@ -66,7 +67,10 @@ function request(lang: LangCode, text: string, prefetch: boolean): Promise<strin
 
 /** Prépare la prononciation en arrière-plan, pour qu'elle soit immédiate au clic. */
 export function preparePronunciation(text: string, lang: LangCode) {
-  if (!naturalVoiceReady(lang) || text.split(/\s+/).length > PREPARE_MAX_WORDS) return;
+  // Linux : espeak-ng prépare aussi les mots sans voix naturelle (chinois,
+  // ou avant le téléchargement de Supertonic)
+  const ready = naturalVoiceReady(lang) || (isLinux && isTauri);
+  if (!ready || text.split(/\s+/).length > PREPARE_MAX_WORDS) return;
   request(lang, text, true).catch(() => {});
 }
 
@@ -90,7 +94,12 @@ let voice_failure = false;
  */
 export async function pronounce(text: string, lang: LangCode, voiceURI?: string, touched = false) {
   const my = ++turn;
-  if (naturalVoiceReady(lang)) {
+  // la voix naturelle si elle parle la langue ; sans elle, Linux passe quand
+  // même par le natif : espeak-ng y tient le rôle de voix du système (le
+  // WebView n'en offre aucune, WebKitGTK embarque flite, anglais seul). Les
+  // autres systèmes gardent la voix du système de leur WebView.
+  const natural = naturalVoiceReady(lang);
+  if (natural || (isLinux && isTauri)) {
     try {
       let path: string;
       try {
@@ -121,11 +130,12 @@ export async function pronounce(text: string, lang: LangCode, voiceURI?: string,
       return;
     } catch (e) {
       // en cas d'échec, la voix du système prend le relais. Sous Linux, les
-      // piles audio varient (speech-dispatcher, PipeWire…) : la raison s'y
-      // montre une fois par séance, avec la classe de l'erreur — c'est elle
-      // qui dit ce qui a coincé (NotSupportedError, NotAllowedError…)
+      // piles audio varient : la raison s'y montre une fois par séance, avec
+      // la classe de l'erreur — c'est elle qui dit ce qui a coincé
+      // (NotSupportedError, NotAllowedError…). Un échec d'espeak-ng ne le
+      // mérite pas : le mot tombe alors dans le WebView, comme avant.
       if (my !== turn) return;
-      if (isLinux && !voice_failure) {
+      if (natural && isLinux && !voice_failure) {
         voice_failure = true;
         const why = e instanceof Error ? e.name : String(e).slice(0, 40);
         useApp.getState().toast(
