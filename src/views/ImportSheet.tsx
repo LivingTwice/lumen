@@ -459,7 +459,7 @@ export function ImportSheet() {
   const onImportEvent = (stagePrefix: string) => (e: ImportEvent) => {
     if (e.type === "stage") {
       setBusy(`${stagePrefix}${stageText(e.stage)}`);
-      setProgress(["transcribe", "timing", "text", "download", "file", "tools"].includes(e.stage) ? 0 : null);
+      setProgress(["transcribe", "timing", "text", "voices", "download", "file", "tools"].includes(e.stage) ? 0 : null);
     } else setProgress(e.value);
   };
 

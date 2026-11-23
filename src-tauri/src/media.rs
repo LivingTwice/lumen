@@ -212,19 +212,22 @@ impl Writer {
 /// Texte et horodatages d'une leçon à partir d'un son. Whisper repère chaque
 /// mot dans le temps (et décode le son) ; si un `writer` est fourni (Qwen3-ASR
 /// ou Parakeet), il écrit le texte, plus juste, sur lequel le minutage de
-/// Whisper est recalé. Le texte est ensuite aéré comme sur LingQ.
+/// Whisper est recalé. Le texte est ensuite aéré comme sur LingQ ; avec `voices`
+/// (speakers.rs), chaque réplique d'une conversation y a son paragraphe.
 /// `reference` : un texte déjà écrit (article, transcription officielle d'une
 /// page), gardé tel quel si le son le suit ; sinon, transcription comme d'habitude.
+#[allow(clippy::too_many_arguments)]
 pub async fn lesson_transcript(
     engine: &crate::ai::Engine,
     whisper: &Path,
     writer: Option<Writer>,
+    voices: Option<crate::speakers::Model>,
     media: &Path,
     lang: &str,
     reference: Option<&str>,
     mut on_event: impl FnMut(ImportEvent),
 ) -> Result<(String, String)> {
-    let pcm = writer.as_ref().map(|_| std::env::temp_dir().join(format!("lumen-{}.pcm", new_stem())));
+    let pcm = (writer.is_some() || voices.is_some()).then(|| std::env::temp_dir().join(format!("lumen-{}.pcm", new_stem())));
     let heard = transcribe(whisper, media, lang, pcm.as_deref(), |e| {
         // avec Qwen3-ASR ou Parakeet, Whisper ne fait plus que repérer les mots dans le temps
         let e = match e {
@@ -254,56 +257,297 @@ pub async fn lesson_transcript(
         }
         eprintln!("texte de la page écarté : {:.0} % des mots retrouvés", found * 100.0);
     }
-    let (mut text, mut timings) = build_transcript(&words);
+    // le son décodé par Whisper : pour le modèle qui écrit et pour reconnaître les voix
+    let samples = pcm.as_ref().and_then(|p| {
+        let s = read_pcm(p);
+        let _ = std::fs::remove_file(p);
+        s.map_err(|e| eprintln!("son décodé illisible : {e}")).ok()
+    });
+    Ok(lesson_text(engine, writer.as_ref(), voices.as_ref(), samples.as_deref(), &words, lang, Cut::Sentences, on_event).await)
+}
+
+/// Le texte d'une leçon et ses horodatages, d'après les mots entendus par Whisper
+/// et le son décodé (`samples`, s'il y a un modèle qui écrit ou qui reconnaît les
+/// voix) : la suite de `lesson_transcript`, une fois Whisper passé.
+#[allow(clippy::too_many_arguments)]
+async fn lesson_text(
+    engine: &crate::ai::Engine,
+    writer: Option<&Writer>,
+    voices: Option<&crate::speakers::Model>,
+    samples: Option<&[f32]>,
+    words: &[WWord],
+    lang: &str,
+    cut: Cut,
+    mut on_event: impl FnMut(ImportEvent),
+) -> (String, String) {
+    let (mut text, mut timings) = build_transcript(words);
     if lang == "zh" {
         text = full_width(&text);
     }
     if text::unspaced(lang) {
         // les fragments de Whisper ne sont pas des mots : un instant par mot de la leçon
-        let (t, found) = align_timings(&text, lang, &words);
+        let (t, found) = align_timings(&text, lang, words);
         if found > 0.0 {
             timings = t;
         }
     }
-    if let (Some(writer), Some(pcm)) = (writer, pcm) {
-        on_event(ImportEvent::Stage { stage: "text".into() });
-        let stop = std::sync::atomic::AtomicBool::new(false);
-        let written = match read_pcm(&pcm) {
-            Err(e) => Err(e),
-            Ok(samples) => match &writer {
-                Writer::Qwen { model, mmproj } => tokio::task::block_in_place(|| {
-                    crate::asr::transcribe(engine, model, mmproj, &samples, lang, &stop, |p| {
-                        on_event(ImportEvent::Progress { value: p });
-                    })
-                }),
-                Writer::Parakeet { data_dir, model } => {
-                    crate::parakeet::transcribe(data_dir, model, &samples, &stop, |p| {
-                        on_event(ImportEvent::Progress { value: p });
-                    })
-                    .await
+    let mut turns = Vec::new();
+    if let Some(samples) = samples {
+        // les voix s'écoutent pendant que le texte s'écrit (sur iPhone, après : speakers.rs)
+        let listening = voices.and_then(|v| crate::speakers::start(v, samples).map_err(|e| eprintln!("interlocuteurs : {e}")).ok());
+        if let Some(writer) = writer {
+            on_event(ImportEvent::Stage { stage: "text".into() });
+            let written = written_text(engine, writer, samples, words, lang, cut, |p| on_event(ImportEvent::Progress { value: p })).await;
+            match written {
+                Ok(t) if !t.trim().is_empty() => {
+                    // Qwen3-ASR oublie parfois de ponctuer la parole spontanée : Whisper comble
+                    let t = borrow_punctuation(&collapse_loops(&t, lang), lang, words);
+                    let (t_timings, found) = align_timings(&t, lang, words);
+                    // garde-fou : un texte qui ne ressemble pas à ce qu'a entendu Whisper est écarté
+                    if found >= 0.5 {
+                        text = t;
+                        timings = t_timings;
+                    } else {
+                        eprintln!("{} écarté : {:.0} % des mots retrouvés", writer.name(), found * 100.0);
+                    }
                 }
-            },
-        };
-        let _ = std::fs::remove_file(&pcm);
-        match written {
-            Ok(t) if !t.trim().is_empty() => {
-                // Qwen3-ASR oublie parfois de ponctuer la parole spontanée : Whisper comble
-                let t = borrow_punctuation(&collapse_loops(&t, lang), lang, &words);
-                let (t_timings, found) = align_timings(&t, lang, &words);
-                // garde-fou : un texte qui ne ressemble pas à ce qu'a entendu Whisper est écarté
-                if found >= 0.5 {
-                    text = t;
-                    timings = t_timings;
-                } else {
-                    eprintln!("{} écarté : {:.0} % des mots retrouvés", writer.name(), found * 100.0);
-                }
+                Ok(_) => {}
+                // Whisper seul plutôt qu'un échec : la leçon se crée quand même
+                Err(e) => eprintln!("{} indisponible : {e}", writer.name()),
             }
-            Ok(_) => {}
-            // Whisper seul plutôt qu'un échec : la leçon se crée quand même
-            Err(e) => eprintln!("{} indisponible : {e}", writer.name()),
+        }
+        if let Some(listening) = listening {
+            on_event(ImportEvent::Stage { stage: "voices".into() });
+            // sans les voix, la leçon se crée quand même : une phrase par paragraphe, comme avant
+            match listening.finish(samples, |p| on_event(ImportEvent::Progress { value: p })).await {
+                Ok(t) => turns = t,
+                Err(e) => eprintln!("interlocuteurs : {e}"),
+            }
         }
     }
-    Ok(airy(&text, lang, &timings))
+    let openings = crate::speakers::openings(&text, lang, &timings, &turns);
+    airy_turns(&text, lang, &timings, &openings)
+}
+
+/// Où couper le son confié au modèle qui écrit.
+#[derive(Clone, Copy, PartialEq)]
+pub enum Cut {
+    /// aux fins de phrase entendues par Whisper, jamais dans un mot
+    Sentences,
+    /// au silence le plus net (l'ancienne découpe, gardée pour comparer)
+    #[cfg_attr(not(test), allow(dead_code))]
+    Silence,
+}
+
+/// Le texte d'un son par le modèle qui écrit : le son est coupé en morceaux (aux
+/// fins de phrase de Whisper), chacun est écrit à part, puis les jointures sont
+/// reprises (`join_pieces`).
+async fn written_text(
+    engine: &crate::ai::Engine,
+    writer: &Writer,
+    samples: &[f32],
+    words: &[WWord],
+    lang: &str,
+    cut: Cut,
+    mut on_progress: impl FnMut(f64),
+) -> Result<String> {
+    let target = match writer {
+        Writer::Qwen { .. } => crate::asr::CHUNK_SECS,
+        Writer::Parakeet { .. } => crate::parakeet::CHUNK_SECS,
+    };
+    let pieces = match cut {
+        Cut::Sentences => split_at_words(samples, words, target),
+        Cut::Silence => crate::asr::split_on_silence(samples, target).into_iter().map(|(a, b)| Piece { a, b, end: None, next: None }).collect(),
+    };
+    let ranges: Vec<(usize, usize)> = pieces.iter().map(|p| (p.a, p.b)).collect();
+    let stop = std::sync::atomic::AtomicBool::new(false);
+    let texts = match writer {
+        Writer::Qwen { model, mmproj } => tokio::task::block_in_place(|| crate::asr::transcribe(engine, model, mmproj, samples, &ranges, lang, &stop, &mut on_progress))?,
+        Writer::Parakeet { data_dir, model } => crate::parakeet::transcribe(data_dir, model, samples, &ranges, &stop, &mut on_progress).await?,
+    };
+    Ok(join_pieces(&texts, &pieces, lang))
+}
+
+// ---------- découpe du son pour le modèle qui écrit ----------
+
+/// Un morceau de son confié au modèle qui écrit, et ce que Whisper entend à sa fin.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Piece {
+    /// échantillons [a, b)
+    pub a: usize,
+    pub b: usize,
+    /// ponctuation de Whisper après le dernier mot du morceau (vide : la phrase
+    /// continue dans le morceau suivant) ; `None` sans repère (coupure dans un silence)
+    pub end: Option<String>,
+    /// premier mot du morceau suivant, tel que Whisper l'écrit
+    pub next: Option<String>,
+}
+
+/// Fin de phrase dans la ponctuation d'un mot de Whisper.
+fn full_stop(p: &str) -> bool {
+    p.contains(['.', '!', '?', '…', '。', '！', '？', '।', '؟'])
+}
+
+/// Mot entendu par Whisper, avec la ponctuation qui le suit (en japonais et en
+/// chinois, elle arrive en fragments à part).
+struct Spoken {
+    word: String,
+    t0: f64,
+    t1: f64,
+    punct: String,
+}
+
+fn spoken(words: &[WWord]) -> Vec<Spoken> {
+    let mut out: Vec<Spoken> = Vec::new();
+    for w in words {
+        let t = w.w.trim();
+        if t.chars().any(char::is_alphanumeric) {
+            out.push(Spoken { word: t.trim_end_matches(PUNCT).to_string(), t0: w.t0, t1: w.t1.max(w.t0), punct: trailing_punct(t).to_string() });
+        } else if let Some(last) = out.last_mut() {
+            last.punct.push_str(t);
+        }
+    }
+    out
+}
+
+/// Découpe le son en morceaux d'environ `target` secondes (de la moitié à 5 s de
+/// plus), chaque coupure tombant entre deux mots entendus par Whisper : de
+/// préférence à une fin de phrase, sinon à la plus longue pause. Le modèle qui écrit
+/// rend chaque morceau comme un texte fermé (un point, puis une majuscule) : coupé
+/// au silence le plus net, une coupure sur six tombait au milieu d'une phrase, une
+/// sur dix dans un mot. Sans mot à cet endroit (musique, silence), le silence le
+/// plus net, comme avant. Les morceaux se suivent sans trou ni chevauchement.
+pub fn split_at_words(pcm: &[f32], words: &[WWord], target: f64) -> Vec<Piece> {
+    use crate::asr::{quietest, RATE};
+    let rate = RATE as f64;
+    let total = pcm.len();
+    let at = |t: f64| ((t.max(0.0) * rate) as usize).min(total);
+    let s = spoken(words);
+    let (min_len, max_len) = (target * 0.5, target + 5.0);
+    let mut out = Vec::new();
+    let mut start = 0usize;
+    // premier mot qui peut encore finir un morceau
+    let mut k = 0usize;
+    while (total - start) as f64 / rate > max_len {
+        let (lo, hi) = (start as f64 / rate + min_len, start as f64 / rate + max_len);
+        let mut best: Option<(f64, usize)> = None;
+        for i in k..s.len().saturating_sub(1) {
+            // l'intervalle entre le mot i et le suivant
+            let (g0, g1) = (s[i].t1, s[i + 1].t0.max(s[i].t1));
+            if g1 < lo {
+                continue;
+            }
+            if g0 > hi {
+                break;
+            }
+            let p = &s[i].punct;
+            let mark = if full_stop(p) { 3.0 } else if !p.is_empty() { 0.5 } else { 0.0 };
+            // à égalité, le morceau le plus long : plus de contexte pour le modèle
+            let late = 0.25 * (((g0 + g1) / 2.0).clamp(lo, hi) - lo) / (hi - lo);
+            let score = mark + (g1 - g0).min(1.5) + late;
+            if best.is_none_or(|(b, _)| score > b) {
+                best = Some((score, i));
+            }
+        }
+        let (boundary, end, next) = match best {
+            Some((_, i)) => {
+                let (g0, g1) = (s[i].t1.max(lo), s[i + 1].t0.max(s[i].t1).min(hi));
+                let cut = if g1 - g0 >= 0.1 {
+                    // une vraie pause : son moment le plus calme
+                    quietest(pcm, at(g0), at(g1), RATE / 10)
+                } else {
+                    // parole continue : le creux le plus proche de la frontière des deux mots
+                    let c = ((g0 + g1) / 2.0).clamp(lo, hi);
+                    quietest(pcm, at(c - 0.12), at(c + 0.12), RATE / 25)
+                };
+                k = i + 1;
+                (cut, Some(s[i].punct.clone()), Some(s[i + 1].word.clone()))
+            }
+            None => {
+                let c = start as f64 / rate + target;
+                (quietest(pcm, at(c - 5.0).max(start), at(c + 5.0), RATE / 10), None, None)
+            }
+        };
+        let boundary = boundary.clamp(start + 1, total);
+        out.push(Piece { a: start, b: boundary, end, next });
+        start = boundary;
+    }
+    if start < total {
+        out.push(Piece { a: start, b: total, end: None, next: None });
+    }
+    out
+}
+
+/// Premier mot d'un texte : sa place (octets) et lui-même, sans ce qui le précède
+/// (guillemet, tiret, « ¿ ») ni la ponctuation qui le suit.
+fn first_word(text: &str) -> Option<(usize, &str)> {
+    let a = text.find(char::is_alphanumeric)?;
+    let len = text[a..].find(|c: char| c.is_whitespace()).unwrap_or(text.len() - a);
+    Some((a, text[a..a + len].trim_end_matches(PUNCT)))
+}
+
+/// Met bout à bout les textes des morceaux. Le modèle écrit chaque morceau comme un
+/// texte fermé : un point à la fin, une majuscule au début, même quand la phrase
+/// continue. Aux jointures, c'est Whisper, qui a entendu la phrase d'un seul tenant,
+/// qui dit si elle se termine : fin de phrase entendue, le point et la majuscule y
+/// sont ; phrase qui continue (Whisper écrit le mot suivant, le même, en minuscule),
+/// le point ajouté s'en va (ou devient la virgule de Whisper) et la majuscule aussi.
+/// Dans le doute (mots différents, majuscule chez Whisper), rien ne change.
+pub fn join_pieces(texts: &[String], pieces: &[Piece], lang: &str) -> String {
+    let unspaced = text::unspaced(lang);
+    let mut out = String::new();
+    // ce que Whisper entend à la fin du dernier morceau écrit
+    let mut seam: Option<(&str, &str)> = None;
+    for (t, piece) in texts.iter().zip(pieces) {
+        let t = t.trim();
+        let here = piece.end.as_deref().zip(piece.next.as_deref());
+        if t.is_empty() {
+            // rien d'écrit pour ce morceau : la jointure n'a plus de repère
+            seam = None;
+            continue;
+        }
+        let mut t = t.to_string();
+        if let (false, Some((punct, next))) = (out.is_empty(), seam) {
+            let ended = full_stop(trailing_punct(&out));
+            let first = first_word(&t).map(|(a, w)| (a, w.to_string()));
+            if full_stop(punct) {
+                if !ended {
+                    let kept = out.trim_end_matches(PUNCT).len();
+                    out.truncate(kept);
+                    out.push_str(punct);
+                }
+                if let Some((a, w)) = &first {
+                    t.replace_range(*a..*a + w.len(), &capitalized(w, lang));
+                }
+            } else if let Some((a, w)) = &first {
+                let same = if unspaced {
+                    w.chars().next() == next.chars().next()
+                } else {
+                    text::normalize_for(w, lang) == text::normalize_for(next, lang)
+                };
+                let c = w.chars().next().unwrap_or(' ');
+                // Whisper écrit la suite en minuscule : la phrase continue (sans casse : même mot suffit)
+                let goes_on = same && next.chars().next().is_some_and(|n| n.is_lowercase() || !n.is_uppercase());
+                let dot = out.ends_with(['.', '。']) && !out.ends_with("..");
+                if goes_on && (dot || !ended) {
+                    if dot {
+                        out.pop();
+                        out.push_str(punct);
+                    }
+                    let low: Vec<char> = c.to_lowercase().collect();
+                    if c.is_uppercase() && low.len() == 1 && !(lang == "tr" && c == 'I') {
+                        t.replace_range(*a..*a + c.len_utf8(), &low[0].to_string());
+                    }
+                }
+            }
+        }
+        if !out.is_empty() && !unspaced {
+            out.push(' ');
+        }
+        out.push_str(&t);
+        seam = here;
+    }
+    out
 }
 
 /// Chinois : Whisper ponctue à l'occidentale (« , » « ? ») ; après un idéogramme, la
@@ -347,6 +591,15 @@ const PARA_MIN_PART: usize = 6;
 /// leur plus longue pause (à défaut après une virgule). Les horodatages
 /// [[début, fin, t0, t1], …] suivent le texte (positions UTF-16).
 pub fn airy(text: &str, lang: &str, timings: &str) -> (String, String) {
+    airy_turns(text, lang, timings, &[])
+}
+
+/// La mise en page aérée d'une conversation. `openings` : les mots (position UTF-16)
+/// qui ouvrent une réplique, quand une autre voix prend la parole
+/// (`speakers::openings`). Un paragraphe commence toujours là, même au milieu d'une
+/// phrase (parole coupée), et une réponse courte (« Sì. ») ne rejoint jamais la
+/// phrase d'un autre.
+pub fn airy_turns(text: &str, lang: &str, timings: &str, openings: &[usize]) -> (String, String) {
     let times: Vec<[f64; 4]> = serde_json::from_str(timings).unwrap_or_default();
     let words: Vec<text::Token> = text::tokenize(text, lang).into_iter().filter(|t| t.w).collect();
     let n = words.len();
@@ -359,23 +612,32 @@ pub fn airy(text: &str, lang: &str, timings: &str) -> (String, String) {
     let wt: Vec<Option<(f64, f64)>> = words.iter().map(|w| when.get(&w.s).copied()).collect();
     // ce qui sépare le mot k du suivant : espaces et ponctuation
     let gap = |k: usize| &text[byte(words[k].e)..byte(words[k + 1].s)];
-    let ends_sentence = |g: &str| g.contains(['.', '!', '?', '…', '。', '！', '？']);
+    // fin de phrase après le mot k : où elle s'arrête dans ce qui le sépare du suivant
+    let stop = |k: usize| sentence_stop(gap(k), &text[byte(words[k + 1].s)..byte(words[k + 1].e)]);
 
-    // 1. phrases (un saut de paragraphe existant compte aussi)
+    // le mot k ouvre une réplique : une autre voix prend la parole
+    let opens: std::collections::HashSet<usize> = (1..n).filter(|&k| openings.contains(&words[k].s)).collect();
+
+    // 1. phrases (un saut de paragraphe existant compte aussi, et un changement de voix)
     let mut sentences: Vec<(usize, usize)> = Vec::new();
     let mut a = 0;
     for k in 0..n - 1 {
         let g = gap(k);
-        if ends_sentence(g) || g.contains('\n') {
+        if stop(k).is_some() || g.contains('\n') || opens.contains(&(k + 1)) {
             sentences.push((a, k));
             a = k + 1;
         }
     }
     sentences.push((a, n - 1));
-    // 2. les phrases trop courtes rejoignent la suivante (la dernière, la précédente)
+    // 2. les phrases trop courtes rejoignent la suivante (la dernière, la précédente),
+    // jamais celle d'une autre voix
     let mut merged: Vec<(usize, usize)> = Vec::new();
     let mut carry: Option<usize> = None;
     for (a, b) in sentences {
+        if let Some(c) = carry.filter(|_| opens.contains(&a)) {
+            merged.push((c, a - 1));
+            carry = None;
+        }
         let a = carry.take().unwrap_or(a);
         if b + 1 - a < PARA_MIN_WORDS {
             carry = Some(a);
@@ -384,7 +646,7 @@ pub fn airy(text: &str, lang: &str, timings: &str) -> (String, String) {
         }
     }
     if let Some(a) = carry {
-        match merged.last_mut() {
+        match merged.last_mut().filter(|_| !opens.contains(&a)) {
             Some(last) => last.1 = n - 1,
             None => merged.push((a, n - 1)),
         }
@@ -428,8 +690,10 @@ pub fn airy(text: &str, lang: &str, timings: &str) -> (String, String) {
         }
         let g = gap(k);
         if breaks.contains(&k) {
-            // ponctuation collée au mot, saut de paragraphe, puis ce qui ouvre la phrase suivante
-            match g.find(char::is_whitespace) {
+            // ce qui termine la phrase reste avec elle (ponctuation, et un nombre : « Formula 1. »),
+            // saut de paragraphe, puis ce qui ouvre la phrase suivante
+            let rest = stop(k).map_or(0, |i| i);
+            match g[rest..].find(char::is_whitespace).map(|i| i + rest) {
                 Some(i) => {
                     out.push(&g[..i]);
                     out.push("\n\n");
@@ -461,6 +725,37 @@ pub fn airy(text: &str, lang: &str, timings: &str) -> (String, String) {
     (out.text, serde_json::to_string(&moved).unwrap_or_else(|_| "[]".into()))
 }
 
+/// Fin de phrase dans ce qui sépare deux mots : la position (en octets) juste après
+/// elle, guillemet fermant compris. Le point d'un nombre (« 7.000 », « 3.5 ») n'en
+/// est pas une ; des points de suspension devant une minuscule non plus (hésitation :
+/// « Io… penso »). `next` : le mot qui suit.
+pub(crate) fn sentence_stop(g: &str, next: &str) -> Option<usize> {
+    let cs: Vec<(usize, char)> = g.char_indices().collect();
+    let goes_on = next.chars().next().is_some_and(char::is_lowercase);
+    let mut stop = None;
+    for (n, &(i, c)) in cs.iter().enumerate() {
+        if !matches!(c, '.' | '!' | '?' | '…' | '。' | '！' | '？') {
+            continue;
+        }
+        let prev = n.checked_sub(1).map(|p| cs[p].1);
+        let after = cs.get(n + 1).map(|x| x.1);
+        let digit = |x: Option<char>| x.is_some_and(|d| d.is_ascii_digit());
+        if c == '.' && digit(prev) && digit(after) {
+            continue;
+        }
+        let dots = c == '…' || (c == '.' && (prev == Some('.') || after == Some('.')));
+        if dots && goes_on {
+            continue;
+        }
+        stop = Some(i + c.len_utf8());
+    }
+    let mut stop = stop?;
+    while let Some(c) = g[stop..].chars().next().filter(|c| "»”’)]」』".contains(*c)) {
+        stop += c.len_utf8();
+    }
+    Some(stop)
+}
+
 /// Texte en construction, avec sa longueur en unités UTF-16 (celles de l'interface).
 #[derive(Default)]
 struct Utf16Text {
@@ -476,7 +771,7 @@ impl Utf16Text {
 }
 
 /// Position en octets de chaque unité UTF-16 du texte (et de sa fin).
-fn byte_positions(text: &str) -> Vec<usize> {
+pub(crate) fn byte_positions(text: &str) -> Vec<usize> {
     let mut byte_at: Vec<usize> = Vec::with_capacity(text.len() + 1);
     for (i, c) in text.char_indices() {
         byte_at.extend(std::iter::repeat_n(i, c.len_utf16()));
@@ -1457,13 +1752,13 @@ mod tests {
         let engine = crate::ai::Engine::new();
         // un texte sans rapport avec le son : Lumen transcrit
         let other = "Ogni mattina, Marta saliva le scale strette del vecchio faro. Dall'alto, il mare sembrava infinito e calmo.";
-        let (heard, _) = lesson_transcript(&engine, Path::new(&whisper), None, Path::new(&audio), &lang, Some(other), |_| {}).await.unwrap();
+        let (heard, _) = lesson_transcript(&engine, Path::new(&whisper), None, None, Path::new(&audio), &lang, Some(other), |_| {}).await.unwrap();
         assert_ne!(heard, other);
         // le texte de la page : un titre en plus, un mot sur dix différent, autres paragraphes
         let words: Vec<&str> = heard.split_whitespace().collect();
         let body: Vec<String> = words.iter().enumerate().map(|(i, w)| if i % 10 == 5 { "autrement".to_string() } else { w.to_string() }).collect();
         let page = format!("Le journal du jour\n\n{}\n\n{}", body[..body.len() / 2].join(" "), body[body.len() / 2..].join(" "));
-        let (text, timings) = lesson_transcript(&engine, Path::new(&whisper), None, Path::new(&audio), &lang, Some(&page), |_| {}).await.unwrap();
+        let (text, timings) = lesson_transcript(&engine, Path::new(&whisper), None, None, Path::new(&audio), &lang, Some(&page), |_| {}).await.unwrap();
         let tm: Vec<[f64; 4]> = serde_json::from_str(&timings).unwrap();
         println!("transcription : {} mots ; texte de la page gardé : {} ; {} mots minutés, du {:.1} s au {:.1} s", words.len(), text == page, tm.len(), tm[0][2], tm.last().unwrap()[2]);
         assert_eq!(text, page);
@@ -1499,7 +1794,13 @@ mod tests {
         let engine = crate::ai::Engine::new();
         let t = std::time::Instant::now();
         let mut stages = Vec::new();
-        let (text, timings) = lesson_transcript(&engine, Path::new(&whisper), fine, Path::new(&audio), &lang, None, |e| {
+        // les interlocuteurs : LUMEN_VOICES_DIR=dossier des deux modèles, LUMEN_DATA=dossier de données qui a le moteur
+        let voices = std::env::var("LUMEN_VOICES_DIR").ok().map(|d| crate::speakers::Model {
+            data_dir: std::env::var("LUMEN_DATA").map(PathBuf::from).unwrap_or_else(|_| std::env::temp_dir().join("lumen-parakeet-live")),
+            voices: Path::new(&d).join("nemo_en_titanet_small.onnx"),
+            turns: Path::new(&d).join("pyannote-segmentation-3-0.onnx"),
+        });
+        let (text, timings) = lesson_transcript(&engine, Path::new(&whisper), fine, voices, Path::new(&audio), &lang, None, |e| {
             if let ImportEvent::Stage { stage } = e {
                 stages.push(stage);
             }
@@ -1513,6 +1814,195 @@ mod tests {
             std::fs::write(out, &text).unwrap();
         }
         assert!(paras > 3 && !tm.is_empty());
+    }
+
+    #[test]
+    fn numbers_stay_with_their_sentence() {
+        // « 1. » finit la phrase et reste avec elle ; le point de « 7.000 » n'est pas une fin
+        let text = "Lui vinceva nel campionato di Formula 1. Fantastico, davvero. Raccoglie circa 7.000 euro in un anno. Sono il 99%. Alcuni la definiscono così.";
+        let tm = timed(text, "it", &[]);
+        let (out, ot) = airy(text, "it", &tm);
+        assert_eq!(out, "Lui vinceva nel campionato di Formula 1.\n\nFantastico, davvero. Raccoglie circa 7.000 euro in un anno.\n\nSono il 99%. Alcuni la definiscono così.");
+        same_words(text, &tm, &out, &ot);
+        // hésitation : des points de suspension devant une minuscule ne coupent pas
+        let text = "Io… penso che sia giusto così. Poi… Vediamo che cosa succede.";
+        let (out, _) = airy(text, "it", &timed(text, "it", &[]));
+        assert_eq!(out, "Io… penso che sia giusto così.\n\nPoi… Vediamo che cosa succede.");
+        assert_eq!(sentence_stop(". ", "Poi"), Some(1));
+        assert_eq!(sentence_stop(" 3.5 ", "volte"), None);
+        assert_eq!(sentence_stop("!» ", "E"), Some(3));
+        assert_eq!(sentence_stop("... ", "e"), None);
+    }
+
+    #[test]
+    fn each_reply_has_its_paragraph() {
+        let text = "Andiamo al mare domani? Sì. Va bene. Allora preparo la macchina stasera. Non ha nulla a che fare con confermi che non ha nulla a che fare con l'Italia. Ecco.";
+        let tm = timed(text, "it", &[]);
+        let at = |w: &str| text[..text.find(w).unwrap()].encode_utf16().count();
+        // sans les voix : la réponse courte rejoint la phrase qui suit, celle d'un autre
+        let (plain, _) = airy(text, "it", &tm);
+        assert!(plain.contains("domani?\n\nSì. Va bene.\n\nAllora") && plain.contains("fare con confermi che"));
+        // « Sì. » est d'une autre voix, « Va bene. Allora… » revient à la première ; la parole
+        // coupée après « con » ouvre un paragraphe au milieu de la phrase
+        let (out, ot) = airy_turns(text, "it", &tm, &[at("Sì"), at("Va bene"), at("confermi"), at("Ecco")]);
+        assert_eq!(
+            out,
+            "Andiamo al mare domani?\n\nSì.\n\nVa bene. Allora preparo la macchina stasera.\n\nNon ha nulla a che fare con\n\nconfermi che non ha nulla a che fare con l'Italia.\n\nEcco."
+        );
+        same_words(text, &tm, &out, &ot);
+        // déjà mis en page : rien ne bouge
+        let again = |w: &str| out[..out.find(w).unwrap()].encode_utf16().count();
+        let (twice, _) = airy_turns(&out, "it", &ot, &[again("Sì"), again("Va bene"), again("confermi"), again("Ecco")]);
+        assert_eq!(twice, out);
+    }
+
+    /// Son d'essai : de la « voix » partout, sauf dans les silences donnés (début, durée).
+    fn voice(secs: f64, silences: &[(f64, f64)]) -> Vec<f32> {
+        let rate = crate::asr::RATE as f64;
+        let mut pcm: Vec<f32> = (0..(secs * rate) as usize).map(|i| ((i as f32) * 0.05).sin() * 0.5).collect();
+        for &(a, d) in silences {
+            pcm[(a * rate) as usize..((a + d) * rate) as usize].iter_mut().for_each(|x| *x = 0.0);
+        }
+        pcm
+    }
+
+    #[test]
+    fn pieces_end_where_sentences_end() {
+        let rate = crate::asr::RATE as f64;
+        // un mot toutes les 0,5 s ; fins de phrase à 9 s (courte pause) et à 27 s, un grand
+        // silence à 14 s au milieu d'une phrase : l'ancienne découpe y coupait
+        let mut words = Vec::new();
+        for i in 0..80 {
+            let t0 = i as f64 * 0.5;
+            let (w, t1) = match i {
+                17 => (" fine.".to_string(), t0 + 0.3),
+                27 => (" con".to_string(), t0 + 0.1),
+                53 => (" basta?".to_string(), t0 + 0.3),
+                _ => (format!(" parola{i}"), t0 + 0.5),
+            };
+            words.push(ww(&w, t0, t1));
+        }
+        let pcm = voice(40.0, &[(8.8, 0.2), (13.6, 0.4), (26.8, 0.2)]);
+        let old = crate::asr::split_on_silence(&pcm, 15.0);
+        assert!((13.6..14.0).contains(&(old[0].1 as f64 / rate)));
+        let parts = split_at_words(&pcm, &words, 15.0);
+        assert_eq!(parts.len(), 3);
+        assert!(parts.windows(2).all(|w| w[0].b == w[1].a) && parts[0].a == 0 && parts[2].b == pcm.len());
+        // après « fine. » puis après « basta? », dans leurs pauses
+        assert!((8.8..9.0).contains(&(parts[0].b as f64 / rate)), "{}", parts[0].b as f64 / rate);
+        assert!((26.8..27.0).contains(&(parts[1].b as f64 / rate)));
+        assert_eq!((parts[0].end.as_deref(), parts[0].next.as_deref()), (Some("."), Some("parola18")));
+        assert_eq!(parts[1].end.as_deref(), Some("?"));
+        assert_eq!(parts[2].end, None);
+        // aucune fin de phrase à portée : la plus longue pause, et Whisper dit que la phrase continue
+        let plain: Vec<WWord> = (0..80).map(|i| ww(&format!(" parola{i}"), i as f64 * 0.5, i as f64 * 0.5 + if i == 27 { 0.1 } else { 0.5 })).collect();
+        let parts = split_at_words(&pcm, &plain, 15.0);
+        assert!((13.6..14.0).contains(&(parts[0].b as f64 / rate)));
+        assert_eq!((parts[0].end.as_deref(), parts[0].next.as_deref()), (Some(""), Some("parola28")));
+        // rien d'entendu (musique) : le silence le plus net, sans repère
+        let parts = split_at_words(&pcm, &[], 15.0);
+        assert_eq!(parts.iter().map(|p| (p.a, p.b)).collect::<Vec<_>>(), old);
+        assert!(parts.iter().all(|p| p.end.is_none()));
+        // un son court : un seul morceau
+        assert_eq!(split_at_words(&pcm[..16_000 * 12], &words, 15.0).len(), 1);
+    }
+
+    #[test]
+    fn seams_follow_what_whisper_heard() {
+        let piece = |end: Option<&str>, next: Option<&str>| Piece { a: 0, b: 1, end: end.map(String::from), next: next.map(String::from) };
+        let join = |a: &str, b: &str, end: Option<&str>, next: Option<&str>, lang: &str| join_pieces(&[a.to_string(), b.to_string()], &[piece(end, next), piece(None, None)], lang);
+        // la phrase continue : le point et la majuscule ajoutés par le modèle s'en vont
+        assert_eq!(join("Inizio a cercare di.", "Portarmi alcuni pezzi.", Some(""), Some("portarmi"), "it"), "Inizio a cercare di portarmi alcuni pezzi.");
+        assert_eq!(join("Va bene.", "Ma non oggi.", Some(","), Some("ma"), "it"), "Va bene, ma non oggi.");
+        // nom propre chez Whisper, mot différent, « ? » du modèle : dans le doute, rien ne change
+        assert_eq!(join("Un altro Kimi.", "Raikkonen ha vinto.", Some(""), Some("Raikkonen"), "it"), "Un altro Kimi. Raikkonen ha vinto.");
+        assert_eq!(join("Non so che.", "Capo della Morra.", Some(""), Some("gioco"), "it"), "Non so che. Capo della Morra.");
+        assert_eq!(join("Chi è?", "Questo Cesare.", Some(""), Some("questo"), "it"), "Chi è? Questo Cesare.");
+        // fin de phrase entendue : le point et la majuscule y sont
+        assert_eq!(join("Ci vediamo di là", "allora ciao.", Some("."), Some("Allora"), "it"), "Ci vediamo di là. Allora ciao.");
+        assert_eq!(join("Come stai,", "bene.", Some("?"), Some("Bene"), "it"), "Come stai? Bene.");
+        assert_eq!(join("Tutto bene!", "Sì.", Some("."), Some("Sì"), "it"), "Tutto bene! Sì.");
+        // sans repère (silence, musique) : simplement bout à bout
+        assert_eq!(join("Uno.", "Due.", None, None, "it"), "Uno. Due.");
+        // un morceau vide ne laisse pas de repère
+        let texts = ["Uno di.".to_string(), String::new(), "Due.".to_string()];
+        assert_eq!(join_pieces(&texts, &[piece(Some(""), Some("due")), piece(Some(""), Some("due")), piece(None, None)], "it"), "Uno di. Due.");
+        // turc : « I » ne devient pas « i » ; japonais : sans espace
+        assert_eq!(join("Bu bir.", "Irmak var.", Some(""), Some("irmak"), "tr"), "Bu bir Irmak var.");
+        assert_eq!(join("今日は。", "暑いですね。", Some(""), Some("暑"), "ja"), "今日は暑いですね。");
+    }
+
+    /// Le texte d'un vrai son par le modèle qui écrit, d'après des mots de Whisper déjà
+    /// calculés (sortie `done` de lumen-whisper) : compare l'ancienne découpe (silences)
+    /// et la nouvelle (fins de phrase). LUMEN_TEST_AUDIO=son.wav (f32, 16 kHz, mono)
+    /// LUMEN_TEST_WORDS=mots.json LUMEN_PARAKEET_DIR=… (ou LUMEN_ASR_DIR=…) LUMEN_TEST_LANG=it
+    /// [LUMEN_DATA=dossier de données qui a déjà le moteur] [LUMEN_CUT=silence] [LUMEN_AIRY_OUT=texte.txt]
+    /// cargo test --release --lib writer_live -- --ignored --nocapture
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore]
+    async fn writer_live() {
+        let (Ok(audio), Ok(w)) = (std::env::var("LUMEN_TEST_AUDIO"), std::env::var("LUMEN_TEST_WORDS")) else { return };
+        let lang = std::env::var("LUMEN_TEST_LANG").unwrap_or_else(|_| "it".into());
+        let writer = if let Ok(model) = std::env::var("LUMEN_PARAKEET_DIR") {
+            let data = std::env::var("LUMEN_DATA").map(PathBuf::from).unwrap_or_else(|_| std::env::temp_dir().join("lumen-parakeet-live"));
+            std::fs::create_dir_all(&data).unwrap();
+            crate::sherpa::ensure(&data, crate::sherpa::Tool::Asr, Default::default(), |_, _| {}).await.unwrap();
+            Writer::Parakeet { data_dir: data, model: PathBuf::from(model) }
+        } else {
+            let files: Vec<PathBuf> = std::fs::read_dir(std::env::var("LUMEN_ASR_DIR").unwrap()).unwrap().filter_map(|e| e.ok()).map(|e| e.path()).collect();
+            let pick = |mm: bool| files.iter().find(|p| {
+                let n = p.file_name().unwrap().to_string_lossy();
+                n.ends_with(".gguf") && n.starts_with("mmproj") == mm
+            }).unwrap().clone();
+            Writer::Qwen { model: pick(false), mmproj: pick(true) }
+        };
+        let words = collapse_word_loops(read_words(&w), &lang);
+        let samples = read_wav(&audio);
+        let cut = if std::env::var("LUMEN_CUT").is_ok_and(|c| c == "silence") { Cut::Silence } else { Cut::Sentences };
+        // les interlocuteurs : LUMEN_VOICES_DIR=dossier des deux modèles (le moteur de LUMEN_DATA doit avoir l'outil)
+        let voices = std::env::var("LUMEN_VOICES_DIR").ok().map(|d| crate::speakers::Model {
+            data_dir: std::env::var("LUMEN_DATA").map(PathBuf::from).unwrap_or_else(|_| std::env::temp_dir().join("lumen-parakeet-live")),
+            voices: Path::new(&d).join("nemo_en_titanet_small.onnx"),
+            turns: Path::new(&d).join("pyannote-segmentation-3-0.onnx"),
+        });
+        let engine = crate::ai::Engine::new();
+        let t = std::time::Instant::now();
+        let mut stages = Vec::new();
+        let (out, tm) = lesson_text(&engine, Some(&writer), voices.as_ref(), Some(&samples), &words, &lang, cut, |e| {
+            if let ImportEvent::Stage { stage } = e {
+                stages.push(stage);
+            }
+        })
+        .await;
+        let timed: Vec<[f64; 4]> = serde_json::from_str(&tm).unwrap();
+        println!("{:.0} s · étapes {stages:?} · {} mots, {} minutés · {} paragraphes", t.elapsed().as_secs_f64(), text::word_count(&out, &lang), timed.len(), out.split("\n\n").count());
+        if let Ok(path) = std::env::var("LUMEN_AIRY_OUT") {
+            std::fs::write(path, &out).unwrap();
+        }
+    }
+
+    /// Mots de Whisper : un tableau JSON, ou les lignes de `lumen-whisper` (celle de `done`).
+    fn read_words(path: &str) -> Vec<WWord> {
+        let raw = std::fs::read_to_string(path).unwrap();
+        if let Ok(w) = serde_json::from_str::<Vec<WWord>>(&raw) {
+            return w;
+        }
+        let done = raw.lines().filter_map(|l| serde_json::from_str::<serde_json::Value>(l).ok()).find(|v| v["type"] == "done").unwrap();
+        serde_json::from_value(done["words"].clone()).unwrap()
+    }
+
+    /// WAV en f32, mono, 16 kHz (afconvert -f WAVE -d LEF32@16000 -c 1).
+    fn read_wav(path: &str) -> Vec<f32> {
+        let b = std::fs::read(path).unwrap();
+        let mut i = 12;
+        while i + 8 <= b.len() {
+            let len = u32::from_le_bytes(b[i + 4..i + 8].try_into().unwrap()) as usize;
+            if &b[i..i + 4] == b"data" {
+                return b[i + 8..(i + 8 + len).min(b.len())].chunks_exact(4).map(|c| f32::from_le_bytes(c.try_into().unwrap())).collect();
+            }
+            i += 8 + len + (len & 1);
+        }
+        panic!("pas de données dans {path}");
     }
 
     #[test]

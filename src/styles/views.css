@@ -178,7 +178,7 @@
   transform: scale(0.92);
 }
 .cover-edit.busy {
-  animation: pulse 1.4s ease-in-out infinite;
+  animation: pulse-soft 1.4s ease-in-out infinite;
 }
 .hero {
   display: grid;

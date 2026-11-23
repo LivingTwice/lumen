@@ -66,6 +66,7 @@ export function stageText(stage: string): string {
     transcribe: "Transcription",
     timing: t("Repérage des mots", "Locating the words"),
     text: t("Écriture du texte", "Writing the text"),
+    voices: t("Reconnaissance des interlocuteurs", "Recognizing the speakers"),
     lesson: t("Création de la leçon", "Creating the lesson"),
     script: t("Gemini écrit le podcast", "Gemini is writing the podcast"),
     studio: t("Enregistrement des voix", "Recording the voices"),
@@ -74,7 +75,7 @@ export function stageText(stage: string): string {
 }
 
 /** Étapes dont l'avancement se mesure dès leur début (les autres restent indéterminées). */
-export const MEASURED = ["transcribe", "timing", "text", "download", "file", "tools", "studio"];
+export const MEASURED = ["transcribe", "timing", "text", "voices", "download", "file", "tools", "studio"];
 
 /** Un modèle de transcription est-il sur ce Mac ? */
 function transcriber(): boolean {

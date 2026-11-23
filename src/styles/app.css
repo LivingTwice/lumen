@@ -672,13 +672,29 @@ p {
   background: var(--light-strong);
   box-shadow: 0 0 0 3px var(--light-veil);
 }
+/* Voyants qui battent (en cours, nouveauté, mise à jour) : seulement transform et
+   opacity, que la carte graphique anime seule. Un anneau en box-shadow obligeait
+   WebKit à repeindre à chaque image : un point de 6 px coûtait 17 % d'un cœur
+   en continu, et la barre latérale le garde sous les yeux pendant toute une leçon. */
 @keyframes pulse {
   0%,
   100% {
-    box-shadow: 0 0 0 0 var(--light-soft);
+    transform: scale(1);
+    opacity: 1;
   }
   50% {
-    box-shadow: 0 0 0 5px transparent;
+    transform: scale(0.7);
+    opacity: 0.5;
+  }
+}
+/* même battement, sans changer de taille (un bouton) */
+@keyframes pulse-soft {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.6;
   }
 }
 

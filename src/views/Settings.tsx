@@ -146,7 +146,7 @@ const groups = (): { title: string | null; tabs: Tab[] }[] => [
           "Sur ce Mac, les modèles sont téléchargés une seule fois puis fonctionnent hors ligne. Si vous le souhaitez, une IA en ligne peut prendre le relais pour la traduction et le chat, avec votre clé.",
           "On this Mac, the models are downloaded once, then work offline. If you wish, an online AI can take over translation and the chat, with your key.",
         ),
-        keys: "ia locale modele modeles qwen whisper asr transcription traduction chat profil leger equilibre maximum telecharger en ligne api cle fournisseur deepseek gemini nvidia nemotron gratuit mistral openai chatgpt claude anthropic openrouter ollama lm studio serveur abonnement carte graphique gpu vulkan processeur nvidia geforce amd radeon intel local ai model models translation profile light balanced download online key provider free server subscription graphics card processor",
+        keys: "ia locale modele modeles qwen whisper asr transcription interlocuteurs voix qui parle repliques conversation dialogue pyannote titanet speakers who speaks replies traduction chat profil leger equilibre maximum telecharger en ligne api cle fournisseur deepseek gemini nvidia nemotron gratuit mistral openai chatgpt claude anthropic openrouter ollama lm studio serveur abonnement carte graphique gpu vulkan processeur nvidia geforce amd radeon intel local ai model models translation profile light balanced download online key provider free server subscription graphics card processor",
       },
       {
         id: "videos",
@@ -1195,6 +1195,15 @@ function AiPane() {
       >
         <div className="set-card">{lines("asrtext")}</div>
       </Section>
+      <Section
+        title={t("Interlocuteurs", "Speakers")}
+        note={t(
+          "Facultatif, conseillé pour les conversations et les podcasts à plusieurs voix : Lumen reconnaît qui parle, et chaque réplique a son paragraphe. Une réponse courte ne se colle plus à la phrase d'un autre, et une parole coupée va à la ligne là où l'autre la prend. Dans toutes les langues ; un récit lu d'une seule voix ne change pas. Sert aux prochaines transcriptions.",
+          "Optional, recommended for conversations and podcasts with several voices: Lumen recognizes who is speaking, and each reply gets its own paragraph. A short answer no longer sticks to someone else's sentence, and an interrupted sentence breaks where the other speaker takes over. In every language; a story read by a single voice doesn't change. Used for your next transcripts.",
+        )}
+      >
+        <div className="set-card">{lines("speakers")}</div>
+      </Section>
     </>
   );
 }
@@ -1496,8 +1505,8 @@ function AboutPane() {
         </div>
         <p className="set-credits">
           {t(
-            "Dictionnaires : Wiktionnaire via kaikki.org ; JMdict et KANJIDIC2, selon la licence de l'Electronic Dictionary Research and Development Group ; corpus Universal Dependencies (tous CC BY-SA 4.0). Traduction : Qwen3.5 (Apache 2.0) par llama.cpp (MIT). Transcription : Qwen3-ASR (Apache 2.0) par llama.cpp, Parakeet TDT 0.6B v3 de NVIDIA (CC BY 4.0, poids compressés par Lumen) par sherpa-onnx, et Whisper (MIT) par whisper.cpp. Voix : Supertonic 3 par sherpa-onnx (Apache 2.0). Polices : Literata, Newsreader, Geist (OFL).",
-            "Dictionaries: Wiktionary via kaikki.org; JMdict and KANJIDIC2, used under the Electronic Dictionary Research and Development Group licence; Universal Dependencies treebanks (all CC BY-SA 4.0). Translation: Qwen3.5 (Apache 2.0) with llama.cpp (MIT). Transcription: Qwen3-ASR (Apache 2.0) with llama.cpp, NVIDIA's Parakeet TDT 0.6B v3 (CC BY 4.0, weights compressed by Lumen) with sherpa-onnx, and Whisper (MIT) with whisper.cpp. Voice: Supertonic 3 with sherpa-onnx (Apache 2.0). Fonts: Literata, Newsreader, Geist (OFL).",
+            "Dictionnaires : Wiktionnaire via kaikki.org ; JMdict et KANJIDIC2, selon la licence de l'Electronic Dictionary Research and Development Group ; corpus Universal Dependencies (tous CC BY-SA 4.0). Traduction : Qwen3.5 (Apache 2.0) par llama.cpp (MIT). Transcription : Qwen3-ASR (Apache 2.0) par llama.cpp, Parakeet TDT 0.6B v3 de NVIDIA (CC BY 4.0, poids compressés par Lumen) par sherpa-onnx, et Whisper (MIT) par whisper.cpp. Interlocuteurs : Pyannote segmentation 3.0 (MIT) et TitaNet Small de NVIDIA (CC BY 4.0) par sherpa-onnx. Voix : Supertonic 3 par sherpa-onnx (Apache 2.0). Polices : Literata, Newsreader, Geist (OFL).",
+            "Dictionaries: Wiktionary via kaikki.org; JMdict and KANJIDIC2, used under the Electronic Dictionary Research and Development Group licence; Universal Dependencies treebanks (all CC BY-SA 4.0). Translation: Qwen3.5 (Apache 2.0) with llama.cpp (MIT). Transcription: Qwen3-ASR (Apache 2.0) with llama.cpp, NVIDIA's Parakeet TDT 0.6B v3 (CC BY 4.0, weights compressed by Lumen) with sherpa-onnx, and Whisper (MIT) with whisper.cpp. Speakers: Pyannote segmentation 3.0 (MIT) and NVIDIA's TitaNet Small (CC BY 4.0) with sherpa-onnx. Voice: Supertonic 3 with sherpa-onnx (Apache 2.0). Fonts: Literata, Newsreader, Geist (OFL).",
           )}
         </p>
       </Section>

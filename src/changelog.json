@@ -2,6 +2,46 @@
   "_lisezmoi": "Nouveautés montrées après chaque mise à jour (components/News.tsx) et notes de publication. Ajouter ce qui change sous la version \"next\" au fil du travail ; « Publier une version » lui donne son numéro et sa date. Icônes : noms de components/Icon.tsx. Actions : \"tour\" (visite guidée), \"guide\", \"settings:<page>\" (profile, general, langs, reading, voice, discover, podcasts, ai, videos, backup, storage, lingq, about), \"import:<onglet>\" (text, link, file, media, podcast), \"view:<vue>\" (library, discover, playlists, chat, vocab, progress).",
   "releases": [
     {
+      "version": "1.5.0",
+      "date": "2026-11-23",
+      "title": { "fr": "Des conversations qui se lisent : une réplique par paragraphe", "en": "Conversations you can read: one reply per paragraph" },
+      "items": [
+        {
+          "icon": "debate",
+          "title": { "fr": "Lumen reconnaît qui parle", "en": "Lumen recognizes who is speaking" },
+          "body": {
+            "fr": "Dans un podcast ou une vidéo à plusieurs voix, chaque réplique a maintenant son paragraphe. Une réponse courte (« Sì. », « Che cosa? ») ne se colle plus à la phrase d'un autre, et quand deux personnes se coupent la parole, le texte va à la ligne là où l'autre la prend. Il suffit d'installer le petit modèle « Interlocuteurs » (67 Mo) dans Réglages › IA : il sert à vos prochaines transcriptions, dans toutes les langues, et tourne sur ce Mac comme le reste. Un récit lu d'une seule voix ne change pas.",
+            "en": "In a podcast or a video with several voices, each reply now gets its own paragraph. A short answer (“Sì.”, “Che cosa?”) no longer sticks to someone else's sentence, and when two people interrupt each other, the text breaks where the other one takes over. Just install the small “Speakers” model (67 MB) in Settings › AI: it's used for your next transcripts, in every language, and runs on this Mac like everything else. A story read by a single voice doesn't change."
+          },
+          "action": "settings:ai"
+        },
+        {
+          "icon": "wave",
+          "title": { "fr": "Des phrases qui ne sont plus coupées trop tôt", "en": "Sentences no longer cut too early" },
+          "body": {
+            "fr": "Pour écrire le texte, Qwen3-ASR et Parakeet écoutent le son par morceaux, et chaque morceau finissait par un point, même au milieu d'une phrase (« …erano andate a. Festeggiare… »). Le son est maintenant coupé aux fins de phrase que Whisper a entendues, jamais dans un mot, et les jointures suivent ce qu'il a entendu. Sur un podcast de 25 minutes, les phrases coupées à tort ont diminué de moitié, et les mots sont un peu plus justes.",
+            "en": "To write the text, Qwen3-ASR and Parakeet listen to the audio in pieces, and each piece ended with a full stop, even in the middle of a sentence (“…erano andate a. Festeggiare…”). The audio is now cut where Whisper heard a sentence end, never inside a word, and the joins follow what it heard. On a 25-minute podcast, wrongly cut sentences dropped by half, and the words are a little more accurate."
+          }
+        },
+        {
+          "icon": "text",
+          "title": { "fr": "Les nombres restent dans leur phrase", "en": "Numbers stay in their sentence" },
+          "body": {
+            "fr": "Un nombre en fin de phrase partait au paragraphe suivant (« Formula » puis « 1. Fantastico »), et « 7.000 euro » coupait la phrase en deux. C'est corrigé, comme les points de suspension d'une hésitation (« Io… penso »), qui ne coupent plus la phrase.",
+            "en": "A number at the end of a sentence went to the next paragraph (“Formula” then “1. Fantastico”), and “7.000 euro” cut the sentence in two. This is fixed, as are the dots of a hesitation (“Io… penso”), which no longer cut the sentence."
+          }
+        },
+        {
+          "icon": "speed",
+          "title": { "fr": "Lumen reste fluide pendant les longues leçons", "en": "Lumen stays smooth through long lessons" },
+          "body": {
+            "fr": "Au bout d'un moment dans une leçon, Lumen pouvait se mettre à ramer. Pendant l'écoute, le lecteur se redessinait 60 fois par seconde, et les petits voyants qui battent (mise à jour, téléchargement, nouveautés) faisaient travailler la carte graphique en continu. Le lecteur ne se redessine plus que quand c'est utile et les voyants ne coûtent presque plus rien : en pause, Lumen ne fait plus chauffer votre Mac.",
+            "en": "After a while in a lesson, Lumen could start to lag. During playback the player redrew itself 60 times a second, and the small pulsing lights (update, download, what's new) kept the graphics chip busy nonstop. The player now redraws only when needed and the lights cost almost nothing: when paused, Lumen no longer warms up your Mac."
+          }
+        }
+      ]
+    },
+    {
       "version": "1.4.0",
       "date": "2026-10-30",
       "title": { "fr": "Le chinois, et tous les épisodes d'un podcast", "en": "Chinese, and every episode of a podcast" },

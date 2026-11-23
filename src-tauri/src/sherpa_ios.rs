@@ -93,3 +93,24 @@ impl Parakeet {
         streams.iter().map(|s| s.get_result().map(|r| r.text.split_whitespace().collect::<Vec<_>>().join(" ")).unwrap_or_default()).collect()
     }
 }
+
+/// Les tours de parole d'un son (mono, 16 kHz) : Pyannote repère les tours, TitaNet
+/// reconnaît les voix (speakers.rs, mêmes réglages que sur Mac). Les modèles se
+/// chargent le temps de l'écoute.
+pub fn speakers(voices: &Path, turns: &Path, pcm: &[f32], threshold: f32, shift: f32, threads: i32) -> Result<Vec<crate::speakers::Turn>> {
+    use sherpa_onnx::{FastClusteringConfig, OfflineSpeakerDiarization, OfflineSpeakerDiarizationConfig, OfflineSpeakerSegmentationModelConfig, OfflineSpeakerSegmentationPyannoteModelConfig, SpeakerEmbeddingExtractorConfig};
+    let config = OfflineSpeakerDiarizationConfig {
+        segmentation: OfflineSpeakerSegmentationModelConfig {
+            pyannote: OfflineSpeakerSegmentationPyannoteModelConfig { model: path(turns.to_path_buf()), window_shift_ratio: shift },
+            num_threads: threads,
+            ..Default::default()
+        },
+        embedding: SpeakerEmbeddingExtractorConfig { model: path(voices.to_path_buf()), num_threads: threads, ..Default::default() },
+        clustering: FastClusteringConfig { num_clusters: -1, threshold, ..Default::default() },
+        ..Default::default()
+    };
+    let failed = || anyhow!(crate::i18n::t("les interlocuteurs n'ont pas pu être reconnus", "the speakers couldn't be recognized"));
+    let engine = OfflineSpeakerDiarization::create(&config).ok_or_else(failed)?;
+    let result = engine.process(pcm).ok_or_else(failed)?;
+    Ok(result.sort_by_start_time().into_iter().map(|s| crate::speakers::Turn { t0: s.start as f64, t1: s.end as f64, who: s.speaker.max(0) as u32 }).collect())
+}

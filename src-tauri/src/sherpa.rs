@@ -1,9 +1,10 @@
 //! Moteur sherpa-onnx (outils officiels et onnxruntime), partagé par la voix
-//! naturelle (Supertonic 3) et le texte des transcriptions (Parakeet).
+//! naturelle (Supertonic 3), le texte des transcriptions (Parakeet) et la
+//! reconnaissance des interlocuteurs (speakers.rs).
 //!
 //! Téléchargé à part (~20 Mo), comme les modèles : l'app ne grossit pas, et le
 //! « hardened runtime » de macOS laisse lancer un exécutable téléchargé, pas
-//! charger une bibliothèque. Une seule archive pour les deux outils.
+//! charger une bibliothèque. Une seule archive pour tous les outils.
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
@@ -37,9 +38,11 @@ pub enum Tool {
     Tts,
     /// reconnaissance de la parole (Parakeet)
     Asr,
+    /// qui parle quand (les interlocuteurs d'une conversation)
+    Speakers,
 }
 
-const TOOLS: [Tool; 2] = [Tool::Tts, Tool::Asr];
+const TOOLS: [Tool; 3] = [Tool::Tts, Tool::Asr, Tool::Speakers];
 
 impl Tool {
     /// Chemin de l'outil dans l'archive.
@@ -49,6 +52,8 @@ impl Tool {
             (Tool::Tts, true) => "bin/sherpa-onnx-offline-tts.exe",
             (Tool::Asr, false) => "bin/sherpa-onnx-offline",
             (Tool::Asr, true) => "bin/sherpa-onnx-offline.exe",
+            (Tool::Speakers, false) => "bin/sherpa-onnx-offline-speaker-diarization",
+            (Tool::Speakers, true) => "bin/sherpa-onnx-offline-speaker-diarization.exe",
         }
     }
 }
@@ -87,7 +92,8 @@ pub fn remove(data_dir: &Path) {
 /// La voix et Parakeet peuvent demander le moteur en même temps : un seul téléchargement.
 static FETCH: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
-/// Télécharge le moteur si l'outil manque, et n'en garde que les deux outils et
+/// Télécharge le moteur si l'outil manque (un moteur installé avant l'arrivée d'un
+/// outil le reprend), et n'en garde que les outils dont Lumen se sert et
 /// leurs bibliothèques (la mise en page bin/ et lib/ est celle qu'attendent les outils).
 pub async fn ensure(data_dir: &Path, tool: Tool, cancel: Arc<AtomicBool>, mut on_progress: impl FnMut(u64, u64)) -> Result<()> {
     if ready(data_dir, tool) {
@@ -101,6 +107,7 @@ pub async fn ensure(data_dir: &Path, tool: Tool, cancel: Arc<AtomicBool>, mut on
         return Err(anyhow!(match tool {
             Tool::Tts => crate::i18n::t("La voix naturelle n'est pas encore disponible sur cet ordinateur.", "The natural voice isn't available on this computer yet."),
             Tool::Asr => crate::i18n::t("Parakeet n'est pas encore disponible sur cet appareil.", "Parakeet isn't available on this device yet."),
+            Tool::Speakers => crate::i18n::t("La reconnaissance des interlocuteurs n'est pas encore disponible sur cet appareil.", "Speaker recognition isn't available on this device yet."),
         }));
     }
     let tools = crate::tools::tools_dir(data_dir);
@@ -156,6 +163,7 @@ pub async fn ensure(data_dir: &Path, tool: Tool, cancel: Arc<AtomicBool>, mut on
         return Err(anyhow!(match tool {
             Tool::Tts => crate::i18n::t("le moteur de voix n'a pas pu être installé, réessayez", "the voice engine couldn't be installed, try again"),
             Tool::Asr => crate::i18n::t("le moteur de Parakeet n'a pas pu être installé, réessayez", "Parakeet's engine couldn't be installed, try again"),
+            Tool::Speakers => crate::i18n::t("le moteur qui reconnaît les interlocuteurs n'a pas pu être installé, réessayez", "the speaker recognition engine couldn't be installed, try again"),
         }));
     }
     Ok(())

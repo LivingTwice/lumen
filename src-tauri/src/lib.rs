@@ -25,6 +25,7 @@ mod podcast;
 mod proc;
 mod search;
 mod sherpa;
+mod speakers;
 // iPhone et iPad : la voix et Parakeet par la bibliothèque sherpa-onnx, dans l'app
 #[cfg(target_os = "ios")]
 mod sherpa_ios;

@@ -66,18 +66,21 @@ pub fn writes(lang: &str) -> bool {
     language_name(lang).is_some() && !matches!(lang, "sv" | "da" | "fi" | "pl" | "cs" | "hu" | "ro" | "el")
 }
 
-/// Transcrit un son (mono, 16 kHz) dans la langue donnée. Chaque morceau passe
-/// sur le GPU à son tour (`Engine::exclusive`) : le chat et la traduction des
-/// mots s'intercalent entre deux morceaux.
+/// Transcrit un son (mono, 16 kHz) dans la langue donnée : le texte de chaque
+/// morceau `pieces` (échantillons [a, b), voir `media::split_at_words`), dans
+/// l'ordre. Chaque morceau passe sur le GPU à son tour (`Engine::exclusive`) :
+/// le chat et la traduction des mots s'intercalent entre deux morceaux.
+#[allow(clippy::too_many_arguments)]
 pub fn transcribe(
     engine: &Engine,
     model_path: &Path,
     mmproj_path: &Path,
     pcm: &[f32],
+    pieces: &[(usize, usize)],
     lang: &str,
     cancel: &AtomicBool,
     mut on_progress: impl FnMut(f64),
-) -> Result<String> {
+) -> Result<Vec<String>> {
     let name = language_name(lang).ok_or_else(|| anyhow!(crate::i18n::t("langue non prise en charge par Qwen3-ASR", "language not supported by Qwen3-ASR")))?;
     let be = backend()?;
     let prof = std::env::var("LUMEN_ASR_PROFILE").is_ok(); // ESSAI
@@ -100,21 +103,15 @@ pub fn transcribe(
         .exclusive(|| MtmdContext::init_from_file(mmproj, &model, &params))
         .map_err(|e| anyhow!(crate::tr!("partie audio du modèle illisible : {e}", "unreadable audio part of the model: {e}")))?;
     if prof { eprintln!("PROFIL chargement {:.2} s", t_all.elapsed().as_secs_f64()); }
-    let pieces = split_on_silence(pcm, CHUNK_SECS);
     let mut texts: Vec<String> = Vec::new();
-    for (a, b) in pieces {
+    for &(a, b) in pieces {
         if cancel.load(Ordering::Relaxed) {
             return Err(anyhow!("annulé"));
         }
-        let t = engine.exclusive(|| transcribe_piece(&model, &mctx, &pcm[a..b], name, threads))?;
-        if !t.is_empty() {
-            texts.push(t);
-        }
+        texts.push(engine.exclusive(|| transcribe_piece(&model, &mctx, &pcm[a..b], name, threads))?);
         on_progress(b as f64 / pcm.len().max(1) as f64 * 100.0);
     }
-    // japonais et chinois s'écrivent sans espaces
-    let sep = if matches!(lang, "ja" | "zh") { "" } else { " " };
-    Ok(texts.join(sep))
+    Ok(texts)
 }
 
 fn transcribe_piece(model: &LlamaModel, mctx: &MtmdContext, audio: &[f32], name: &str, threads: i32) -> Result<String> {
@@ -237,6 +234,26 @@ fn repeated_tail(text: &str, spaced: bool) -> Option<usize> {
     None
 }
 
+/// Milieu de la fenêtre de `win` échantillons la plus calme de pcm[from..to]
+/// (le milieu de l'intervalle s'il est plus court qu'elle).
+pub fn quietest(pcm: &[f32], from: usize, to: usize, win: usize) -> usize {
+    let to = to.min(pcm.len());
+    if to <= from + win || win == 0 {
+        return (from + to.max(from)) / 2;
+    }
+    // somme glissante de l'amplitude : le minimum est le silence le plus net
+    let mut sum: f32 = pcm[from..from + win].iter().map(|x| x.abs()).sum();
+    let (mut best, mut best_at) = (sum, from);
+    for i in from + 1..=to - win {
+        sum += pcm[i + win - 1].abs() - pcm[i - 1].abs();
+        if sum < best {
+            best = sum;
+            best_at = i;
+        }
+    }
+    best_at + win / 2
+}
+
 /// Découpe en morceaux d'environ `max_secs`, chaque coupure tombant dans le
 /// passage le plus calme (fenêtre de 100 ms) à ± 5 s de la limite, comme le
 /// fait Qwen. Les morceaux se suivent sans trou ni chevauchement.
@@ -251,20 +268,7 @@ pub fn split_on_silence(pcm: &[f32], max_secs: f64) -> Vec<(usize, usize)> {
         let cut = start + max_len;
         let left = cut.saturating_sub(expand).max(start);
         let right = (cut + expand).min(total);
-        let mut boundary = cut;
-        if right - left > win {
-            // somme glissante de l'amplitude : le minimum est le silence le plus net
-            let mut sum: f32 = pcm[left..left + win].iter().map(|x| x.abs()).sum();
-            let (mut best, mut best_at) = (sum, left);
-            for i in left + 1..=right - win {
-                sum += pcm[i + win - 1].abs() - pcm[i - 1].abs();
-                if sum < best {
-                    best = sum;
-                    best_at = i;
-                }
-            }
-            boundary = best_at + win / 2;
-        }
+        let boundary = if right - left > win { quietest(pcm, left, right, win) } else { cut };
         let boundary = boundary.clamp(start + 1, total);
         out.push((start, boundary));
         start = boundary;
@@ -356,7 +360,8 @@ mod live {
         for f in files.split(',') {
             let pcm = read_wav(f);
             let t = std::time::Instant::now();
-            let text = transcribe(&engine, &model, &mmproj, &pcm, &lang, &AtomicBool::new(false), |_| {}).unwrap();
+            let pieces = split_on_silence(&pcm, CHUNK_SECS);
+            let text = transcribe(&engine, &model, &mmproj, &pcm, &pieces, &lang, &AtomicBool::new(false), |_| {}).unwrap().join(" ");
             let secs = pcm.len() as f64 / RATE as f64;
             println!("\n=== {f} : {secs:.0} s d'audio, transcrit en {:.1} s\n{text}", t.elapsed().as_secs_f64());
             if let Ok(out) = std::env::var("LUMEN_ASR_OUT") {

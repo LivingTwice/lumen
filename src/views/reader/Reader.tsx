@@ -13,7 +13,7 @@ import { fitPages, pageOfToken } from "../../lib/pagefit";
 import { isMobile, isWindows } from "../../lib/platform";
 import { panelMode, readerLook, roomForSidePanel } from "../../lib/reading";
 import { paginate, sentenceBounds, type PageRange } from "../../lib/tokenize";
-import type { LessonSummary, OpenedLesson, Term, Token } from "../../lib/types";
+import type { LessonSummary, OpenedLesson, Resynced, Term, Token, VoicedLesson } from "../../lib/types";
 import { Player, type PlayerHandle, type PlaybackState } from "./Player";
 import { useChat } from "../../lib/chat";
 import { chooseCover } from "../../lib/covers";
@@ -718,6 +718,15 @@ export function Reader() {
     [lesson, pages, logRead, creditPage, savePage, nextChapter, openLesson, pl],
   );
 
+  // rappels du lecteur audio, stables : il ne se redessine pas à chaque mot lu
+  const retextRef = useRef(() => {});
+  retextRef.current = () => lesson && retext(lesson.id);
+  const onResynced = useCallback((r: Resynced) => {
+    if (r.text) retextRef.current();
+    else setData((d) => (d ? { ...d, lesson: { ...d.lesson, timings: r.timings, timing_v: 2 } } : d));
+  }, []);
+  const onVoiced = useCallback((v: VoicedLesson) => setData((d) => (d ? { ...d, lesson: { ...d.lesson, ...v, position: 0 } } : d)), []);
+
   const onPlayerPage = useCallback(
     (p: number) => {
       // la lecture passe à la page suivante : celle qu'elle quitte est lue
@@ -1183,6 +1192,74 @@ export function Reader() {
     return () => window.removeEventListener("lumen:tour-word", show);
   }, [tokens, select]);
 
+  // ---------- mots de la page ----------
+  // Composés une fois pour toutes, sans le mot lu à voix haute : pendant l'écoute, le mot
+  // change plusieurs fois par seconde, et reconstruire chaque mot de la page à chaque fois
+  // finissait par faire ramer Lumen. Le mot lu prend sa classe « cur » directement (plus bas).
+  const paragraphs = useMemo(() => {
+    const out: React.ReactNode[] = [];
+    let current: React.ReactNode[] = [];
+    const total = Math.max(1, pr.end - pr.start);
+    for (let i = pr.start; i < pr.end; i++) {
+      const t = tokens[i];
+      const ph = phraseCover.get(i);
+      const inPhrase = ph && i > ph.a && i <= ph.b;
+      const inSel = range && range.a !== range.b && i > range.a && i < range.b;
+      if (!t.w) {
+        const parts = t.t.split(/\n+/);
+        if (parts.length > 1) {
+          if (parts[0]) current.push(parts[0]);
+          if (current.length) out.push(<p key={`p${i}`}>{current}</p>);
+          current = [];
+          const tail = parts[parts.length - 1];
+          if (tail.trim()) current.push(tail);
+        } else {
+          current.push(
+            inPhrase || inSel ? (
+              <span key={i} className={`${inPhrase ? `ph p${ph!.status}` : ""} ${inSel ? "sel-gap" : ""}`}>
+                {t.t}
+              </span>
+            ) : (
+              t.t
+            ),
+          );
+        }
+        continue;
+      }
+      const st = statusOf(t.k);
+      const selected = range && i >= range.a && i <= range.b;
+      let cls = `w s${st}`;
+      if (selected) cls += range!.a === range!.b ? " sel" : ` sel-range${i === range!.a ? " sel-a" : ""}${i === range!.b ? " sel-b" : ""}`;
+      if (ph) cls += ` ph p${ph.status}`;
+      if (i === resumeAt) cls += " resume";
+      if (glowKeys.has(t.k)) cls += " known-glow";
+      current.push(
+        <span key={i} className={cls} data-i={i} style={illum && st === 0 ? ({ "--d": `${((i - pr.start) / total) * 0.75}s` } as React.CSSProperties) : undefined}>
+          {t.t}
+        </span>,
+      );
+    }
+    if (current.length) out.push(<p key="last">{current}</p>);
+    return out;
+  }, [tokens, pr.start, pr.end, phraseCover, range, statusOf, resumeAt, glowKeys, illum]);
+  // le mot lu à voix haute : sa classe est posée sur la page, après chaque rendu
+  // (React la retire quand il réécrit la classe d'un mot dont le statut change)
+  const markCursor = useCallback((container: HTMLElement | null) => {
+    if (!container) return;
+    const cur = cursorNow.current;
+    for (const el of container.querySelectorAll<HTMLElement>(".w.cur")) if (Number(el.dataset.i) !== cur) el.classList.remove("cur");
+    if (cur >= 0) container.querySelector(`[data-i="${cur}"]`)?.classList.add("cur");
+  }, []);
+  useLayoutEffect(() => markCursor(pageRef.current));
+  // une page qui arrive après l'animation du changement de page : le mot lu y est marqué tout de suite
+  const attachPage = useCallback(
+    (el: HTMLDivElement | null) => {
+      pageRef.current = el;
+      markCursor(el);
+    },
+    [markCursor],
+  );
+
   if (!lessonId) {
     return (
       <div className="empty" style={{ flex: 1, justifyContent: "center" }}>
@@ -1214,51 +1291,6 @@ export function Reader() {
 
   // ---------- rendu de la page ----------
   const markClass = settings.word_style === "line" ? "mark-line" : "mark-tint";
-  const paragraphs: React.ReactNode[] = [];
-  let current: React.ReactNode[] = [];
-  const total = Math.max(1, pr.end - pr.start);
-  for (let i = pr.start; i < pr.end; i++) {
-    const t = tokens[i];
-    const ph = phraseCover.get(i);
-    const inPhrase = ph && i > ph.a && i <= ph.b;
-    const inSel = range && range.a !== range.b && i > range.a && i < range.b;
-    if (!t.w) {
-      const parts = t.t.split(/\n+/);
-      if (parts.length > 1) {
-        if (parts[0]) current.push(parts[0]);
-        if (current.length) paragraphs.push(<p key={`p${i}`}>{current}</p>);
-        current = [];
-        const tail = parts[parts.length - 1];
-        if (tail.trim()) current.push(tail);
-      } else {
-        current.push(
-          inPhrase || inSel ? (
-            <span key={i} className={`${inPhrase ? `ph p${ph!.status}` : ""} ${inSel ? "sel-gap" : ""}`}>
-              {t.t}
-            </span>
-          ) : (
-            t.t
-          ),
-        );
-      }
-      continue;
-    }
-    const st = statusOf(t.k);
-    const selected = range && i >= range.a && i <= range.b;
-    let cls = `w s${st}`;
-    if (selected) cls += range!.a === range!.b ? " sel" : ` sel-range${i === range!.a ? " sel-a" : ""}${i === range!.b ? " sel-b" : ""}`;
-    if (ph) cls += ` ph p${ph.status}`;
-    if (i === cursor) cls += " cur";
-    if (i === resumeAt) cls += " resume";
-    if (glowKeys.has(t.k)) cls += " known-glow";
-    current.push(
-      <span key={i} className={cls} data-i={i} style={illum && st === 0 ? ({ "--d": `${((i - pr.start) / total) * 0.75}s` } as React.CSSProperties) : undefined}>
-        {t.t}
-      </span>,
-    );
-  }
-  if (current.length) paragraphs.push(<p key="last">{current}</p>);
-
   let newOnPage = 0;
   const seen = new Set<string>();
   for (let i = pr.start; i < pr.end; i++) {
@@ -1328,7 +1360,7 @@ export function Reader() {
 
   const pageEl = (
     <div
-      ref={pageRef}
+      ref={attachPage}
       data-tour="page"
       className={`page ${markClass} ${illum ? "illuminate" : ""}`}
       onPointerDown={onPointerDown}
@@ -1662,8 +1694,8 @@ export function Reader() {
           videoHost={videoHost}
           videoOff={isVideo && !videoShown && !cinema}
           onState={onPlayback}
-          onResynced={(r) => (r.text ? retext(lesson.id) : setData((d) => (d ? { ...d, lesson: { ...d.lesson, timings: r.timings, timing_v: 2 } } : d)))}
-          onVoiced={(v) => setData((d) => (d ? { ...d, lesson: { ...d.lesson, ...v, position: 0 } } : d))}
+          onResynced={onResynced}
+          onVoiced={onVoiced}
           autoplay={autoplay}
           onFinished={onFinished}
         />

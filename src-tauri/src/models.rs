@@ -23,7 +23,7 @@ pub struct ModelInfo {
     pub id: &'static str,
     /// "llm" (traduction, explications), "asr" (transcription et minutage des
     /// mots), "asrtext" (texte des transcriptions, plus juste : Qwen3-ASR,
-    /// Parakeet) ou "tts" (voix)
+    /// Parakeet), "speakers" (qui parle : les interlocuteurs) ou "tts" (voix)
     pub kind: &'static str,
     pub name: &'static str,
     pub detail: &'static str,
@@ -143,6 +143,24 @@ pub const CATALOG: &[ModelInfo] = &[
         engine: Some(crate::sherpa::Tool::Asr),
     },
     ModelInfo {
+        id: "speakers-1",
+        kind: "speakers",
+        name: "Pyannote 3 + TitaNet",
+        detail: "Reconnaît qui parle dans une conversation : chaque réplique a son paragraphe, même quand les interlocuteurs se coupent la parole ; dans toutes les langues",
+        detail_en: "Recognizes who is speaking in a conversation: each reply gets its own paragraph, even when the speakers interrupt each other; in every language",
+        // les voix (TitaNet, 40,3 Mo) + les tours de parole (Pyannote, 6 Mo) + moteur sherpa-onnx (20,3 Mo)
+        size: 40_257_283 + 5_992_913 + crate::sherpa::SIZE,
+        url: "https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-recongition-models/nemo_en_titanet_small.onnx",
+        file: "nemo_en_titanet_small.onnx",
+        ram_gb: 8,
+        companion: Some(Companion {
+            url: "https://huggingface.co/csukuangfj/sherpa-onnx-pyannote-segmentation-3-0/resolve/main/model.onnx",
+            file: "pyannote-segmentation-3-0.onnx",
+            size: 5_992_913,
+        }),
+        engine: Some(crate::sherpa::Tool::Speakers),
+    },
+    ModelInfo {
         id: "supertonic-3",
         kind: "tts",
         name: "Supertonic 3",
@@ -188,10 +206,9 @@ pub fn companion_path(data_dir: &Path, m: &ModelInfo) -> Option<PathBuf> {
 
 pub fn installed(data_dir: &Path, m: &ModelInfo) -> bool {
     let p = path_of(data_dir, m);
-    if let Some(tool) = m.engine {
-        return p.is_dir() && crate::sherpa::ready(data_dir, tool);
-    }
-    p.exists() && companion_path(data_dir, m).is_none_or(|c| c.exists())
+    // un modèle du moteur sherpa-onnx : un dossier (archive décompressée) ou des fichiers
+    let there = if is_archive(m) { p.is_dir() } else { p.exists() };
+    there && companion_path(data_dir, m).is_none_or(|c| c.exists()) && m.engine.is_none_or(|tool| crate::sherpa::ready(data_dir, tool))
 }
 
 #[derive(Serialize, Clone, Debug)]
@@ -213,7 +230,7 @@ pub async fn download(
         on_event(DownloadEvent::Done);
         return Ok(());
     }
-    // la voix et Parakeet ont besoin du moteur : téléchargé d'abord, compté dans la progression
+    // la voix, Parakeet et les interlocuteurs ont besoin du moteur : téléchargé d'abord, compté dans la progression
     let mut base = 0u64;
     if let Some(tool) = m.engine {
         crate::sherpa::ensure(data_dir, tool, cancel.clone(), |received, _| {
@@ -233,10 +250,10 @@ pub async fn download(
                     e => e,
                 })
             };
-            fetch_resumable(c.url, &cpart, 0, m.size, cancel.clone(), &mut whole).await?;
+            fetch_resumable(c.url, &cpart, base, m.size, cancel.clone(), &mut whole).await?;
             tokio::fs::rename(&cpart, &cpath).await?;
         }
-        base = c.size;
+        base += c.size;
     }
     let final_path = path_of(data_dir, m);
     let part = part_of(data_dir, m);

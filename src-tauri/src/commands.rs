@@ -891,7 +891,7 @@ pub async fn model_delete(state: State<'_, AppState>, id: String) -> R<()> {
     } else if p.exists() {
         std::fs::remove_file(&p).map_err(err)?;
     }
-    // le moteur sherpa-onnx part avec le dernier modèle qui s'en sert (voix, Parakeet)
+    // le moteur sherpa-onnx part avec le dernier modèle qui s'en sert (voix, Parakeet, interlocuteurs)
     if m.engine.is_some() && !models::CATALOG.iter().any(|o| o.engine.is_some() && models::path_of(&state.data_dir, o).exists()) {
         crate::sherpa::remove(&state.data_dir);
     }
@@ -1029,8 +1029,16 @@ fn text_model(state: &AppState, lang: &str) -> Option<media::Writer> {
     }
 }
 
+/// Le modèle qui reconnaît les interlocuteurs, s'il est installé (speakers.rs).
+fn voices_model(state: &AppState) -> Option<crate::speakers::Model> {
+    let dir = &state.data_dir;
+    let m = models::CATALOG.iter().find(|m| m.kind == "speakers" && models::installed(dir, m))?;
+    Some(crate::speakers::Model { data_dir: dir.clone(), voices: models::path_of(dir, m), turns: models::companion_path(dir, m)? })
+}
+
 /// Transcrit un son pour en faire une leçon (Whisper, et Qwen3-ASR ou Parakeet
-/// s'il est installé et convient à la langue) : voir `media::lesson_transcript`.
+/// s'il est installé et convient à la langue ; les interlocuteurs, si leur modèle
+/// est installé) : voir `media::lesson_transcript`.
 async fn transcribe_media(
     state: &AppState,
     media: &std::path::Path,
@@ -1040,7 +1048,7 @@ async fn transcribe_media(
 ) -> R<(String, String)> {
     let m = active_model(state, "asr")?;
     let whisper = models::path_of(&state.data_dir, m);
-    media::lesson_transcript(&state.ai, &whisper, text_model(state, lang), media, lang, reference, |e| {
+    media::lesson_transcript(&state.ai, &whisper, text_model(state, lang), voices_model(state), media, lang, reference, |e| {
         let _ = on_event.send(e);
     })
     .await
@@ -1617,7 +1625,7 @@ pub async fn podcast_create(state: State<'_, AppState>, lang: String, request: p
     let mut version = db::TIMING_LINES;
     if let Ok(m) = active_model(&state, "asr") {
         let whisper = models::path_of(&state.data_dir, m);
-        let heard = media::lesson_transcript(&state.ai, &whisper, text_model(&state, &lang), &rec.path, &lang, Some(&rec.text), |e| {
+        let heard = media::lesson_transcript(&state.ai, &whisper, text_model(&state, &lang), voices_model(&state), &rec.path, &lang, Some(&rec.text), |e| {
             let _ = on_event.send(e);
         })
         .await;

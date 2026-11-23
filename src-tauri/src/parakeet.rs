@@ -19,6 +19,7 @@ use std::time::Duration;
 
 use anyhow::{anyhow, Result};
 
+#[cfg(test)]
 use crate::asr::split_on_silence;
 #[cfg(any(not(target_os = "ios"), test))]
 use crate::asr::RATE;
@@ -46,7 +47,7 @@ pub fn before_qwen(lang: &str) -> bool {
 /// que pour Qwen3-ASR : sur 30 s, Parakeet lâche parfois toute une phrase après
 /// un changement de voix (FLEURS : jusqu'à 38 mots d'affilée ; 10 au plus sur 15 s,
 /// sans rien perdre sur les leçons italiennes).
-const CHUNK_SECS: f64 = 15.0;
+pub const CHUNK_SECS: f64 = 15.0;
 
 /// Morceaux par lancement de l'outil (deux minutes de son) : il les décode
 /// ensemble, et la mémoire grandit avec leur nombre (environ 2,4 Go ici).
@@ -64,22 +65,23 @@ fn files(model: &Path) -> [PathBuf; 4] {
     ["encoder.onnx", "decoder.onnx", "joiner.onnx", "tokens.txt"].map(|f| model.join(f))
 }
 
-/// Écrit le texte d'un son (mono, 16 kHz, f32). `on_progress` : de 0 à 100.
-pub async fn transcribe(data_dir: &Path, model: &Path, pcm: &[f32], cancel: &AtomicBool, mut on_progress: impl FnMut(f64)) -> Result<String> {
+/// Écrit le texte d'un son (mono, 16 kHz, f32) : celui de chaque morceau `pieces`
+/// (échantillons [a, b), voir `media::split_at_words`), dans l'ordre.
+/// `on_progress` : de 0 à 100.
+pub async fn transcribe(data_dir: &Path, model: &Path, pcm: &[f32], pieces: &[(usize, usize)], cancel: &AtomicBool, mut on_progress: impl FnMut(f64)) -> Result<Vec<String>> {
     if !sherpa::ready(data_dir, Tool::Asr) {
         return Err(anyhow!(crate::i18n::t("le moteur de Parakeet est absent, réinstallez le modèle", "Parakeet's engine is missing, reinstall the model")));
     }
     let tmp = std::env::temp_dir().join(format!("lumen-parakeet-{}", crate::media::new_stem()));
     std::fs::create_dir_all(&tmp)?;
-    let res = run(data_dir, model, pcm, &tmp, cancel, &mut on_progress).await;
+    let res = run(data_dir, model, pcm, pieces, &tmp, cancel, &mut on_progress).await;
     let _ = std::fs::remove_dir_all(&tmp);
     res
 }
 
 /// iPhone et iPad : la bibliothèque sherpa-onnx dans l'app (sherpa_ios.rs), mêmes morceaux.
 #[cfg(target_os = "ios")]
-async fn run(_data_dir: &Path, model: &Path, pcm: &[f32], _tmp: &Path, cancel: &AtomicBool, on_progress: &mut impl FnMut(f64)) -> Result<String> {
-    let pieces = split_on_silence(pcm, CHUNK_SECS);
+async fn run(_data_dir: &Path, model: &Path, pcm: &[f32], pieces: &[(usize, usize)], _tmp: &Path, cancel: &AtomicBool, on_progress: &mut impl FnMut(f64)) -> Result<Vec<String>> {
     let engine = tokio::task::block_in_place(|| crate::sherpa_ios::Parakeet::load(model, threads()))?;
     // la mémoire d'un iPhone : deux morceaux à la fois (environ 1,4 Go avec le modèle),
     // quatre s'il en reste beaucoup (iPad)
@@ -94,12 +96,11 @@ async fn run(_data_dir: &Path, model: &Path, pcm: &[f32], _tmp: &Path, cancel: &
         let done = group.last().map(|p| p.1).unwrap_or(pcm.len());
         on_progress(done as f64 / pcm.len().max(1) as f64 * 100.0);
     }
-    Ok(texts.into_iter().map(|t| t.trim().to_string()).filter(|t| !t.is_empty()).collect::<Vec<_>>().join(" "))
+    Ok(texts.into_iter().map(|t| t.trim().to_string()).collect())
 }
 
 #[cfg(not(target_os = "ios"))]
-async fn run(data_dir: &Path, model: &Path, pcm: &[f32], tmp: &Path, cancel: &AtomicBool, on_progress: &mut impl FnMut(f64)) -> Result<String> {
-    let pieces = split_on_silence(pcm, CHUNK_SECS);
+async fn run(data_dir: &Path, model: &Path, pcm: &[f32], pieces: &[(usize, usize)], tmp: &Path, cancel: &AtomicBool, on_progress: &mut impl FnMut(f64)) -> Result<Vec<String>> {
     let mut texts: Vec<String> = Vec::new();
     for (g, group) in pieces.chunks(GROUP).enumerate() {
         if cancel.load(Ordering::Relaxed) {
@@ -119,7 +120,7 @@ async fn run(data_dir: &Path, model: &Path, pcm: &[f32], tmp: &Path, cancel: &At
             let _ = std::fs::remove_file(w);
         }
     }
-    Ok(texts.into_iter().map(|t| t.trim().to_string()).filter(|t| !t.is_empty()).collect::<Vec<_>>().join(" "))
+    Ok(texts.into_iter().map(|t| t.trim().to_string()).collect())
 }
 
 /// Un lancement de l'outil : le texte de chaque fichier, dans l'ordre.
@@ -243,7 +244,8 @@ mod live {
             let pcm = read_wav(f);
             let t = std::time::Instant::now();
             let mut steps = 0;
-            let text = transcribe(&data, Path::new(&model), &pcm, &AtomicBool::new(false), |_| steps += 1).await.unwrap();
+            let pieces = split_on_silence(&pcm, CHUNK_SECS);
+            let text = transcribe(&data, Path::new(&model), &pcm, &pieces, &AtomicBool::new(false), |_| steps += 1).await.unwrap().join(" ");
             let secs = pcm.len() as f64 / RATE as f64;
             println!("\n=== {f} : {secs:.0} s d'audio, transcrit en {:.1} s ({steps} étapes)\n{text}", t.elapsed().as_secs_f64());
             if let Ok(out) = std::env::var("LUMEN_PARAKEET_OUT") {
@@ -285,7 +287,7 @@ mod live {
         assert!(files(&model).iter().all(|f| f.exists()));
         if let Ok(f) = std::env::var("LUMEN_TEST_AUDIO") {
             let pcm = read_wav(&f);
-            let text = transcribe(&data, &model, &pcm, &AtomicBool::new(false), |_| {}).await.unwrap();
+            let text = transcribe(&data, &model, &pcm, &split_on_silence(&pcm, CHUNK_SECS), &AtomicBool::new(false), |_| {}).await.unwrap().join(" ");
             println!("{} mots transcrits", text.split_whitespace().count());
             assert!(!text.is_empty());
         }

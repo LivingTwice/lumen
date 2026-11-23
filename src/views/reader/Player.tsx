@@ -1,4 +1,4 @@
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
+import { forwardRef, memo, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Icon } from "../../components/Icon";
 import { Segmented } from "../../components/ui";
@@ -167,7 +167,8 @@ export function lastLE(n: number, get: (i: number) => number, x: number): number
   return ans;
 }
 
-export const Player = forwardRef<PlayerHandle, Props>(function Player({ lesson, tokens, pages, page, onPage, onCursor, videoHost, videoOff, onState, onResynced, onVoiced, autoplay, onFinished }, ref) {
+// mémorisé : le lecteur ne se redessine pas à chaque mot lu par la leçon autour de lui
+export const Player = memo(forwardRef<PlayerHandle, Props>(function Player({ lesson, tokens, pages, page, onPage, onCursor, videoHost, videoOff, onState, onResynced, onVoiced, autoplay, onFinished }, ref) {
   const settings = useApp((s) => s.settings);
   const setSetting = useApp((s) => s.setSetting);
   const hasMedia = !!lesson.media_path;
@@ -322,7 +323,20 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player({ lesson, 
     [onCursor, onPage, pageOf],
   );
 
+  // barre de progression déplacée directement pendant l'écoute (sans nouveau rendu)
+  const fillRef = useRef<HTMLDivElement>(null);
+  const knobRef = useRef<HTMLDivElement>(null);
+  const drawProgress = useCallback((f: number) => {
+    const pct = `${(Math.min(1, Math.max(0, f)) * 100).toFixed(1)}%`;
+    if (fillRef.current && fillRef.current.style.width !== pct) fillRef.current.style.width = pct;
+    if (knobRef.current && knobRef.current.style.left !== pct) knobRef.current.style.left = pct;
+  }, []);
+
   // ---------- boucle de synchronisation (texte et image) ----------
+  // Elle tourne à chaque image : rien n'y passe par React, sauf ce qui change
+  // vraiment (le mot lu, la seconde affichée). Redessiner le lecteur 60 fois par
+  // seconde (et mesurer la mise en page du sélecteur de vitesse animé) chauffait
+  // le Mac au bout de quelques minutes d'écoute, et tout finissait par ramer.
   useEffect(() => {
     if (!hasMedia || !playing) return;
     let raf = 0;
@@ -330,7 +344,8 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player({ lesson, 
       const el = single ? videoRef.current : audioRef.current;
       if (el) {
         const t = el.currentTime;
-        setTime(t);
+        setTime((prev) => (Math.floor(prev) === Math.floor(t) ? prev : t));
+        drawProgress(el.duration ? t / el.duration : 0);
         remember(t);
         if (timing) {
           const k = lastLE(timing.raw.length, (j) => timing.raw[j][2], t + LANTERN_LEAD);
@@ -359,7 +374,7 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player({ lesson, 
     };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
-  }, [hasMedia, playing, timing, setCursor, single, dual, rate, remember]);
+  }, [hasMedia, playing, timing, setCursor, single, dual, rate, remember, drawProgress]);
 
   // temps d'écoute
   useEffect(() => {
@@ -704,8 +719,8 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player({ lesson, 
         )}
         <div className="timeline" onClick={onTimeline} role="slider" aria-label={t("Position", "Position")} aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(progress * 100)}>
           <div className="track">
-            <div className="fill" style={{ width: `${progress * 100}%` }} />
-            <div className="knob" style={{ left: `${progress * 100}%` }} />
+            <div ref={fillRef} className="fill" style={{ width: `${progress * 100}%` }} />
+            <div ref={knobRef} className="knob" style={{ left: `${progress * 100}%` }} />
           </div>
         </div>
         {hasMedia && <span className="time player-total">{formatDuration(duration)}</span>}
@@ -779,4 +794,4 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player({ lesson, 
       </div>
     </>
   );
-});
+}));

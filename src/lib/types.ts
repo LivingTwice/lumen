@@ -255,8 +255,8 @@ export interface GpuInfo {
 
 export interface ModelRow {
   id: string;
-  /** asr : Whisper (transcription et minutage des mots) ; asrtext : Qwen3-ASR ou Parakeet (texte plus juste) */
-  kind: "llm" | "asr" | "asrtext" | "tts";
+  /** asr : Whisper (transcription et minutage des mots) ; asrtext : Qwen3-ASR ou Parakeet (texte plus juste) ; speakers : qui parle (une réplique par paragraphe) */
+  kind: "llm" | "asr" | "asrtext" | "speakers" | "tts";
   name: string;
   detail: string;
   size: number;
