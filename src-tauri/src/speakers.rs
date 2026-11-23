@@ -82,7 +82,7 @@ pub fn start(model: &Model, pcm: &[f32]) -> Result<Listening> {
     let samples: Vec<i16> = pcm.iter().map(|x| (x.clamp(-1.0, 1.0) * 32767.0).round() as i16).collect();
     std::fs::write(&wav, crate::voice::write_wav(crate::asr::RATE as u32, &samples))?;
     let secs = pcm.len() as u64 / crate::asr::RATE as u64;
-    let mut cmd = crate::proc::tokio_command(crate::sherpa::bin(&model.data_dir, crate::sherpa::Tool::Speakers));
+    let mut cmd = crate::sherpa::command(&model.data_dir, crate::sherpa::Tool::Speakers);
     cmd.arg(format!("--segmentation.pyannote-model={}", model.turns.display()))
         .arg(format!("--segmentation.pyannote-window-shift-ratio={SHIFT}"))
         .arg(format!("--segmentation.num-threads={}", threads()))
