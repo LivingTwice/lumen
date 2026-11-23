@@ -127,7 +127,7 @@ async fn run(data_dir: &Path, model: &Path, pcm: &[f32], pieces: &[(usize, usize
 #[cfg(not(target_os = "ios"))]
 async fn decode(data_dir: &Path, model: &Path, wavs: &[PathBuf]) -> Result<Vec<String>> {
     let [encoder, decoder, joiner, tokens] = files(model);
-    let mut cmd = crate::proc::tokio_command(sherpa::bin(data_dir, Tool::Asr));
+    let mut cmd = sherpa::command(data_dir, Tool::Asr);
     cmd.arg(format!("--encoder={}", encoder.display()))
         .arg(format!("--decoder={}", decoder.display()))
         .arg(format!("--joiner={}", joiner.display()))
