@@ -9,7 +9,7 @@ import { extractArticle, firstWords, wordCount } from "../lib/importers";
 import { stageText, useImports, useJob } from "../lib/imports";
 import { useLessonOf } from "../lib/known";
 import { LANGS, inLang } from "../lib/langs";
-import { isPc } from "../lib/platform";
+import { isLinux, isPc } from "../lib/platform";
 import { jobOf, usePreview, type Previewable } from "../lib/preview";
 import { formatBytes, formatDuration, useApp } from "../lib/store";
 import type { LangCode, Lyrics, MediaStream, TextStats } from "../lib/types";
@@ -129,7 +129,9 @@ function LyricsView({ lyrics, time, live }: { lyrics: Lyrics; time: number; live
 
 // ---------- lecteur ----------
 
-const SPEEDS = [1, 0.85, 0.7];
+/** Vitesses de l'aperçu. Sous Linux, le son et la vidéo restent à 1× : le lecteur de
+ * WebKitGTK arrête le son pour de bon après un changement de vitesse. */
+const SPEEDS = isLinux ? [1] : [1, 0.85, 0.7];
 
 /** Flux HLS (YouTube : `hls_playlist`, Dailymotion : `.m3u8`). */
 const isHls = (url: string) => /\.m3u8|hls_playlist|\/hls\//i.test(url);
@@ -302,14 +304,16 @@ function Player({ source, poster, cover, known, onTime }: { source: MediaStream;
         <label className="pv-scrub" style={{ ["--p" as string]: `${pct}%` }}>
           <input type="range" min={0} max={total || 1} step={0.1} value={Math.min(time, total || time)} onChange={(e) => seek(Number(e.target.value))} aria-label={t("Position", "Position")} />
         </label>
-        <button
-          className="pv-ctl pv-speed num"
-          onClick={() => setSpeed((s) => SPEEDS[(SPEEDS.indexOf(s) + 1) % SPEEDS.length])}
-          title={t("Vitesse de lecture", "Playback speed")}
-          aria-label={t("Vitesse de lecture", "Playback speed")}
-        >
-          {speed === 1 ? "1×" : `${String(speed).replace(".", t(",", "."))}×`}
-        </button>
+        {SPEEDS.length > 1 && (
+          <button
+            className="pv-ctl pv-speed num"
+            onClick={() => setSpeed((s) => SPEEDS[(SPEEDS.indexOf(s) + 1) % SPEEDS.length])}
+            title={t("Vitesse de lecture", "Playback speed")}
+            aria-label={t("Vitesse de lecture", "Playback speed")}
+          >
+            {speed === 1 ? "1×" : `${String(speed).replace(".", t(",", "."))}×`}
+          </button>
+        )}
         <button className="pv-ctl" onClick={() => setMuted((m) => !m)} aria-label={muted ? t("Remettre le son", "Unmute") : t("Couper le son", "Mute")}>
           <Icon name={muted ? "mute" : "speaker"} size={17} />
         </button>

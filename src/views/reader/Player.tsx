@@ -7,6 +7,7 @@ import { followAudio } from "../../lib/avsync";
 import { confirmAsk } from "../../lib/dialogs";
 import { t } from "../../lib/i18n";
 import { naturalVoiceSpeaks, stopPronunciation } from "../../lib/pronounce";
+import { isLinux } from "../../lib/platform";
 import { playbackRates } from "../../lib/reading";
 import { formatDuration, useApp } from "../../lib/store";
 import { RUN_ON_WORDS, longestRun, type PageRange } from "../../lib/tokenize";
@@ -280,7 +281,8 @@ export const Player = memo(forwardRef<PlayerHandle, Props>(function Player({ les
   };
 
   const rateKey = hasMedia ? "media_rate" : "tts_rate";
-  const rate = parseFloat(settings[rateKey] ?? (hasMedia ? "1" : "0.95")) || 1;
+  // Linux : le son et la vidéo restent à 1× (playbackRates), même si le réglage dit autre chose
+  const rate = hasMedia && isLinux ? 1 : parseFloat(settings[rateKey] ?? (hasMedia ? "1" : "0.95")) || 1;
 
   useEffect(() => {
     onState?.({ playing, time, duration });
@@ -719,24 +721,29 @@ export const Player = memo(forwardRef<PlayerHandle, Props>(function Player({ les
           </div>
         </div>
         {hasMedia && <span className="time player-total">{formatDuration(duration)}</span>}
-        <div className="rate-full">
-          <Segmented
-            id={`rate-${hasMedia ? "m" : "t"}`}
-            label={t("Vitesse", "Speed")}
-            value={rates.includes(String(rate)) ? String(rate) : rates[2]}
-            onChange={(v) => setSetting(rateKey, v)}
-            options={rates.map((r) => ({ value: r, label: `${t(r.replace(".", ","), r)}×` }))}
-          />
-        </div>
-        {/* fenêtre étroite : un seul bouton qui passe à la vitesse suivante */}
-        <button
-          className="btn sm soft rate-compact num"
-          onClick={() => setSetting(rateKey, rates[(rates.indexOf(String(rate)) + 1) % rates.length])}
-          aria-label={t("Vitesse de lecture", "Playback speed")}
-          title={t("Vitesse de lecture", "Playback speed")}
-        >
-          {t(String(rate).replace(".", ","), String(rate))}×
-        </button>
+        {/* une seule vitesse possible (Linux, un son ou une vidéo) : rien à choisir */}
+        {rates.length > 1 && (
+          <>
+            <div className="rate-full">
+              <Segmented
+                id={`rate-${hasMedia ? "m" : "t"}`}
+                label={t("Vitesse", "Speed")}
+                value={rates.includes(String(rate)) ? String(rate) : rates[2]}
+                onChange={(v) => setSetting(rateKey, v)}
+                options={rates.map((r) => ({ value: r, label: `${t(r.replace(".", ","), r)}×` }))}
+              />
+            </div>
+            {/* fenêtre étroite : un seul bouton qui passe à la vitesse suivante */}
+            <button
+              className="btn sm soft rate-compact num"
+              onClick={() => setSetting(rateKey, rates[(rates.indexOf(String(rate)) + 1) % rates.length])}
+              aria-label={t("Vitesse de lecture", "Playback speed")}
+              title={t("Vitesse de lecture", "Playback speed")}
+            >
+              {t(String(rate).replace(".", ","), String(rate))}×
+            </button>
+          </>
+        )}
         {/* la page tourne avec la lecture, ou reste où l'on lit pendant que le son continue */}
         <button
           className={`icon-btn player-follow ${follow ? "" : "off"}`}
