@@ -1,6 +1,7 @@
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api, errorText } from "../lib/api";
+import { followAudio } from "../lib/avsync";
 import { formatWhen } from "../lib/backup";
 import { ago, levelRange, openSource, useDiscover } from "../lib/discover";
 import { count, formatNumber, t } from "../lib/i18n";
@@ -186,17 +187,16 @@ function Player({ source, poster, cover, known, onTime }: { source: MediaStream;
   useEffect(() => {
     if (!dual) return;
     let raf = 0;
+    const seek = { at: 0 };
     const tick = () => {
       const a = audio.current;
       const v = video.current;
-      if (a && v && v.readyState >= 2) {
-        const d = v.currentTime - a.currentTime;
-        if (Math.abs(d) > 0.35) {
-          v.currentTime = a.currentTime;
-          v.playbackRate = speed;
-        } else if (Math.abs(d) > 0.06) v.playbackRate = speed * (d > 0 ? 0.96 : 1.04);
-        else if (v.playbackRate !== speed) v.playbackRate = speed;
-        if (!a.paused && v.paused) void v.play().catch(() => {});
+      if (a && v) {
+        if (v.readyState >= 2) {
+          followAudio(v, a.currentTime, speed, seek);
+          if (!a.paused && v.paused) void v.play().catch(() => {});
+        }
+        // même sans image prête : une image qui continue sans le son ne se défend pas
         if (a.paused && !v.paused) v.pause();
       }
       raf = requestAnimationFrame(tick);

@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { Icon } from "../../components/Icon";
 import { Segmented } from "../../components/ui";
 import { api, errorText, isNoModel, isTauri } from "../../lib/api";
+import { followAudio } from "../../lib/avsync";
 import { confirmAsk } from "../../lib/dialogs";
 import { t } from "../../lib/i18n";
 import { naturalVoiceSpeaks, stopPronunciation } from "../../lib/pronounce";
@@ -340,6 +341,7 @@ export const Player = memo(forwardRef<PlayerHandle, Props>(function Player({ les
   useEffect(() => {
     if (!hasMedia || !playing) return;
     let raf = 0;
+    const seek = { at: 0 };
     const tick = () => {
       const el = single ? videoRef.current : audioRef.current;
       if (el) {
@@ -356,17 +358,10 @@ export const Player = memo(forwardRef<PlayerHandle, Props>(function Player({ les
           }
         }
         // l'image suit le son : petite correction de vitesse, ou saut si l'écart est grand
+        // (sous Linux, des sauts espacés seulement : voir followAudio)
         const v = videoRef.current;
         if (dual && v && !idleRef.current && v.readyState >= 2) {
-          const d = v.currentTime - t;
-          if (Math.abs(d) > 0.35) {
-            v.currentTime = t;
-            v.playbackRate = rate;
-          } else if (Math.abs(d) > 0.06) {
-            v.playbackRate = rate * (d > 0 ? 0.96 : 1.04);
-          } else if (v.playbackRate !== rate) {
-            v.playbackRate = rate;
-          }
+          followAudio(v, t, rate, seek);
           if (v.paused) void v.play().catch(() => {});
         }
       }
