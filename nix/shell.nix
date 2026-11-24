@@ -14,6 +14,7 @@
 , shaderc
 , llvmPackages
 , glib
+, glib-networking
 , gsettings-desktop-schemas
 , gtk3
 , webkitgtk_4_1
@@ -44,6 +45,7 @@ llvmPackages.stdenv.mkDerivation {
     libpulseaudio
     spirv-headers
     glib
+    glib-networking
     gsettings-desktop-schemas
     gtk3
     webkitgtk_4_1
@@ -71,6 +73,9 @@ llvmPackages.stdenv.mkDerivation {
     # Vulkan pour llama.cpp et whisper.cpp : leurs scripts de construction
     # lancent leur propre CMake, qui ne voit pas les paquets du shell autrement
     export CMAKE_PREFIX_PATH="${lib.concatStringsSep ":" [ vulkan-headers vulkan-loader spirv-headers ]}"
+    # le moteur TLS de GLib à portée de la fenêtre (https dans le WebView : images
+    # et flux de Découvrir), comme le paquet le fait par wrapGAppsHook
+    export GIO_EXTRA_MODULES="${lib.getLib glib-networking}/lib/gio/modules"
     export XDG_DATA_DIRS="${gsettings-desktop-schemas}/share/gsettings-schemas/${gsettings-desktop-schemas.name}:${gtk3}/share/gsettings-schemas/${gtk3.name}:$XDG_DATA_DIRS"
     export GST_PLUGIN_SYSTEM_PATH_1_0="${lib.makeSearchPath "lib/gstreamer-1.0" [
       (lib.getLib gst_all_1.gstreamer)

@@ -18,6 +18,7 @@
 , spirv-headers
 , shaderc
 , glib
+, glib-networking
 , gsettings-desktop-schemas
 , gtk3
 , webkitgtk_4_1
@@ -107,6 +108,11 @@ rustPlatform.buildRustPackage {
     vulkan-loader
     spirv-headers
     glib
+    # le réseau https de la fenêtre : WebKitGTK passe par GLib, dont le moteur TLS
+    # vit dans glib-networking. wrapGAppsHook ne le met à portée des processus de la
+    # fenêtre que s'il est ici ; sans lui aucune image ni aucun flux distant ne se
+    # charge (l'aperçu de Découvrir : « La lecture n'a pas pu commencer. »)
+    glib-networking
     gsettings-desktop-schemas
     gtk3
     webkitgtk_4_1
