@@ -1348,14 +1348,16 @@ pub async fn yt_flat(data_dir: &Path, ytdlp: &Path, url: &str, from: usize, to: 
 /// Adresses de lecture directe d'une vidéo (ou du seul son), pour la regarder
 /// avant d'en faire une leçon : image H.264 et son AAC séparés (que la WebView lit
 /// telles quelles), sinon un flux qui porte les deux (HLS compris).
-/// L'image de YouTube se prend en HLS : WebKit ne lit pas ses fichiers DASH
-/// d'image seule (la vidéo restait figée, le son seul jouait). Le son, lui, se
-/// lit très bien en DASH.
+/// L'image de YouTube se prend en HLS sur Mac : WebKit n'y lit pas ses fichiers
+/// DASH d'image seule (la vidéo restait figée, le son seul jouait). Le son, lui,
+/// se lit très bien en DASH.
 pub async fn yt_stream(data_dir: &Path, ytdlp: &Path, url: &str, audio_only: bool, browser: Option<&str>) -> Result<serde_json::Value> {
     let format = if audio_only {
         "ba[ext=m4a][protocol=https]/ba[protocol=https]/ba/b"
-    } else if cfg!(windows) {
-        // le moteur de Windows (WebView2) lit l'image DASH de YouTube, pas toujours le HLS
+    } else if cfg!(any(windows, target_os = "linux")) {
+        // WebView2 (Windows) lit l'image DASH de YouTube, pas toujours le HLS ; WebKitGTK
+        // (Linux) lit la DASH et pas le HLS du tout (hls.js ne peut lire le manifeste de
+        // YouTube, qui refuse la lecture croisée) : la DASH pour tous les deux
         "bv*[vcodec^=avc1][height<=720][protocol=https]+ba[ext=m4a][protocol=https]/b[vcodec^=avc1][acodec!=none][protocol=https]/bv*[vcodec^=avc1][height<=720][protocol^=m3u8]+ba[ext=m4a][protocol=https]/b[protocol=https]/b[protocol^=m3u8]/b"
     } else {
         "bv*[vcodec^=avc1][height<=720][protocol^=m3u8]+ba[ext=m4a][protocol=https]/bv*[vcodec^=avc1][height<=720][protocol=https]+ba[ext=m4a][protocol=https]/b[vcodec^=avc1][acodec!=none][protocol=https]/b[protocol^=m3u8]/b[protocol=https]/b"
