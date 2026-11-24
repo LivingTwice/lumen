@@ -65,6 +65,16 @@ pub fn run() {
     if std::env::var_os("WEBKIT_DISABLE_DMABUF_RENDERER").is_none() {
         std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
     }
+    // Linux : le lecteur média que WebKitGTK prend d'office (l'ancien playbin) annonce
+    // la vidéo chargée avant qu'elle le soit, s'arrête pour mettre en tampon et ne
+    // reprend pas toujours ; un saut peut figer l'image pour de bon. Le lecteur récent
+    // (playbin3) n'a aucun de ces défauts : la vidéo joue d'emblée à 30 images par
+    // seconde, les sauts sont propres. Posée seulement si l'apprenant n'a pas choisi
+    // lui-même : WEBKIT_GST_USE_PLAYBIN3=0 revient à l'ancien lecteur.
+    #[cfg(target_os = "linux")]
+    if std::env::var_os("WEBKIT_GST_USE_PLAYBIN3").is_none() {
+        std::env::set_var("WEBKIT_GST_USE_PLAYBIN3", "1");
+    }
     let builder = tauri::Builder::default().plugin(tauri_plugin_dialog::init()).plugin(tauri_plugin_opener::init());
     // mises à jour et relance : Mac, Windows et Linux (sur iPhone et iPad, l'App Store s'en charge)
     #[cfg(desktop)]
