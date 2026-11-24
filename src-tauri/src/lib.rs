@@ -54,17 +54,11 @@ use tauri::Manager;
 // iPhone et iPad : point d'entrée appelé par le projet Xcode (gen/apple)
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    // Linux : le rendu DMABUF de WebKitGTK viole la règle du point d'acquisition
-    // du composeur sous Wayland, et la fenêtre ne répond plus (vu avec Mesa sur
-    // un iGPU AMD ; le même bogue se voit ailleurs : NVIDIA, X11…). Sans lui,
-    // WebKit compose autrement et tout répond. Posée seulement si l'apprenant
-    // n'a pas choisi lui-même : WEBKIT_DISABLE_DMABUF_RENDERER=0 permet
-    // d'essayer le rendu DMABUF. Le jour où le bogue est réglé dans WebKitGTK,
-    // retirer ce passage.
-    #[cfg(target_os = "linux")]
-    if std::env::var_os("WEBKIT_DISABLE_DMABUF_RENDERER").is_none() {
-        std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
-    }
+    // Linux : le rendu DMABUF de WebKitGTK (par son processus graphique) est utilisé tel quel :
+    // c'est lui qui rend la fenêtre fluide. Il avait été écarté parce que l'accueil se figeait à
+    // l'étape des langues ; le coupable était le flou de fond des cartes de cette étape
+    // (onboarding.css), pas le rendu. Si un pilote graphique s'entend mal avec lui,
+    // WEBKIT_DISABLE_DMABUF_RENDERER=1 revient au rendu par le processeur (lent).
     // Linux : le lecteur média que WebKitGTK prend d'office (l'ancien playbin) annonce
     // la vidéo chargée avant qu'elle le soit, s'arrête pour mettre en tampon et ne
     // reprend pas toujours ; un saut peut figer l'image pour de bon. Le lecteur récent

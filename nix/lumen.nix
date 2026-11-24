@@ -162,8 +162,6 @@ rustPlatform.buildRustPackage {
   # pour YouTube et l'audio des leçons, espeak-ng pour les mots sans voix
   # naturelle (chinois, ou avant le téléchargement), les ressources là où
   # Lumen les attend.
-  # (Le contournement du rendu DMABUF de WebKitGTK vit dans lib.rs, pour tous
-  # les paquets : nix, deb, appimage, développement.)
   postFixup = ''
     wrapProgram $out/bin/lumen \
       --set LUMEN_RESOURCES $out/share/lumen \

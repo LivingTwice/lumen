@@ -68,7 +68,6 @@ llvmPackages.stdenv.mkDerivation {
   BINDGEN_EXTRA_CLANG_ARGS = "-I${lib.getDev llvmPackages.stdenv.cc.libc}/include";
 
   # dialogues GTK, schémas de réglages, et vidéos qui se lisent dans la fenêtre
-  # (le contournement du rendu DMABUF de WebKitGTK vit dans lib.rs)
   shellHook = ''
     # Vulkan pour llama.cpp et whisper.cpp : leurs scripts de construction
     # lancent leur propre CMake, qui ne voit pas les paquets du shell autrement
