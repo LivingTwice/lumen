@@ -87,6 +87,11 @@ rustPlatform.buildRustPackage {
   sourceRoot = "source/src-tauri";
   cargoLock.lockFile = ../src-tauri/Cargo.lock;
   doCheck = false;
+  # Depuis nixpkgs de novembre 2026 (cargo-setup-hook.sh), la construction dit à certaines
+  # bibliothèques de crates Rust d'utiliser une copie du système (aws-lc-sys, libsqlite3-sys,
+  # zstd-sys…) sans la fournir : elle s'arrête à la première, aws-lc-sys. Lumen garde leurs
+  # copies embarquées, comme sur Mac et sous Windows : le même SQLite (« bundled ») partout.
+  dontCargoUseSystemLibs = true;
   # Sans la caractéristique custom-protocol de Tauri (celle que « tauri build »
   # active), l'app cherche son interface sur le serveur de développement
   # (localhost:1420) au lieu de l'embarquer
