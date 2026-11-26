@@ -86,5 +86,8 @@ llvmPackages.stdenv.mkDerivation {
     ]}"
     # le même chemin par l'ancienne variable : certains codes ne lisent que celle-là
     export GST_PLUGIN_PATH="$GST_PLUGIN_SYSTEM_PATH_1_0"
+    # l'aperçu de Découvrir lu par segments depuis l'interface, comme dans le paquet
+    # (nix/lumen.nix dit pourquoi) ; `LUMEN_PREVIEW_STREAMER=0 nix develop` le coupe
+    export LUMEN_PREVIEW_STREAMER="''${LUMEN_PREVIEW_STREAMER:-1}"
   '';
 }

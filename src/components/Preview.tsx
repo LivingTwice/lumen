@@ -11,6 +11,7 @@ import { useLessonOf } from "../lib/known";
 import { LANGS, inLang } from "../lib/langs";
 import { isLinux, isPc } from "../lib/platform";
 import { jobOf, usePreview, type Previewable } from "../lib/preview";
+import { canStream, startStreamer } from "../lib/streamer";
 import { formatBytes, formatDuration, useApp } from "../lib/store";
 import type { LangCode, Lyrics, MediaStream, TextStats } from "../lib/types";
 import { CoverArt } from "./Cover";
@@ -169,12 +170,17 @@ function useWindowsSource(el: React.RefObject<HTMLMediaElement | null>, url: str
   }, [el, url]);
 }
 
-/** Vidéo (muette si le son est à part, qu'elle suit) ou son seul, avec ses commandes. */
-function Player({ source, poster, cover, known, onTime }: { source: MediaStream; poster: string; cover?: React.ReactNode; known: number; onTime?(t: number): void }) {
+/**
+ * Vidéo (muette si le son est à part, qu'elle suit) ou son seul, avec ses commandes.
+ * `segments` (Linux) : la vidéo arrive par segments et l'image et le son n'en font qu'un ;
+ * si ce chemin-là ne peut pas servir, `onFallback` ramène à la lecture directe.
+ */
+function Player({ source, poster, cover, known, onTime, onFallback }: { source: MediaStream; poster: string; cover?: React.ReactNode; known: number; onTime?(t: number): void; onFallback(): void }) {
   const video = useRef<HTMLVideoElement>(null);
   const audio = useRef<HTMLAudioElement>(null);
-  const dual = !!source.video && !!source.audio;
-  const master = () => (source.audio ? audio.current : video.current);
+  const streamed = !!source.segments;
+  const dual = !!source.video && !!source.audio && !streamed;
+  const master = () => (source.audio && !streamed ? audio.current : video.current);
   const [playing, setPlaying] = useState(false);
   const [time, setTime] = useState(0);
   const [length, setLength] = useState(0);
@@ -184,6 +190,19 @@ function Player({ source, poster, cover, known, onTime }: { source: MediaStream;
   const [failed, setFailed] = useState(false);
   useWindowsSource(video, source.video);
   useWindowsSource(audio, source.audio);
+
+  // Linux : l'interface donne les segments au moteur (lib/streamer.ts), d'un seul montage
+  const fallback = useRef(onFallback);
+  fallback.current = onFallback;
+  useEffect(() => {
+    if (!source.segments || !video.current) return;
+    if (!canStream(source.segments)) {
+      fallback.current();
+      return;
+    }
+    const streamer = startStreamer(video.current, source.segments, known > 0 ? known : 0, { error: fallback.current });
+    return () => streamer.stop();
+  }, [source.segments, known]);
 
   // le son est le maître : la vidéo muette le suit (même correction que dans les leçons)
   useEffect(() => {
@@ -267,10 +286,10 @@ function Player({ source, poster, cover, known, onTime }: { source: MediaStream;
         <video
           ref={video}
           className="pv-video"
-          src={isPc ? undefined : source.video}
+          src={isPc || streamed ? undefined : source.video}
           poster={poster || undefined}
           playsInline
-          autoPlay={!dual}
+          autoPlay={!dual && !streamed}
           muted={dual || muted}
           onClick={toggle}
           {...(dual ? { onError: events.onError } : events)}
@@ -278,7 +297,7 @@ function Player({ source, poster, cover, known, onTime }: { source: MediaStream;
       ) : (
         cover
       )}
-      {source.audio && <audio ref={audio} src={isPc ? undefined : source.audio} autoPlay muted={muted} {...events} />}
+      {source.audio && !streamed && <audio ref={audio} src={isPc ? undefined : source.audio} autoPlay muted={muted} {...events} />}
       {failed && (
         <div className="pv-failed">
           <Icon name="ban" size={18} /> {t("La lecture n'a pas pu commencer.", "Playback couldn't start.")}
@@ -429,6 +448,8 @@ function PreviewPanel({ item, onClose }: { item: Previewable; onClose(): void })
   const [time, setTime] = useState(0);
   const [more, setMore] = useState(false);
   const [asked, setAsked] = useState(false);
+  // la lecture par segments n'a pas pu servir : l'aperçu joue l'adresse directe, comme avant
+  const [direct, setDirect] = useState(false);
 
   // chanson : les paroles (déjà là, ou cherchées)
   const [lyrics, setLyrics] = useState<Lyrics | null | undefined>(item.song ? (item.song.lyrics ?? undefined) : null);
@@ -557,7 +578,15 @@ function PreviewPanel({ item, onClose }: { item: Previewable; onClose(): void })
     );
     stage =
       source.state === "ready" ? (
-        <Player source={source.value} poster={item.image} cover={cover} known={source.value.duration || item.duration} onTime={setTime} />
+        <Player
+          key={direct ? "direct" : "segments"}
+          source={direct ? { ...source.value, segments: null } : source.value}
+          poster={item.image}
+          cover={cover}
+          known={source.value.duration || item.duration}
+          onTime={setTime}
+          onFallback={() => setDirect(true)}
+        />
       ) : (
         <div className={`pv-player waiting ${item.kind === "video" ? "has-video" : "sound"}`}>
           {item.kind === "video" ? item.image && <img className="pv-poster" src={item.image} alt="" /> : cover}

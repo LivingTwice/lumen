@@ -22,6 +22,8 @@ use crate::lyrics;
 use crate::level;
 use crate::podcast;
 use crate::search;
+#[cfg(target_os = "linux")]
+use crate::streamer;
 use crate::media::{self, ImportEvent};
 use crate::models::{self, DownloadEvent};
 use crate::online;
@@ -1908,7 +1910,11 @@ pub async fn search_online(
 #[tauri::command]
 pub async fn media_stream(state: State<'_, AppState>, url: String, audio: bool) -> R<search::Stream> {
     let browser = db::setting(&state.db.lock(), "youtube_browser").filter(|b| !b.is_empty());
-    search::stream(&state.data_dir, &url, audio, browser.as_deref()).await.map_err(err)
+    let stream = search::stream(&state.data_dir, &url, audio, browser.as_deref()).await.map_err(err)?;
+    // Linux : l'interface peut lire la vidéo par segments quand elle en a l'index (streamer.rs)
+    #[cfg(target_os = "linux")]
+    let stream = streamer::decorate(stream, &state.media_base).await;
+    Ok(stream)
 }
 
 /// La vidéo YouTube d'une chanson (version de l'album de préférence).

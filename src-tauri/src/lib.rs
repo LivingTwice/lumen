@@ -37,6 +37,8 @@ mod user;
 mod voice;
 #[cfg(target_os = "linux")]
 mod mediaserv;
+#[cfg(target_os = "linux")]
+mod streamer;
 #[cfg(windows)]
 mod vulkan;
 // Whisper dans l'app : iPhone et iPad (essais sur Mac : LUMEN_WHISPER_INAPP=1)

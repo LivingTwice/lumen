@@ -167,10 +167,19 @@ rustPlatform.buildRustPackage {
   # pour YouTube et l'audio des leçons, espeak-ng pour les mots sans voix
   # naturelle (chinois, ou avant le téléchargement), les ressources là où
   # Lumen les attend.
+  #
+  # L'aperçu de Découvrir lu par segments depuis l'interface (streamer.rs,
+  # lib/streamer.ts) plutôt que téléchargé par le moteur de WebKitGTK, qui
+  # laisse souvent l'image en suspens au démarrage (défaut du tampon de
+  # téléchargement de GStreamer, encore présent en 1.28.9). Cette ligne
+  # l'allume par défaut : `LUMEN_PREVIEW_STREAMER=0 nix run .#lumen` coupe la
+  # lecture par segments et revient à l'élément vidéo seul, pour comparer.
+  # Le jour où GStreamer n'aura plus ce défaut : l'enlever.
   postFixup = ''
     wrapProgram $out/bin/lumen \
       --set LUMEN_RESOURCES $out/share/lumen \
       --set LUMEN_ESPEAK ${espeak-ng}/bin/espeak-ng \
+      --set-default LUMEN_PREVIEW_STREAMER 1 \
       --prefix GST_PLUGIN_SYSTEM_PATH_1_0 : "${lib.makeSearchPath "lib/gstreamer-1.0" [
         (lib.getLib gst_all_1.gstreamer)
         gst_all_1.gst-plugins-base
