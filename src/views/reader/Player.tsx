@@ -3,9 +3,11 @@ import { createPortal } from "react-dom";
 import { Icon } from "../../components/Icon";
 import { Segmented } from "../../components/ui";
 import { api, errorText, isNoModel, isTauri } from "../../lib/api";
+import { followAudio } from "../../lib/avsync";
 import { confirmAsk } from "../../lib/dialogs";
 import { t } from "../../lib/i18n";
 import { naturalVoiceSpeaks, stopPronunciation } from "../../lib/pronounce";
+import { isLinux } from "../../lib/platform";
 import { playbackRates } from "../../lib/reading";
 import { formatDuration, useApp } from "../../lib/store";
 import { RUN_ON_WORDS, longestRun, type PageRange } from "../../lib/tokenize";
@@ -279,7 +281,8 @@ export const Player = memo(forwardRef<PlayerHandle, Props>(function Player({ les
   };
 
   const rateKey = hasMedia ? "media_rate" : "tts_rate";
-  const rate = parseFloat(settings[rateKey] ?? (hasMedia ? "1" : "0.95")) || 1;
+  // Linux : le son et la vidéo restent à 1× (playbackRates), même si le réglage dit autre chose
+  const rate = hasMedia && isLinux ? 1 : parseFloat(settings[rateKey] ?? (hasMedia ? "1" : "0.95")) || 1;
 
   useEffect(() => {
     onState?.({ playing, time, duration });
@@ -340,6 +343,7 @@ export const Player = memo(forwardRef<PlayerHandle, Props>(function Player({ les
   useEffect(() => {
     if (!hasMedia || !playing) return;
     let raf = 0;
+    const seek = { at: 0 };
     const tick = () => {
       const el = single ? videoRef.current : audioRef.current;
       if (el) {
@@ -356,17 +360,10 @@ export const Player = memo(forwardRef<PlayerHandle, Props>(function Player({ les
           }
         }
         // l'image suit le son : petite correction de vitesse, ou saut si l'écart est grand
+        // (sous Linux, des sauts espacés seulement : voir followAudio)
         const v = videoRef.current;
         if (dual && v && !idleRef.current && v.readyState >= 2) {
-          const d = v.currentTime - t;
-          if (Math.abs(d) > 0.35) {
-            v.currentTime = t;
-            v.playbackRate = rate;
-          } else if (Math.abs(d) > 0.06) {
-            v.playbackRate = rate * (d > 0 ? 0.96 : 1.04);
-          } else if (v.playbackRate !== rate) {
-            v.playbackRate = rate;
-          }
+          followAudio(v, t, rate, seek);
           if (v.paused) void v.play().catch(() => {});
         }
       }
@@ -724,24 +721,29 @@ export const Player = memo(forwardRef<PlayerHandle, Props>(function Player({ les
           </div>
         </div>
         {hasMedia && <span className="time player-total">{formatDuration(duration)}</span>}
-        <div className="rate-full">
-          <Segmented
-            id={`rate-${hasMedia ? "m" : "t"}`}
-            label={t("Vitesse", "Speed")}
-            value={rates.includes(String(rate)) ? String(rate) : rates[2]}
-            onChange={(v) => setSetting(rateKey, v)}
-            options={rates.map((r) => ({ value: r, label: `${t(r.replace(".", ","), r)}×` }))}
-          />
-        </div>
-        {/* fenêtre étroite : un seul bouton qui passe à la vitesse suivante */}
-        <button
-          className="btn sm soft rate-compact num"
-          onClick={() => setSetting(rateKey, rates[(rates.indexOf(String(rate)) + 1) % rates.length])}
-          aria-label={t("Vitesse de lecture", "Playback speed")}
-          title={t("Vitesse de lecture", "Playback speed")}
-        >
-          {t(String(rate).replace(".", ","), String(rate))}×
-        </button>
+        {/* une seule vitesse possible (Linux, un son ou une vidéo) : rien à choisir */}
+        {rates.length > 1 && (
+          <>
+            <div className="rate-full">
+              <Segmented
+                id={`rate-${hasMedia ? "m" : "t"}`}
+                label={t("Vitesse", "Speed")}
+                value={rates.includes(String(rate)) ? String(rate) : rates[2]}
+                onChange={(v) => setSetting(rateKey, v)}
+                options={rates.map((r) => ({ value: r, label: `${t(r.replace(".", ","), r)}×` }))}
+              />
+            </div>
+            {/* fenêtre étroite : un seul bouton qui passe à la vitesse suivante */}
+            <button
+              className="btn sm soft rate-compact num"
+              onClick={() => setSetting(rateKey, rates[(rates.indexOf(String(rate)) + 1) % rates.length])}
+              aria-label={t("Vitesse de lecture", "Playback speed")}
+              title={t("Vitesse de lecture", "Playback speed")}
+            >
+              {t(String(rate).replace(".", ","), String(rate))}×
+            </button>
+          </>
+        )}
         {/* la page tourne avec la lecture, ou reste où l'on lit pendant que le son continue */}
         <button
           className={`icon-btn player-follow ${follow ? "" : "off"}`}

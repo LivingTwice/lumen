@@ -1,7 +1,7 @@
 import type { CSSProperties } from "react";
 import { t } from "./i18n";
 import { langInfo } from "./langs";
-import { isWindows } from "./platform";
+import { isLinux, isPc } from "./platform";
 
 /**
  * Affichage des leçons : mise en page, police, taille, couleur de la page,
@@ -48,7 +48,7 @@ export const READ_FONTS: ReadFont[] = [
 ];
 
 /** Polices proposées sur ce système (une police du Mac choisie avant reste lisible : `readFont`). */
-export const readFonts = (): ReadFont[] => (isWindows ? READ_FONTS.filter((f) => !f.mac) : READ_FONTS);
+export const readFonts = (): ReadFont[] => (isPc ? READ_FONTS.filter((f) => !f.mac) : READ_FONTS);
 
 export interface Paper {
   id: string;
@@ -145,9 +145,12 @@ export const LOOK_DEFAULTS: Record<string, string> = {
   word_panel: "auto",
 };
 
-/** Vitesses de lecture : audio et vidéo, ou voix (réglages `media_rate` et `tts_rate`). */
+/** Vitesses de lecture : audio et vidéo, ou voix (réglages `media_rate` et `tts_rate`).
+ * Sous Linux, le son et la vidéo restent à 1× : le lecteur de WebKitGTK arrête le son
+ * pour de bon après un changement de vitesse. */
 export function playbackRates(media: boolean): string[] {
-  return media ? ["0.75", "0.9", "1", "1.25"] : ["0.75", "0.85", "0.95", "1.1"];
+  if (!media) return ["0.75", "0.85", "0.95", "1.1"];
+  return isLinux ? ["1"] : ["0.75", "0.9", "1", "1.25"];
 }
 
 export function readFont(id: string | undefined): ReadFont {

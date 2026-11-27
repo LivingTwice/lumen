@@ -934,6 +934,15 @@ pub struct Stream {
     pub video: String,
     /// son à part, que la vidéo muette suit
     pub audio: String,
+    /// codec de l'image et du son annoncés par le site (« avc1.4d401f », « mp4a.40.2 »), vides si inconnus
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub vcodec: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub acodec: String,
+    /// Linux : de quoi lire l'image et le son par segments depuis l'interface (voir `streamer.rs`) ;
+    /// absent quand le flux ne s'y prête pas, ou que la lecture directe suffit
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub segments: Option<Segments>,
     pub width: i64,
     pub height: i64,
     /// langue parlée annoncée par le site (YouTube), vide si inconnue
@@ -944,6 +953,39 @@ pub struct Stream {
     pub duration: f64,
     pub published: i64,
     pub count: i64,
+}
+
+/// Image et son d'une vidéo lus par segments depuis l'interface (Linux, `streamer.rs`) :
+/// comme le lecteur de youtube.com, sans passer par le téléchargement du moteur.
+#[derive(Serialize, Clone, Debug)]
+pub struct Segments {
+    pub video: Track,
+    pub audio: Track,
+}
+
+/// Une piste : son en-tête et la table de ses segments.
+#[derive(Serialize, Clone, Debug)]
+pub struct Track {
+    /// adresse, servie par Lumen, des octets du fichier (une plage à la fois)
+    pub url: String,
+    /// codec de la piste, pour le tampon du moteur
+    pub codec: String,
+    /// fin de l'en-tête (ftyp puis moov) : ses octets vont de 0 à `init_end - 1`
+    pub init_end: u64,
+    pub segments: Vec<Segment>,
+}
+
+/// Un segment : ses octets dans le fichier, l'instant où il commence et sa durée.
+#[derive(Serialize, Clone, Debug, PartialEq)]
+pub struct Segment {
+    /// son premier octet
+    pub start: u64,
+    /// le premier octet qui n'en fait plus partie
+    pub end: u64,
+    /// instant du début, en secondes
+    pub time: f64,
+    /// durée, en secondes
+    pub duration: f64,
 }
 
 fn stream_of(v: &Value) -> Stream {
@@ -970,10 +1012,12 @@ fn stream_of(v: &Value) -> Stream {
         let sound_only = f.get("vcodec").and_then(Value::as_str) == Some("none");
         if !sound_only && s.video.is_empty() {
             s.video = url;
+            s.vcodec = str_of(f, "vcodec");
             s.width = f.get("width").and_then(Value::as_i64).unwrap_or(0);
             s.height = f.get("height").and_then(Value::as_i64).unwrap_or(0);
         } else if sound_only && s.audio.is_empty() {
             s.audio = url;
+            s.acodec = str_of(f, "acodec");
         }
     }
     // un flux unique sans indication de codec : on le confie à l'élément vidéo

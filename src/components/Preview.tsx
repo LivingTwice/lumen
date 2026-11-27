@@ -1,6 +1,7 @@
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api, errorText } from "../lib/api";
+import { followAudio } from "../lib/avsync";
 import { formatWhen } from "../lib/backup";
 import { ago, levelRange, openSource, useDiscover } from "../lib/discover";
 import { count, formatNumber, t } from "../lib/i18n";
@@ -8,8 +9,9 @@ import { extractArticle, firstWords, wordCount } from "../lib/importers";
 import { stageText, useImports, useJob } from "../lib/imports";
 import { useLessonOf } from "../lib/known";
 import { LANGS, inLang } from "../lib/langs";
-import { isWindows } from "../lib/platform";
+import { isLinux, isPc } from "../lib/platform";
 import { jobOf, usePreview, type Previewable } from "../lib/preview";
+import { canStream, startStreamer } from "../lib/streamer";
 import { formatBytes, formatDuration, useApp } from "../lib/store";
 import type { LangCode, Lyrics, MediaStream, TextStats } from "../lib/types";
 import { CoverArt } from "./Cover";
@@ -128,7 +130,9 @@ function LyricsView({ lyrics, time, live }: { lyrics: Lyrics; time: number; live
 
 // ---------- lecteur ----------
 
-const SPEEDS = [1, 0.85, 0.7];
+/** Vitesses de l'aperçu. Sous Linux, le son et la vidéo restent à 1× : le lecteur de
+ * WebKitGTK arrête le son pour de bon après un changement de vitesse. */
+const SPEEDS = isLinux ? [1] : [1, 0.85, 0.7];
 
 /** Flux HLS (YouTube : `hls_playlist`, Dailymotion : `.m3u8`). */
 const isHls = (url: string) => /\.m3u8|hls_playlist|\/hls\//i.test(url);
@@ -141,7 +145,7 @@ const isHls = (url: string) => /\.m3u8|hls_playlist|\/hls\//i.test(url);
 function useWindowsSource(el: React.RefObject<HTMLMediaElement | null>, url: string) {
   useEffect(() => {
     const media = el.current;
-    if (!isWindows || !media || !url) return;
+    if (!isPc || !media || !url) return;
     if (!isHls(url) || media.canPlayType("application/vnd.apple.mpegurl")) {
       media.src = url;
       return;
@@ -166,12 +170,17 @@ function useWindowsSource(el: React.RefObject<HTMLMediaElement | null>, url: str
   }, [el, url]);
 }
 
-/** Vidéo (muette si le son est à part, qu'elle suit) ou son seul, avec ses commandes. */
-function Player({ source, poster, cover, known, onTime }: { source: MediaStream; poster: string; cover?: React.ReactNode; known: number; onTime?(t: number): void }) {
+/**
+ * Vidéo (muette si le son est à part, qu'elle suit) ou son seul, avec ses commandes.
+ * `segments` (Linux) : la vidéo arrive par segments et l'image et le son n'en font qu'un ;
+ * si ce chemin-là ne peut pas servir, `onFallback` ramène à la lecture directe.
+ */
+function Player({ source, poster, cover, known, onTime, onFallback }: { source: MediaStream; poster: string; cover?: React.ReactNode; known: number; onTime?(t: number): void; onFallback(): void }) {
   const video = useRef<HTMLVideoElement>(null);
   const audio = useRef<HTMLAudioElement>(null);
-  const dual = !!source.video && !!source.audio;
-  const master = () => (source.audio ? audio.current : video.current);
+  const streamed = !!source.segments;
+  const dual = !!source.video && !!source.audio && !streamed;
+  const master = () => (source.audio && !streamed ? audio.current : video.current);
   const [playing, setPlaying] = useState(false);
   const [time, setTime] = useState(0);
   const [length, setLength] = useState(0);
@@ -182,21 +191,33 @@ function Player({ source, poster, cover, known, onTime }: { source: MediaStream;
   useWindowsSource(video, source.video);
   useWindowsSource(audio, source.audio);
 
+  // Linux : l'interface donne les segments au moteur (lib/streamer.ts), d'un seul montage
+  const fallback = useRef(onFallback);
+  fallback.current = onFallback;
+  useEffect(() => {
+    if (!source.segments || !video.current) return;
+    if (!canStream(source.segments)) {
+      fallback.current();
+      return;
+    }
+    const streamer = startStreamer(video.current, source.segments, known > 0 ? known : 0, { error: fallback.current });
+    return () => streamer.stop();
+  }, [source.segments, known]);
+
   // le son est le maître : la vidéo muette le suit (même correction que dans les leçons)
   useEffect(() => {
     if (!dual) return;
     let raf = 0;
+    const seek = { at: 0 };
     const tick = () => {
       const a = audio.current;
       const v = video.current;
-      if (a && v && v.readyState >= 2) {
-        const d = v.currentTime - a.currentTime;
-        if (Math.abs(d) > 0.35) {
-          v.currentTime = a.currentTime;
-          v.playbackRate = speed;
-        } else if (Math.abs(d) > 0.06) v.playbackRate = speed * (d > 0 ? 0.96 : 1.04);
-        else if (v.playbackRate !== speed) v.playbackRate = speed;
-        if (!a.paused && v.paused) void v.play().catch(() => {});
+      if (a && v) {
+        if (v.readyState >= 2) {
+          followAudio(v, a.currentTime, speed, seek);
+          if (!a.paused && v.paused) void v.play().catch(() => {});
+        }
+        // même sans image prête : une image qui continue sans le son ne se défend pas
         if (a.paused && !v.paused) v.pause();
       }
       raf = requestAnimationFrame(tick);
@@ -265,10 +286,10 @@ function Player({ source, poster, cover, known, onTime }: { source: MediaStream;
         <video
           ref={video}
           className="pv-video"
-          src={isWindows ? undefined : source.video}
+          src={isPc || streamed ? undefined : source.video}
           poster={poster || undefined}
           playsInline
-          autoPlay={!dual}
+          autoPlay={!dual && !streamed}
           muted={dual || muted}
           onClick={toggle}
           {...(dual ? { onError: events.onError } : events)}
@@ -276,7 +297,7 @@ function Player({ source, poster, cover, known, onTime }: { source: MediaStream;
       ) : (
         cover
       )}
-      {source.audio && <audio ref={audio} src={isWindows ? undefined : source.audio} autoPlay muted={muted} {...events} />}
+      {source.audio && !streamed && <audio ref={audio} src={isPc ? undefined : source.audio} autoPlay muted={muted} {...events} />}
       {failed && (
         <div className="pv-failed">
           <Icon name="ban" size={18} /> {t("La lecture n'a pas pu commencer.", "Playback couldn't start.")}
@@ -302,14 +323,16 @@ function Player({ source, poster, cover, known, onTime }: { source: MediaStream;
         <label className="pv-scrub" style={{ ["--p" as string]: `${pct}%` }}>
           <input type="range" min={0} max={total || 1} step={0.1} value={Math.min(time, total || time)} onChange={(e) => seek(Number(e.target.value))} aria-label={t("Position", "Position")} />
         </label>
-        <button
-          className="pv-ctl pv-speed num"
-          onClick={() => setSpeed((s) => SPEEDS[(SPEEDS.indexOf(s) + 1) % SPEEDS.length])}
-          title={t("Vitesse de lecture", "Playback speed")}
-          aria-label={t("Vitesse de lecture", "Playback speed")}
-        >
-          {speed === 1 ? "1×" : `${String(speed).replace(".", t(",", "."))}×`}
-        </button>
+        {SPEEDS.length > 1 && (
+          <button
+            className="pv-ctl pv-speed num"
+            onClick={() => setSpeed((s) => SPEEDS[(SPEEDS.indexOf(s) + 1) % SPEEDS.length])}
+            title={t("Vitesse de lecture", "Playback speed")}
+            aria-label={t("Vitesse de lecture", "Playback speed")}
+          >
+            {speed === 1 ? "1×" : `${String(speed).replace(".", t(",", "."))}×`}
+          </button>
+        )}
         <button className="pv-ctl" onClick={() => setMuted((m) => !m)} aria-label={muted ? t("Remettre le son", "Unmute") : t("Couper le son", "Mute")}>
           <Icon name={muted ? "mute" : "speaker"} size={17} />
         </button>
@@ -425,6 +448,8 @@ function PreviewPanel({ item, onClose }: { item: Previewable; onClose(): void })
   const [time, setTime] = useState(0);
   const [more, setMore] = useState(false);
   const [asked, setAsked] = useState(false);
+  // la lecture par segments n'a pas pu servir : l'aperçu joue l'adresse directe, comme avant
+  const [direct, setDirect] = useState(false);
 
   // chanson : les paroles (déjà là, ou cherchées)
   const [lyrics, setLyrics] = useState<Lyrics | null | undefined>(item.song ? (item.song.lyrics ?? undefined) : null);
@@ -553,7 +578,15 @@ function PreviewPanel({ item, onClose }: { item: Previewable; onClose(): void })
     );
     stage =
       source.state === "ready" ? (
-        <Player source={source.value} poster={item.image} cover={cover} known={source.value.duration || item.duration} onTime={setTime} />
+        <Player
+          key={direct ? "direct" : "segments"}
+          source={direct ? { ...source.value, segments: null } : source.value}
+          poster={item.image}
+          cover={cover}
+          known={source.value.duration || item.duration}
+          onTime={setTime}
+          onFallback={() => setDirect(true)}
+        />
       ) : (
         <div className={`pv-player waiting ${item.kind === "video" ? "has-video" : "sound"}`}>
           {item.kind === "video" ? item.image && <img className="pv-poster" src={item.image} alt="" /> : cover}

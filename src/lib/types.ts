@@ -273,6 +273,8 @@ export interface AppInfo {
   version: string;
   data_dir: string;
   platform: string;
+  /** Linux : adresse de base du serveur local des médias (vide ailleurs) */
+  media_base: string;
   ytdlp: boolean;
   transcriber: boolean;
   dict_langs: string[];
@@ -525,6 +527,11 @@ export interface MediaStream {
   video: string;
   /** son à part, que la vidéo muette suit */
   audio: string;
+  /** codec de l'image et du son annoncés par le site (« avc1.4d401f », « mp4a.40.2 »), vides si inconnus */
+  vcodec?: string;
+  acodec?: string;
+  /** Linux : de quoi lire l'image et le son par segments depuis l'interface (voir `lib/streamer.ts`) ; absent sinon */
+  segments?: MediaSegments | null;
   width: number;
   height: number;
   /** langue parlée annoncée par le site */
@@ -535,6 +542,35 @@ export interface MediaStream {
   duration: number;
   published: number;
   count: number;
+}
+
+/** Un segment d'un fichier MP4 fragmenté : ses octets dans le fichier, l'instant où il commence et sa durée. */
+export interface MediaSegment {
+  /** son premier octet */
+  start: number;
+  /** le premier octet qui n'en fait plus partie */
+  end: number;
+  /** instant du début, en secondes */
+  time: number;
+  /** durée, en secondes */
+  duration: number;
+}
+
+/** Une piste (image ou son) d'une vidéo lue par segments : son en-tête et la table de ses segments. */
+export interface MediaTrack {
+  /** adresse, servie par Lumen, des octets du fichier (une plage à la fois) */
+  url: string;
+  /** codec de la piste, pour le tampon du moteur */
+  codec: string;
+  /** fin de l'en-tête (ftyp puis moov) : ses octets vont de 0 à `init_end - 1` */
+  init_end: number;
+  segments: MediaSegment[];
+}
+
+/** Image et son d'une vidéo lus par segments depuis l'interface (Linux, `lib/streamer.ts`). */
+export interface MediaSegments {
+  video: MediaTrack;
+  audio: MediaTrack;
 }
 
 /** Une chanson à importer (paroles pour texte, la lanterne suit la chanson). */

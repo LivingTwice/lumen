@@ -13,7 +13,7 @@ import { api, isTauri } from "./lib/api";
 import { MEDIA_EXT, TEXT_EXT, extOf } from "./lib/importers";
 import { startBackupEvents } from "./lib/backup";
 import { setUiLang, t, type UiLang } from "./lib/i18n";
-import { useAppMenu, useWindowsKeys } from "./lib/menu";
+import { useAppMenu, usePcKeys } from "./lib/menu";
 import { isMobile, playableCodecs } from "./lib/platform";
 import { useApp } from "./lib/store";
 import { startUpdateChecks } from "./lib/updater";
@@ -107,9 +107,9 @@ export function App() {
 
   useTheme();
   // barre des menus du Mac, dans la langue de Lumen et à jour de son état ;
-  // sous Windows, ses raccourcis (Ctrl) sans barre des menus
+  // sous Windows et Linux, ses raccourcis (Ctrl) sans barre des menus
   useAppMenu();
-  useWindowsKeys();
+  usePcKeys();
   const dropping = useFileDrop(ready && !!onboarded);
   // après une mise à jour : ce qui a changé
   useNewsOnUpdate();

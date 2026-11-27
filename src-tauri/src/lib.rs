@@ -35,6 +35,10 @@ mod text;
 mod tools;
 mod user;
 mod voice;
+#[cfg(target_os = "linux")]
+mod mediaserv;
+#[cfg(target_os = "linux")]
+mod streamer;
 #[cfg(windows)]
 mod vulkan;
 // Whisper dans l'app : iPhone et iPad (essais sur Mac : LUMEN_WHISPER_INAPP=1)
@@ -52,8 +56,23 @@ use tauri::Manager;
 // iPhone et iPad : point d'entrée appelé par le projet Xcode (gen/apple)
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Linux : le rendu DMABUF de WebKitGTK (par son processus graphique) est utilisé tel quel :
+    // c'est lui qui rend la fenêtre fluide. Il avait été écarté parce que l'accueil se figeait à
+    // l'étape des langues ; le coupable était le flou de fond des cartes de cette étape
+    // (onboarding.css), pas le rendu. Si un pilote graphique s'entend mal avec lui,
+    // WEBKIT_DISABLE_DMABUF_RENDERER=1 revient au rendu par le processeur (lent).
+    // Linux : le lecteur média que WebKitGTK prend d'office (l'ancien playbin) annonce
+    // la vidéo chargée avant qu'elle le soit, s'arrête pour mettre en tampon et ne
+    // reprend pas toujours ; un saut peut figer l'image pour de bon. Le lecteur récent
+    // (playbin3) n'a aucun de ces défauts : la vidéo joue d'emblée à 30 images par
+    // seconde, les sauts sont propres. Posée seulement si l'apprenant n'a pas choisi
+    // lui-même : WEBKIT_GST_USE_PLAYBIN3=0 revient à l'ancien lecteur.
+    #[cfg(target_os = "linux")]
+    if std::env::var_os("WEBKIT_GST_USE_PLAYBIN3").is_none() {
+        std::env::set_var("WEBKIT_GST_USE_PLAYBIN3", "1");
+    }
     let builder = tauri::Builder::default().plugin(tauri_plugin_dialog::init()).plugin(tauri_plugin_opener::init());
-    // mises à jour et relance : Mac et Windows (sur iPhone et iPad, l'App Store s'en charge)
+    // mises à jour et relance : Mac, Windows et Linux (sur iPhone et iPad, l'App Store s'en charge)
     #[cfg(desktop)]
     let builder = builder.plugin(tauri_plugin_updater::Builder::new().build()).plugin(tauri_plugin_process::init());
     builder
@@ -71,9 +90,23 @@ pub fn run() {
             compress::sweep(&media::media_dir(&data_dir), |p| db::media_used(&conn, p, None));
             // iPhone et iPad : le dossier de l'app change à chaque mise à jour ; les médias suivent
             let _ = db::rebase_media(&conn, &media::media_dir(&data_dir));
-            let resource_dir = app.path().resource_dir()?.join("dicts");
+            // Dictionnaires livrés : le dossier de ressources du paquet. Sous Linux sans
+            // paquet (nix, `cargo build`), il n'existe pas à l'endroit attendu : la variable
+            // LUMEN_RESOURCES le donne, sinon Lumen démarre sans les dictionnaires livrés
+            // (les autres se téléchargent comme d'habitude).
+            let resource_dir = std::env::var_os("LUMEN_RESOURCES")
+                .map(std::path::PathBuf::from)
+                .or_else(|| app.path().resource_dir().ok())
+                .unwrap_or_else(std::path::PathBuf::new)
+                .join("dicts");
             let dicts = dict::Dicts::new(resource_dir, dict::dict_dir(&data_dir));
             let discover = discover::Store::open(&data_dir);
+            // Linux : l'audio et la vidéo des leçons passent par le petit serveur
+            // local (l'élément média d'WebKitGTK refuse le protocole des ressources)
+            #[cfg(target_os = "linux")]
+            let media_base = mediaserv::start(data_dir.join("media")).unwrap_or_default();
+            #[cfg(not(target_os = "linux"))]
+            let media_base = String::new();
             app.manage(state::AppState {
                 data_dir,
                 db: Mutex::new(conn),
@@ -86,6 +119,7 @@ pub fn run() {
                 discover,
                 levels: Mutex::new(HashMap::new()),
                 codecs: Mutex::new(Vec::new()),
+                media_base,
             });
             // barre des menus (construite par l'interface, lib/menu.ts) : l'élément choisi lui
             // revient par son identifiant ; les actions JavaScript des éléments de sous-menus

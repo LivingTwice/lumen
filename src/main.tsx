@@ -19,11 +19,13 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import { App } from "./App";
 import { api, initApi, isTauri } from "./lib/api";
-import { isIOS, isIPad, isWindows } from "./lib/platform";
+import { isIOS, isIPad, isLinux, isPc } from "./lib/platform";
 import { useApp } from "./lib/store";
 
-// sous Windows : boutons de la fenêtre, barres de défilement fines, polices de repli (styles .win)
-if (isWindows) document.documentElement.classList.add("win");
+// sous Windows et Linux : boutons de la fenêtre, barres de défilement fines, polices de repli (styles .win)
+if (isPc) document.documentElement.classList.add("win");
+// Linux (WebKitGTK) : les grands décors animés y sont dessinés en logiciel
+if (isLinux) document.documentElement.classList.add("linux");
 // iPhone et iPad : écran tactile, zones réservées (encoche, barre du bas), mise en page compacte (styles/mobile.css)
 if (isIOS) document.documentElement.classList.add("ios", isIPad ? "ipad" : "iphone");
 

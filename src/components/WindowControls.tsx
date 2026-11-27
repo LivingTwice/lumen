@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { isTauri } from "../lib/api";
 import { t } from "../lib/i18n";
-import { isWindows } from "../lib/platform";
+import { isPc } from "../lib/platform";
 
 type Win = import("@tauri-apps/api/window").Window;
 
@@ -13,10 +13,10 @@ async function current(): Promise<Win | null> {
 }
 
 /**
- * Boutons de la fenêtre sous Windows : réduire, agrandir ou restaurer, fermer.
- * La fenêtre n'a pas la barre de titre de Windows (elle garderait sa bande
- * blanche au-dessus de Lumen) : ces boutons en tiennent lieu, en haut à droite,
- * à la manière de Windows 11, et la barre du haut de chaque vue sert à déplacer
+ * Boutons de la fenêtre sous Windows et Linux : réduire, agrandir ou restaurer,
+ * fermer. La fenêtre n'a pas de barre de titre native (elle garderait sa bande
+ * au-dessus de Lumen) : ces boutons en tiennent lieu, en haut à droite, à la
+ * manière de Windows 11, et la barre du haut de chaque vue sert à déplacer
  * la fenêtre (double-clic : agrandir). Rien sur Mac.
  */
 export function WindowControls() {
@@ -45,7 +45,7 @@ export function WindowControls() {
     };
   }, []);
 
-  if (!isWindows || full) return null;
+  if (!isPc || full) return null;
   const run = (act: (w: Win) => Promise<void>) => () => void current().then((w) => w && act(w));
 
   return (

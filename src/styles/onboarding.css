@@ -704,6 +704,14 @@
   transform: translateY(-3px);
   background: var(--ob-glass-hover);
 }
+/* Linux (WebKitGTK) : pas de flou de fond sur ces cartes. Avec le rendu par le processus
+   graphique, celui de la liste des langues lançait le composeur de WebKit dans une boucle sans
+   fin dès qu'on en choisissait une. Il ne se voyait pas : le ciel derrière elles est déjà
+   flouté (mesuré : la carte change moins qu'entre deux prises du ciel qui bouge). */
+html.linux .ob-card {
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
 .ob-card::before {
   content: "";
   position: absolute;
